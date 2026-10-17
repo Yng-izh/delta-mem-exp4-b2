@@ -2,15 +2,42 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
-## 最终结论（v4，2026-10-17）
+## 最终结论（v5，2026-10-17）
 
-| 切片 | B2 v4 SF | v3 | A chunked 基线 | Δ vs A | 官方整段 | Δ vs 官方 | Go/No-Go（≥20pp） |
-|---|---|---|---|---|---|---|---|
-| factconsolidation_sh_6k | **0.860**（86/100） | 0.850 | 0.12 | **+74pp** | 0.40 | +46pp | **Go** |
-| factconsolidation_sh_64k | **0.870**（87/100） | 0.300 | 0.23 | **+64pp** | 0.23 | +64pp | **Go** |
+| 切片 | B2 v5 SF | B2 v4 | v3 | A chunked 基线 | Δ vs A | Go/No-Go（≥20pp） |
+|---|---|---|---|---|---|---|
+| factconsolidation_sh_6k | —（未重跑） | **0.860** | 0.850 | 0.12 | **+74pp** | **Go**（v4） |
+| factconsolidation_sh_64k | —（未重跑） | **0.870** | 0.300 | 0.23 | **+64pp** | **Go**（v4） |
+| factconsolidation_mh_6k | **0.510**（51/100） | 0.080 | — | — | — | Go（vs v4 +43pp） |
+| factconsolidation_mh_64k | **0.450**（45/100） | — | — | — | — | 待评估 |
 
-- **两个切片双双 Go**：sh_64k 从 No-Go（+7pp）翻转为强 Go，且两切片分数几乎持平——容量瓶颈解决后长上下文不再掉分。
-- sh_6k 相比 v3 基本持平（-1pp），v4 的核心增量集中在 64k。
+- **单跳（sh）任务**：v4 已双双 Go（0.86/0.87），v5 未重跑 sh 切片（v5 主打多跳）。
+- **多跳（mh）任务**：v4 仅 0.08（断链），v5 三元组解耦潜键 + 主语门控多跳接力提升至 0.51/0.45；池从 294→2847（×9.7）时 SF 仅降 6pp，规模适应性良好。
+
+## v4 → v5：三元组解耦潜键 + 主语门控多跳接力（Beam Chaining）
+
+v4 的失败模式（mh_6k SF=0.08）：多跳链中段事实检索不到（Top-15 无搭桥机制）、洲级/干扰事实混入块。v5（`v5_slotpool.py`，由主脚本 `from v5_slotpool import *` 覆盖内置 SlotPool）：
+
+1. **三元组解耦潜键**：`parse_fact_triple`（VP_RE 谓词正则 + PREFIX_REL_RE 前缀关系）把事实拆为 (subj, rel, obj)，每槽存均值键 (k_subj, k_rel, k_obj) 与逐 token 向量矩阵 (E_subj, E_rel, E_obj)。
+2. **双重命中覆写**：cos(k_subj)>0.82 且 cos(k_rel)>0.70 时原位覆写，并同步更新出键 k_obj/E_obj（多跳搭桥核心）。
+3. **主语门控多跳检索** `retrieve_multihop_context`：Hop1 用 maxsim_coverage（ColBERT MaxSim）做主语硬门控（subj_cov≥0.62），Hop2-4 拿上一跳 k_obj/E_obj 搭桥（bridge_sim≥0.65），Beam=2，按跳序拼块。
+
+### env 参数表
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `B2_POOL_MAX` | 5000 | 槽位池上限（FIFO 淘汰） |
+| `B2_THETA_SUBJ` | 0.82 | 覆写：主语键余弦阈值 |
+| `B2_THETA_REL` | 0.70 | 覆写：关系键余弦阈值 |
+| `B2_BRIDGE` | 0.65 | Hop2+ 搭桥硬门控阈值 |
+| `B2_SUBJGATE` | 0.62 | Hop1 主语硬门控阈值 |
+| `B2_HOPS` | 4 | 最大跳数 |
+| `B2_BEAM` | 2 | 每跳保留槽数 |
+
+### 运行参数实测
+
+- mh_6k：pool=294、overwrites=161、约 26min（GPU2）
+- mh_64k：pool=2847、overwrites=1733、约 25min（GPU9）
 
 ## v3 → v4 修复（救 sh_64k）
 

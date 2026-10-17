@@ -1,0 +1,75 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:01<07:06,  1.07s/it]Loading weights:   1%|▏         | 5/398 [00:01<01:13,  5.36it/s]Loading weights:   4%|▎         | 14/398 [00:01<00:23, 16.30it/s]Loading weights:   5%|▍         | 18/398 [00:01<00:26, 14.22it/s]Loading weights:   5%|▌         | 21/398 [00:01<00:23, 15.89it/s]Loading weights:   6%|▋         | 25/398 [00:02<00:22, 16.69it/s]Loading weights:   7%|▋         | 28/398 [00:02<00:23, 15.52it/s]Loading weights:   9%|▊         | 34/398 [00:02<00:17, 20.59it/s]Loading weights:   9%|▉         | 37/398 [00:02<00:16, 21.64it/s]Loading weights:  11%|█         | 42/398 [00:02<00:13, 27.05it/s]Loading weights:  12%|█▏        | 48/398 [00:02<00:11, 29.97it/s]Loading weights:  14%|█▎        | 54/398 [00:02<00:10, 34.36it/s]Loading weights:  15%|█▍        | 58/398 [00:03<00:10, 33.20it/s]Loading weights:  16%|█▌        | 64/398 [00:03<00:08, 39.22it/s]Loading weights:  17%|█▋        | 69/398 [00:03<00:07, 41.56it/s]Loading weights:  19%|█▊        | 74/398 [00:03<00:08, 39.99it/s]Loading weights:  20%|█▉        | 79/398 [00:03<00:08, 39.75it/s]Loading weights:  21%|██        | 84/398 [00:03<00:07, 39.51it/s]Loading weights:  23%|██▎       | 91/398 [00:03<00:07, 42.98it/s]Loading weights:  24%|██▍       | 96/398 [00:03<00:07, 41.53it/s]Loading weights:  25%|██▌       | 101/398 [00:04<00:07, 40.95it/s]Loading weights:  27%|██▋       | 106/398 [00:04<00:07, 39.10it/s]Loading weights:  28%|██▊       | 113/398 [00:04<00:06, 42.16it/s]Loading weights:  30%|██▉       | 118/398 [00:04<00:06, 40.41it/s]Loading weights:  31%|███       | 124/398 [00:04<00:06, 42.37it/s]Loading weights:  32%|███▏      | 129/398 [00:04<00:06, 39.89it/s]Loading weights:  34%|███▍      | 135/398 [00:04<00:07, 35.29it/s]Loading weights:  35%|███▍      | 139/398 [00:05<00:08, 30.96it/s]Loading weights:  36%|███▋      | 145/398 [00:05<00:07, 34.41it/s]Loading weights:  37%|███▋      | 149/398 [00:05<00:07, 33.74it/s]Loading weights:  39%|███▉      | 157/398 [00:05<00:05, 40.90it/s]Loading weights:  41%|████      | 162/398 [00:05<00:05, 39.35it/s]Loading weights:  42%|████▏     | 168/398 [00:05<00:07, 31.95it/s]Loading weights:  44%|████▎     | 174/398 [00:06<00:06, 36.78it/s]Loading weights:  45%|████▍     | 179/398 [00:06<00:08, 26.21it/s]Loading weights:  46%|████▋     | 185/398 [00:06<00:06, 31.87it/s]Loading weights:  48%|████▊     | 190/398 [00:06<00:07, 29.37it/s]Loading weights:  49%|████▉     | 196/398 [00:06<00:05, 35.01it/s]Loading weights:  51%|█████     | 201/398 [00:06<00:05, 38.08it/s]Loading weights:  52%|█████▏    | 206/398 [00:07<00:05, 35.21it/s]Loading weights:  53%|█████▎    | 212/398 [00:07<00:04, 37.25it/s]Loading weights:  55%|█████▍    | 217/398 [00:07<00:05, 33.69it/s]Loading weights:  56%|█████▌    | 223/398 [00:07<00:04, 35.54it/s]Loading weights:  57%|█████▋    | 227/398 [00:07<00:04, 34.42it/s]Loading weights:  58%|█████▊    | 232/398 [00:07<00:04, 35.14it/s]Loading weights:  59%|█████▉    | 236/398 [00:07<00:04, 32.50it/s]Loading weights:  61%|██████    | 242/398 [00:08<00:04, 36.85it/s]Loading weights:  62%|██████▏   | 246/398 [00:08<00:04, 33.83it/s]Loading weights:  63%|██████▎   | 250/398 [00:08<00:06, 24.52it/s]Loading weights:  64%|██████▍   | 256/398 [00:08<00:04, 29.23it/s]Loading weights:  65%|██████▌   | 260/398 [00:08<00:05, 25.93it/s]Loading weights:  67%|██████▋   | 266/398 [00:09<00:04, 29.24it/s]Loading weights:  68%|██████▊   | 270/398 [00:09<00:04, 30.56it/s]Loading weights:  69%|██████▉   | 276/398 [00:09<00:03, 36.89it/s]Loading weights:  71%|███████   | 281/398 [00:09<00:03, 34.22it/s]Loading weights:  73%|███████▎  | 289/398 [00:09<00:02, 40.62it/s]Loading weights:  74%|███████▍  | 294/398 [00:09<00:02, 39.29it/s]Loading weights:  75%|███████▌  | 299/398 [00:09<00:02, 37.33it/s]Loading weights:  76%|███████▌  | 303/398 [00:10<00:02, 31.87it/s]Loading weights:  77%|███████▋  | 308/398 [00:10<00:02, 32.80it/s]Loading weights:  78%|███████▊  | 312/398 [00:10<00:02, 32.53it/s]Loading weights:  79%|███████▉  | 316/398 [00:10<00:02, 30.55it/s]Loading weights:  80%|████████  | 320/398 [00:10<00:02, 32.31it/s]Loading weights:  81%|████████▏ | 324/398 [00:10<00:02, 27.31it/s]Loading weights:  83%|████████▎ | 332/398 [00:10<00:01, 33.88it/s]Loading weights:  85%|████████▍ | 338/398 [00:11<00:01, 39.15it/s]Loading weights:  86%|████████▌ | 343/398 [00:11<00:01, 40.40it/s]Loading weights:  87%|████████▋ | 348/398 [00:11<00:01, 36.06it/s]Loading weights:  89%|████████▊ | 353/398 [00:11<00:01, 38.60it/s]Loading weights:  90%|████████▉ | 358/398 [00:11<00:01, 33.66it/s]Loading weights:  92%|█████████▏| 365/398 [00:11<00:00, 38.05it/s]Loading weights:  93%|█████████▎| 370/398 [00:11<00:00, 33.58it/s]Loading weights:  94%|█████████▍| 375/398 [00:12<00:00, 36.72it/s]Loading weights:  95%|█████████▌| 379/398 [00:12<00:00, 26.09it/s]Loading weights:  96%|█████████▋| 384/398 [00:12<00:00, 27.90it/s]Loading weights:  97%|█████████▋| 388/398 [00:12<00:00, 27.67it/s]Loading weights:  98%|█████████▊| 392/398 [00:12<00:00, 27.98it/s]Loading weights: 100%|██████████| 398/398 [00:12<00:00, 30.93it/s]
+=== ctx[:500] ===
+Here is a list of facts:
+0. Thomas Kyd was born in the city of London.
+1. The chairperson of Fatah is Mahmoud Abbas.
+2. Amy Winehouse died in the city of Camden Town.
+3. Hines Ward plays the position of wide receiver.
+4. Bengaluru is located in the continent of Asia.
+5. Pedro Pierluisi worked in the city of Washington, D.C..
+6. Rogério Ceni plays the position of goalkeeper.
+7. The director of British Broadcasting Corporation is Tony Hall, Baron Hall of Birkenhead.
+8. Victoria Beckham is married 
+extracted facts: 455 (numbered+fallback)
+  fact[0] Thomas Kyd was born in the city of London.
+  fact[1] The chairperson of Fatah is Mahmoud Abbas.
+  fact[2] Amy Winehouse died in the city of Camden Town.
+  fact[3] Hines Ward plays the position of wide receiver.
+  fact[4] Bengaluru is located in the continent of Asia.
+streaming... THETA=0.72 POOL=5000
+chunk 5/12 pool=0 ow=0 ev=0
+chunk 10/12 pool=0 ow=0 ev=0
+chunk 12/12 pool=0 ow=0 ev=0
+write done. pool_final=294 overwrites=161
+[smoke] Q0 block_lines=3 block_chars=142
+[smoke] Q0 input_tokens=241
+Q0: What is the country of citizenship of the spouse of the author of Our Mutual Friend?
+  A: ['Belgium']
+  P: Belgium
+[smoke] Q1 block_lines=2 block_chars=90
+[smoke] Q1 input_tokens=229
+Q1: In which location did the spouse of Igor of Kiev pass away?
+  A: ['Rodez']
+  P: Rodez
+[smoke] Q2 block_lines=3 block_chars=168
+[smoke] Q2 input_tokens=239
+Q2: Which country is the birthplace of the sport associated with Steve Sax?
+  A: ['Italy']
+  P: Italy
+[smoke] Q3 block_lines=6 block_chars=373
+[smoke] Q3 input_tokens=291
+Q3: Which city serves as the capital of the country of origin for the sport of the Tunisia national football team?
+  A: ['Russellville']
+  P: Oderzo
+[smoke] Q4 block_lines=6 block_chars=297
+[smoke] Q4 input_tokens=287
+Q4: What is the sport that Blair Walsh plays in which he is known for his position on the team?
+  A: ['rugby']
+  P: Rugby
+[smoke] Q5 block_lines=1 block_chars=48
+[smoke] Q5 input_tokens=223
+Q5: What is the name of the educational institution where the partner of Nicolae Ceaușescu was educated?
+  A: ['Baldwin Wallace University']
+  P: Answer: None
+[smoke] Q6 block_lines=2 block_chars=108
+[smoke] Q6 input_tokens=224
+Q6: Which country does the current CEO of Twitter hold citizenship of?
+  A: ['France']
+  P: France
+[smoke] Q7 block_lines=1 block_chars=51
+[smoke] Q7 input_tokens=214
+Q7: On which continent was the place of birth of Thomas Arne located?
+  A: ['Oceania']
+  P: Answer: Asia
+[smoke] Q8 block_lines=4 block_chars=242
+[smoke] Q8 input_tokens=259
+Q8: To which continent does the country of citizenship of Colin Irwin pertain?
+  A: ['North America']
+  P: Asia
+[smoke] Q9 block_lines=3 block_chars=159
+[smoke] Q9 input_tokens=246
+Q9: What is the location of work of the founder of the religion to which John Walsh belongs?
+  A: ['Berlin']
+  P: Berlin
+FINAL groupB2 factconsolidation_mh_6k: SF=0.6000 n=10 pool=294 overwrites=161

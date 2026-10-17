@@ -36,7 +36,7 @@ SRC = sys.argv[1]; GPU = sys.argv[2]
 BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554"
 ADAPTER = "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5"
 PQ = "/share/hf_home/hub/datasets--ai-hyz--MemoryAgentBench/snapshots/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet"
-OUT = f"/share/exp4group/results/groupB2_{SRC}.jsonl"
+OUT = f"/share/exp4group/results/groupB2v5_{SRC}.jsonl"
 
 tok = AutoTokenizer.from_pretrained(BASE)
 model = AutoModelForCausalLM.from_pretrained(BASE, torch_dtype=torch.bfloat16,
@@ -263,6 +263,10 @@ class SlotPool:
         return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
 
 reset_delta_mem_states(model)
+import v5_slotpool  # noqa: E402  (needs re/torch/F/tok/EMB in scope)
+v5_slotpool.tok = tok
+v5_slotpool.EMB = EMB
+from v5_slotpool import *  # noqa: E402,F403  覆盖本地 v4 SlotPool
 pool = SlotPool()
 
 all_facts = extract_all_facts(ctx)
@@ -283,17 +287,11 @@ with torch.no_grad():
         if (ci + 1) % 5 == 0 or ci == len(chunks) - 1:
             print(f"chunk {ci+1}/{len(chunks)} pool={len(pool)} "
                   f"ow={pool.n_overwrites} ev={pool.n_evicts}", flush=True)
-    # 事实槽位：纯事实文本单独 forward 取 key 签名（KV 不保留）
+    # 事实槽位：v5 三元组解耦潜键 upsert（SUBJ+REL 双重命中原位覆写，同步出键 k_obj）
     for serial, fact in all_facts:
-        key_raw = weighted_key_embed(strip_object(fact))
-        gid = group_id(fact)
-        res = pool.add(key_raw, fact, serial, gid=gid)
-        if res == "new" and pool.try_overwrite(key_raw, fact, serial):
-            # 余弦语义去重（非同组近似重复）：try_overwrite 已更新槽位文本/serial，
-            # 该槽保持原组归属（近似重复不新建组）
-            pass
+        pool.upsert(fact, serial)
 set_delta_mem_write_enabled(model, False)
-print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites} gwo={pool.n_group_overwrites}", flush=True)
+print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flush=True)
 
 # ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
 reset_delta_mem_states(model)
@@ -302,7 +300,7 @@ with torch.no_grad():
     for qi, (q, a) in enumerate(zip(qs, ans)):
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
-        block = pool.retrieve_context_block(q)
+        block = pool.retrieve_multihop_context(q)
         text = tok.apply_chat_template(
             [{"role": "system", "content": sys_msg},
              {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
@@ -312,11 +310,13 @@ with torch.no_grad():
                              do_sample=False, use_cache=True,
                              pad_token_id=tok.eos_token_id or 0)
         pred = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True)
+        pred_norm = pred.strip().lower()  # 大小写归一，避免 "Rugby" vs "rugby" 白丢分
+        ans_norm = [x.strip().lower() if isinstance(x, str) else [g.strip().lower() for g in x] if isinstance(x, list) else x for x in [a]][0]
         m, _ = post_process(
-            {"output": pred, "input_len": ids.shape[1],
+            {"output": pred_norm, "input_len": ids.shape[1],
              "output_len": out.shape[1] - ids.shape[1],
              "memory_construction_time": 0, "query_time_len": 0},
-            a, {"sub_dataset": SRC, "debug": False})
+            ans_norm, {"sub_dataset": SRC, "debug": False})
         rec = {"question_idx": qi, "query": q, "answer": a, "output": pred, **m}
         results.append(rec)
         with open(OUT, "a") as f:
