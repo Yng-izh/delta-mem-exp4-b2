@@ -15,26 +15,25 @@ from utils.eval_other_utils import chunk_text_into_sentences, post_process
 import pyarrow.parquet as pq
 
 # =====================================================================
-# B-v2：流式句子级 KV 槽位原位覆写（KV Slot Pool in-place overwrite）
-#  存：逐 512-token chunk 流式前向，按句切事实（"N. " 行），
-#      每条事实句子在 forward 后从各层 past_key_values 里截出该句 token
-#      区间的 KV 片段存入槽位；Key 签名 = 该句主谓部分 token embedding 均值，
-#      去中心化（减池内均值）后 L2 归一。
-#  覆写：新事实 key 与池内旧 key 余弦 > THETA → 旧槽位 KV 原位替换为新句 KV。
-#  池满：FIFO 淘汰最旧且从未被命中过的槽位。
-#  读出：把存活槽位的 KV 拼成 past_key_values，问题单独前向做 attention；
-#      delta state 同时保留（问题前向时关写，delta 态照常读出辅助）。
+# B-v3：clean 重编码读出（fact-text slot pool）
+#  存：全局编号事实提取（<10 条回退句切分）；delta 写入照常按 chunk 流式 forward；
+#      每条事实对纯事实文本 tok(fact, add_special_tokens=False) 单独 forward 取 key
+#      签名（主谓部分 = 切掉句尾 KEY_TAIL_CUT 个词的 embedding 均值）。
+#  覆写：仅池内潜向量比较 + 文本替换；去中心化仅当 len(pool)>10，否则原始均值+L2。
+#  读出：不拼接任何旧 chunk 的 KV（规避跨 chunk RoPE 错位）；把存活槽位事实
+#      拼成干净 context 块，走 System+RAG 模板单次前向 generate。
 # =====================================================================
 
 CHUNK_TOKENS   = 512
 THETA          = float(os.environ.get("B2_THETA", "0.70"))
 POOL_MAX       = int(os.environ.get("B2_POOL_MAX", "512"))
 KEEP_DELTA     = os.environ.get("B2_KEEP_DELTA", "1") == "1"
-KEY_TAIL_CUT   = 5          # 主谓 key：去掉句尾 5 个 token（宾语/新值）
-SIM_PRUNE_THR  = 0.75       # 诊断 2 直方图双峰分界
+KEY_TAIL_CUT   = 2          # 主谓 key：切掉句尾最后 2 个词
+WHITEN_MIN     = 10         # 去中心化仅当池内 key 数 > 10
+MAX_NEW_TOKENS = 24
 
 SRC = sys.argv[1]; GPU = sys.argv[2]
-BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/" + os.listdir("/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots")[0]
+BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554"
 ADAPTER = "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5"
 PQ = "/share/hf_home/hub/datasets--ai-hyz--MemoryAgentBench/snapshots/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet"
 OUT = f"/share/exp4group/results/groupB2_{SRC}.jsonl"
@@ -50,6 +49,7 @@ NL = model.config.num_hidden_layers
 NW = model.config.num_key_value_heads or model.config.num_attention_heads
 HD = model.config.head_dim
 EMB = model.get_input_embeddings().weight.detach()
+DEV = f"cuda:{GPU}"
 
 rows = pq.read_table(PQ).to_pylist()
 row = [x for x in rows if x["metadata"]["source"] == SRC][0]
@@ -62,14 +62,19 @@ def fmt(tpl, **kw):
     try: return tpl.format(time_stamp="", **kw)
     except KeyError: return tpl.format(**kw)
 
-# ---------- 句子切分：与 diag2 一致，按 "N. " 行 ----------
-def split_facts(text):
-    out = []
-    for line in text.split("\n"):
-        m = re.match(r"\s*(\d+)\.\s*(.*)", line)
-        if m:
-            out.append((int(m.group(1)), m.group(2).strip()))
-    return out
+# ---------- (1) 全局事实提取 ----------
+NUM_FACT_RE = re.compile(r"(?:^|\s)(\d+)\.\s+([^\n]+?)(?=(?:\s+\d+\.\s+)|\n|$)")
+def extract_all_facts(text):
+    """全局编号事实提取；<10 条时回退按句切分。"""
+    facts = [(int(m.group(1)), m.group(2).strip())
+             for m in NUM_FACT_RE.finditer(text) if m.group(2).strip()]
+    if len(facts) < 10:
+        parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
+        facts = [(i + 1, s) for i, s in enumerate(parts)]
+    return facts
+
+print("=== ctx[:500] ===", flush=True)
+print(ctx[:500], flush=True)
 
 def subj_pred_key(fact):
     toks = fact.split()
@@ -81,161 +86,125 @@ def embed_norm(text):
     ids = tok(text, return_tensors="pt", truncation=True, max_length=64).input_ids.to(EMB.device)
     return F.normalize(EMB[ids[0]].mean(dim=0), dim=0)
 
+# ---------- (2) 纯事实文本单独 forward 取 KV ----------
+def fact_kv(fact_text):
+    ids = tok(fact_text, return_tensors="pt", add_special_tokens=False).input_ids.to(DEV)
+    with torch.no_grad():
+        out = model(input_ids=ids, use_cache=True)
+    past = out.past_key_values
+    kv = []
+    for layer in range(NL):
+        kl = past.layers[layer]
+        kv.append((kl.keys.clone(), kl.values.clone()))
+    return tuple(kv)
+
+# ---------- (5) key 池：去中心化仅当 len(pool)>10 ----------
 class SlotPool:
     def __init__(self):
-        self.keys = []          # list[Tensor dim=hidden] 归一化后
-        self.kv  = []           # list[tuple(K,V)] K/V: [layers][1,NKV,T,HD]
-        self.serial = []        # fact serial
-        self.t0 = []            # 全局时间戳，用于 FIFO
+        self.keys = []          # raw embedding mean (未去中心化)
+        self.texts = []         # 存活槽位存事实文本
+        self.serial = []
+        self.t0 = []
         self.clock = 0
         self.n_overwrites = 0
         self.n_evicts = 0
 
-    def _whiten(self):
-        if not self.keys:
-            return []
-        M = torch.stack(self.keys).float()
-        mu = M.mean(dim=0, keepdim=True)
-        return [F.normalize(v, dim=0) for v in (M - mu)]
+    def __len__(self):
+        return len(self.keys)
 
-    def add(self, key_raw, kv, serial):
-        self.keys.append(key_raw); self.kv.append(kv)
+    def _sims(self, key_raw):
+        """返回与池内各槽位的余弦相似度。"""
+        if not self.keys:
+            return None
+        M = torch.stack(self.keys).float()
+        k = key_raw.float()
+        if len(self.keys) > WHITEN_MIN:      # 去中心化
+            mu = M.mean(dim=0, keepdim=True)
+            M = M - mu
+            k = k - mu.squeeze(0)
+        M = F.normalize(M, dim=1)
+        k = F.normalize(k, dim=0)
+        return M @ k
+
+    def add(self, key_raw, text, serial):
+        self.keys.append(key_raw); self.texts.append(text)
         self.serial.append(serial); self.t0.append(self.clock); self.clock += 1
         while len(self.keys) > POOL_MAX:
             self._evict_oldest()
 
     def _evict_oldest(self):
         idx = min(range(len(self.t0)), key=lambda i: self.t0[i])
-        for lst in (self.keys, self.kv, self.serial, self.t0):
+        for lst in (self.keys, self.texts, self.serial, self.t0):
             lst.pop(idx)
         self.n_evicts += 1
 
-    def try_overwrite(self, key_raw, kv_new, serial_new):
-        """返回 True 表示命中并已原位替换。"""
-        if not self.keys:
+    def try_overwrite(self, key_raw, text, serial):
+        sims = self._sims(key_raw)
+        if sims is None:
             return False
-        W = torch.stack(self.keys).float()
-        Wn = [F.normalize(v, dim=0) for v in (W - W.mean(dim=0, keepdim=True))]
-        kn = F.normalize(key_raw - torch.stack(self.keys).float().mean(dim=0), dim=0)
-        sims = torch.stack([torch.dot(kn, w) for w in Wn])
         top = int(sims.argmax())
         if float(sims[top]) > THETA:
-            self.kv[top] = kv_new          # 原位替换 KV
+            self.texts[top] = text          # 文本替换
             self.keys[top] = key_raw
-            self.serial[top] = serial_new
+            self.serial[top] = serial
             self.t0[top] = self.clock; self.clock += 1
             self.n_overwrites += 1
             return True
         return False
 
-    def build_past_key_values(self):
-        """把所有槽位 KV 沿 seq 拼接为 DynamicCache 兼容结构。"""
-        if not self.kv:
-            return None
-        Ks, Vs = [], []
-        for layer in range(NL):
-            k_cat = torch.cat([kv[layer][0] for kv in self.kv], dim=2)
-            v_cat = torch.cat([kv[layer][1] for kv in self.kv], dim=2)
-            Ks.append(k_cat); Vs.append(v_cat)
-        # transformers>=4.36 使用 tuple of tuple 也可被 generate 接受
-        from transformers import DynamicCache
-        cache = DynamicCache()
-        for l in range(NL):
-            cache.update(Ks[l], Vs[l], l)
-        return cache
-
-# ---------- 从一次 forward 的 KV cache 中截取某句 token 区间 ----------
-def slice_kv(past, t0, t1):
-    out = []
-    for layer in range(NL):
-        kl = past.layers[layer]; k, v = kl.keys, kl.values   # transformers 5.x DynamicLayer
-        out.append((k[:, :, t0:t1, :].clone(), v[:, :, t0:t1, :].clone()))
-    return tuple(out)
-
-# ---------- 定位句子在 chunk token 序列中的 span ----------
-def locate_spans(chunk_text, facts, ids_len):
-    """用字符比例近似映射 token 位置（事实行有序且等密度，足够用于 KV 截取）。"""
-    total_chars = len(chunk_text)
-    spans = []
-    for serial, fact in facts:
-        pos = chunk_text.find(fact[:40])
-        if pos < 0:
-            pos = 0
-        t0 = min(max(ids_len - 2, 0), int(ids_len * pos / max(total_chars, 1)))
-        t1 = min(ids_len, t0 + max(8, int(ids_len * (len(fact) + 2) / max(total_chars, 1))))
-        if t1 <= t0:
-            t0 = max(0, ids_len - 24); t1 = ids_len
-        spans.append((t0, t1))
-    return spans
+    def context_block(self):
+        """存活槽位事实拼成干净 context 块。"""
+        order = sorted(range(len(self.serial)), key=lambda i: self.serial[i])
+        return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
 
 reset_delta_mem_states(model)
 pool = SlotPool()
-seen_serials = {}
+
+all_facts = extract_all_facts(ctx)
+print(f"extracted facts: {len(all_facts)} (numbered+fallback)", flush=True)
+for s, f in all_facts[:5]:
+    print(f"  fact[{s}] {f[:80]}", flush=True)
 
 print(f"streaming... THETA={THETA} POOL={POOL_MAX}", flush=True)
 with torch.no_grad():
+    # (4) delta 写入仍按 chunk 流式 forward（与官方口径一致），但不从 chunk KV 截句子
     for ci, ch in enumerate(chunks := chunk_text_into_sentences(ctx, chunk_size=CHUNK_TOKENS)):
-        facts = split_facts(ch)
         txt = tok.apply_chat_template(
             [{"role": "system", "content": sys_msg},
              {"role": "user", "content": fmt(mem_tpl, context=ch)}],
             add_generation_prompt=True, tokenize=False)
-        ids = tok(txt, return_tensors="pt").input_ids.to(f"cuda:{GPU}")
-        past = None
-        if KEEP_DELTA:
-            out = model(input_ids=ids, use_cache=True, past_key_values=past)
-            past = out.past_key_values
-        else:
-            # delta 写入也要走 forward；use_cache=True 拿 KV
-            out = model(input_ids=ids, use_cache=True)
-            past = out.past_key_values
-        # 注意：past 里包含 system+模板 token，句子 span 从尾部往前映射
-        ctx_len = ids.shape[1]
-        spans = locate_spans(ch, facts, ctx_len)
-        for (serial, fact), (t0, t1) in zip(facts, spans):
-            if t1 - t0 < 4:
-                continue
-            key_raw = embed_norm(subj_pred_key(fact))
-            kv_new = slice_kv(past, t0, t1)
-            hit = pool.try_overwrite(key_raw, kv_new, serial)
-            if not hit:
-                pool.add(key_raw, kv_new, serial)
+        ids = tok(txt, return_tensors="pt").input_ids.to(DEV)
+        model(input_ids=ids, use_cache=True)
         if (ci + 1) % 5 == 0 or ci == len(chunks) - 1:
-            print(f"chunk {ci+1}/{len(chunks)} pool={len(pool.keys)} "
+            print(f"chunk {ci+1}/{len(chunks)} pool={len(pool)} "
                   f"ow={pool.n_overwrites} ev={pool.n_evicts}", flush=True)
+    # 事实槽位：纯事实文本单独 forward 取 key 签名（KV 不保留）
+    for serial, fact in all_facts:
+        key_raw = embed_norm(subj_pred_key(fact))
+        if not pool.try_overwrite(key_raw, fact, serial):
+            pool.add(key_raw, fact, serial)
 set_delta_mem_write_enabled(model, False)
-print(f"write done. pool_final={len(pool.keys)} overwrites={pool.n_overwrites}", flush=True)
+print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flush=True)
 
-# ---------- 读出 ----------
+# ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
 results = []
 with torch.no_grad():
     for qi, (q, a) in enumerate(zip(qs, ans)):
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
+        block = pool.context_block()
         text = tok.apply_chat_template(
-            [{"role": "system", "content": sys_msg}, {"role": "user", "content": qtxt}],
+            [{"role": "system", "content": sys_msg},
+             {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
             add_generation_prompt=True, tokenize=False)
-        qids = tok(text, return_tensors="pt").input_ids.to(f"cuda:{GPU}")
-        pkv = pool.build_past_key_values()
-        # generate 与 delta 层在 cache 长度 != ids 长度时不兼容（scan 空列表崩溃），
-        # 改为手写 greedy decode：显式传 cache_position 从池子长度起算。
-        SL = pkv.get_seq_length() if pkv is not None else 0
-        cur = qids
-        gen_ids = []
-        for step in range(10):
-            cp = torch.arange(SL, SL + cur.shape[1], device=cur.device)
-            logits = model(input_ids=cur, past_key_values=pkv,
-                           cache_position=cp, use_cache=True).logits[:, -1, :]
-            nxt = int(logits.argmax(dim=-1))
-            gen_ids.append(nxt)
-            if nxt == (tok.eos_token_id or -1):
-                break
-            cur = torch.tensor([[nxt]], device=cur.device)
-            SL += 1
-        pred = tok.decode(gen_ids, skip_special_tokens=True)
+        ids = tok(text, return_tensors="pt").input_ids.to(DEV)
+        out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
+                             do_sample=False, use_cache=True,
+                             pad_token_id=tok.eos_token_id or 0)
+        pred = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True)
         m, _ = post_process(
-            {"output": pred, "input_len": qids.shape[1],
-             "output_len": len(gen_ids),
+            {"output": pred, "input_len": ids.shape[1],
+             "output_len": out.shape[1] - ids.shape[1],
              "memory_construction_time": 0, "query_time_len": 0},
             a, {"sub_dataset": SRC, "debug": False})
         rec = {"question_idx": qi, "query": q, "answer": a, "output": pred, **m}
@@ -247,4 +216,4 @@ with torch.no_grad():
             print(f"{qi+1}/{len(qs)} running SF={sf:.3f}", flush=True)
 sf = sum(r["substring_exact_match"] for r in results) / len(results)
 print(f"FINAL groupB2 {SRC}: SF={sf:.4f} n={len(results)} "
-      f"pool={len(pool.keys)} overwrites={pool.n_overwrites}", flush=True)
+      f"pool={len(pool)} overwrites={pool.n_overwrites}", flush=True)
