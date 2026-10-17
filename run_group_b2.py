@@ -25,8 +25,8 @@ import pyarrow.parquet as pq
 # =====================================================================
 
 CHUNK_TOKENS   = 512
-THETA          = float(os.environ.get("B2_THETA", "0.70"))
-POOL_MAX       = int(os.environ.get("B2_POOL_MAX", "512"))
+THETA          = float(os.environ.get("B2_THETA", "0.72"))
+POOL_MAX       = int(os.environ.get("B2_POOL_MAX", "5000"))
 KEEP_DELTA     = os.environ.get("B2_KEEP_DELTA", "1") == "1"
 KEY_TAIL_CUT   = 2          # 主谓 key：切掉句尾最后 2 个词
 WHITEN_MIN     = 10         # 去中心化仅当池内 key 数 > 10
@@ -76,11 +76,68 @@ def extract_all_facts(text):
 print("=== ctx[:500] ===", flush=True)
 print(ctx[:500], flush=True)
 
-def subj_pred_key(fact):
+VERB_EDGES = ("affiliated with", "associated with", "created in", "created by",
+              "famous for", "educated at", "author of", "language of",
+              "citizenship of", "head of", "founded", "written in",
+              "plays", "played", "play", "is", "was", "are", "were")
+VERB_PAT = re.compile(r"\b(" + "|".join(re.escape(v) for v in VERB_EDGES) + r")\b")
+def strip_object(fact):
+    """按系动词/谓语边界（词边界匹配）精准剥宾语；兜底切尾 3 词。"""
+    m = VERB_PAT.search(fact.lower())
+    if m and m.start() > 0:
+        return fact[:m.start()].strip()
     toks = fact.split()
-    if len(toks) <= KEY_TAIL_CUT + 2:
+    if len(toks) <= 3:
         return fact
-    return " ".join(toks[:-KEY_TAIL_CUT])
+    return " ".join(toks[:-3])
+
+import string as _string
+def group_id(fact):
+    """主谓组标识：strip_object 后归一化（小写、去标点、空白合一）。"""
+    t = strip_object(fact).lower()
+    t = t.translate(str.maketrans("", "", _string.punctuation))
+    return " ".join(t.split())
+
+STOPWORDS = set("the a an of in on at to for with by from is was are were "
+                "be been what which who where when current name does did".split())
+def weighted_key_embed(text):
+    """STOPWORDS 过滤 + 非句首大写词 2.5 倍权重的加权 embedding。"""
+    words = text.split()
+    kept, weights = [], []
+    for i, w in enumerate(words):
+        if w.lower().strip(",.!?;:'\"()") in STOPWORDS:
+            continue
+        cap = w[:1].isupper() and i > 0
+        kept.append(w)
+        weights.append(2.5 if cap else 1.0)
+    if not kept:
+        kept, weights = words, [1.0] * len(words)
+    # token 与词数不一致（子词切分），用 offset mapping 把词权重摊到 token 上
+    enc = tok(" ".join(kept), return_tensors="pt", truncation=True, max_length=64,
+              return_offsets_mapping=True)
+    ids = enc.input_ids[0].to(EMB.device)
+    spans = enc.offset_mapping[0].tolist()
+    # 重建每个 kept 词在拼接文本中的字符起点
+    starts, pos = [], 0
+    for wd in kept:
+        starts.append(pos)
+        pos += len(wd) + 1
+    tok_w = []
+    for (a, b) in spans:
+        if a == b:                      # special/empty
+            tok_w.append(0.0); continue
+        wi = 0
+        for i, st in enumerate(starts):
+            if a >= st:
+                wi = i
+            else:
+                break
+        tok_w.append(weights[wi])
+    w = torch.tensor(tok_w, dtype=torch.float32, device=EMB.device)
+    if w.sum() <= 0:
+        w = torch.ones_like(w)
+    w = w / w.sum()
+    return F.normalize((EMB[ids].float() * w.unsqueeze(1)).sum(dim=0), dim=0)
 
 def embed_norm(text):
     ids = tok(text, return_tensors="pt", truncation=True, max_length=64).input_ids.to(EMB.device)
@@ -108,9 +165,16 @@ class SlotPool:
         self.clock = 0
         self.n_overwrites = 0
         self.n_evicts = 0
+        self.n_group_overwrites = 0
+        self.groups = {}        # group_id -> slot index (最新 serial 槽位)
 
     def __len__(self):
         return len(self.keys)
+
+    def _drop_slot(self, idx):
+        gid = getattr(self, '_slot_groups', None)
+        if gid is not None:
+            gid.pop(idx, None)
 
     def _sims(self, key_raw):
         """返回与池内各槽位的余弦相似度。"""
@@ -126,16 +190,40 @@ class SlotPool:
         k = F.normalize(k, dim=0)
         return M @ k
 
-    def add(self, key_raw, text, serial):
+    def add(self, key_raw, text, serial, gid=None):
+        if not hasattr(self, '_slot_groups'):
+            self._slot_groups = [None] * len(self.keys)
+        # ③ 主谓组去重：同组新事实无条件替换组内旧槽位，只留最新 serial
+        if gid is not None and gid in self.groups:
+            old_i = self.groups[gid]
+            if self.serial[old_i] < serial:
+                self.keys[old_i] = key_raw
+                self.texts[old_i] = text
+                self.serial[old_i] = serial
+                self.t0[old_i] = self.clock; self.clock += 1
+                self.n_group_overwrites += 1
+                return "group_overwrite"
+            return "stale_skip"
         self.keys.append(key_raw); self.texts.append(text)
         self.serial.append(serial); self.t0.append(self.clock); self.clock += 1
+        self._slot_groups.append(gid)
+        if gid is not None:
+            self.groups[gid] = len(self.keys) - 1
         while len(self.keys) > POOL_MAX:
             self._evict_oldest()
+        return "new"
 
     def _evict_oldest(self):
         idx = min(range(len(self.t0)), key=lambda i: self.t0[i])
-        for lst in (self.keys, self.texts, self.serial, self.t0):
+        gid = self._slot_groups[idx]
+        if gid is not None and self.groups.get(gid) == idx:
+            self.groups.pop(gid, None)
+        for lst in (self.keys, self.texts, self.serial, self.t0, self._slot_groups):
             lst.pop(idx)
+        # groups 指向的索引整体左移
+        for g, i in list(self.groups.items()):
+            if i > idx:
+                self.groups[g] = i - 1
         self.n_evicts += 1
 
     def try_overwrite(self, key_raw, text, serial):
@@ -144,6 +232,7 @@ class SlotPool:
             return False
         top = int(sims.argmax())
         if float(sims[top]) > THETA:
+            gid = self._slot_groups[top]
             self.texts[top] = text          # 文本替换
             self.keys[top] = key_raw
             self.serial[top] = serial
@@ -155,6 +244,22 @@ class SlotPool:
     def context_block(self):
         """存活槽位事实拼成干净 context 块。"""
         order = sorted(range(len(self.serial)), key=lambda i: self.serial[i])
+        return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
+
+    def retrieve_context_block(self, query_text, top_k=15):
+        """池≤top_k 全取；否则按问题加权 key 检索 Top-K，按 serial 排序拼块。"""
+        if len(self.serial) <= top_k:
+            return self.context_block()
+        # 问题不 strip_object：strip_object 会把 "What is ..." 截成 "What"，破坏问题 key
+        qk = weighted_key_embed(query_text)
+        sims = self._sims(qk)
+        if sims is None:
+            return self.context_block()
+        sims_np = sims.tolist()
+        # 相似度按 serial 降序打破平局（新鲜度偏置）
+        ranked = sorted(range(len(sims_np)), key=lambda i: (-float(sims_np[i]), -self.serial[i]))
+        top = ranked[:top_k]
+        order = sorted(top, key=lambda i: self.serial[i])
         return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
 
 reset_delta_mem_states(model)
@@ -180,19 +285,24 @@ with torch.no_grad():
                   f"ow={pool.n_overwrites} ev={pool.n_evicts}", flush=True)
     # 事实槽位：纯事实文本单独 forward 取 key 签名（KV 不保留）
     for serial, fact in all_facts:
-        key_raw = embed_norm(subj_pred_key(fact))
-        if not pool.try_overwrite(key_raw, fact, serial):
-            pool.add(key_raw, fact, serial)
+        key_raw = weighted_key_embed(strip_object(fact))
+        gid = group_id(fact)
+        res = pool.add(key_raw, fact, serial, gid=gid)
+        if res == "new" and pool.try_overwrite(key_raw, fact, serial):
+            # 余弦语义去重（非同组近似重复）：try_overwrite 已更新槽位文本/serial，
+            # 该槽保持原组归属（近似重复不新建组）
+            pass
 set_delta_mem_write_enabled(model, False)
-print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flush=True)
+print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites} gwo={pool.n_group_overwrites}", flush=True)
 
 # ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
+reset_delta_mem_states(model)
 results = []
 with torch.no_grad():
     for qi, (q, a) in enumerate(zip(qs, ans)):
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
-        block = pool.context_block()
+        block = pool.retrieve_context_block(q)
         text = tok.apply_chat_template(
             [{"role": "system", "content": sys_msg},
              {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],

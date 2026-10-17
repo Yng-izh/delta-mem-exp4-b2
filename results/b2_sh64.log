@@ -1,37 +1,54 @@
 [transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<06:26,  1.03it/s]Loading weights:   1%|          | 2/398 [00:01<03:16,  2.02it/s]Loading weights:   1%|          | 4/398 [00:01<01:28,  4.47it/s]Loading weights:   1%|▏         | 5/398 [00:01<01:19,  4.92it/s]Loading weights:   3%|▎         | 10/398 [00:01<00:33, 11.42it/s]Loading weights:   4%|▍         | 15/398 [00:01<00:27, 14.02it/s]Loading weights:   4%|▍         | 17/398 [00:01<00:26, 14.33it/s]Loading weights:   5%|▌         | 21/398 [00:02<00:21, 17.38it/s]Loading weights:   6%|▋         | 25/398 [00:02<00:22, 16.86it/s]Loading weights:   7%|▋         | 27/398 [00:02<00:30, 11.97it/s]Loading weights:   8%|▊         | 33/398 [00:02<00:20, 17.82it/s]Loading weights:   9%|▉         | 36/398 [00:03<00:18, 19.26it/s]Loading weights:  10%|▉         | 39/398 [00:03<00:25, 13.95it/s]Loading weights:  11%|█         | 43/398 [00:03<00:21, 16.56it/s]Loading weights:  12%|█▏        | 47/398 [00:03<00:18, 18.98it/s]Loading weights:  13%|█▎        | 50/398 [00:03<00:22, 15.51it/s]Loading weights:  14%|█▎        | 54/398 [00:04<00:19, 18.08it/s]Loading weights:  15%|█▍        | 58/398 [00:04<00:18, 18.60it/s]Loading weights:  15%|█▌        | 61/398 [00:04<00:24, 14.04it/s]Loading weights:  16%|█▋        | 65/398 [00:04<00:20, 16.24it/s]Loading weights:  17%|█▋        | 69/398 [00:05<00:18, 17.61it/s]Loading weights:  18%|█▊        | 71/398 [00:05<00:20, 16.06it/s]Loading weights:  19%|█▊        | 74/398 [00:05<00:17, 18.46it/s]Loading weights:  20%|█▉        | 78/398 [00:05<00:14, 21.88it/s]Loading weights:  20%|██        | 81/398 [00:05<00:20, 15.58it/s]Loading weights:  21%|██        | 83/398 [00:05<00:21, 14.82it/s]Loading weights:  22%|██▏       | 88/398 [00:06<00:16, 19.18it/s]Loading weights:  23%|██▎       | 91/398 [00:06<00:17, 17.91it/s]Loading weights:  23%|██▎       | 93/398 [00:06<00:23, 12.76it/s]Loading weights:  25%|██▍       | 99/398 [00:06<00:16, 17.85it/s]Loading weights:  26%|██▌       | 102/398 [00:07<00:16, 17.47it/s]Loading weights:  26%|██▌       | 104/398 [00:07<00:23, 12.60it/s]Loading weights:  28%|██▊       | 110/398 [00:07<00:16, 17.68it/s]Loading weights:  28%|██▊       | 113/398 [00:07<00:15, 18.42it/s]Loading weights:  29%|██▉       | 116/398 [00:07<00:18, 15.22it/s]Loading weights:  31%|███       | 122/398 [00:08<00:12, 22.07it/s]Loading weights:  31%|███▏      | 125/398 [00:08<00:16, 16.25it/s]Loading weights:  32%|███▏      | 128/398 [00:08<00:16, 16.67it/s]Loading weights:  33%|███▎      | 131/398 [00:08<00:14, 18.70it/s]Loading weights:  34%|███▎      | 134/398 [00:08<00:13, 19.70it/s]Loading weights:  34%|███▍      | 137/398 [00:09<00:20, 12.49it/s]Loading weights:  36%|███▌      | 142/398 [00:09<00:15, 16.28it/s]Loading weights:  37%|███▋      | 146/398 [00:09<00:14, 17.26it/s]Loading weights:  37%|███▋      | 149/398 [00:09<00:17, 13.94it/s]Loading weights:  39%|███▊      | 154/398 [00:10<00:14, 17.30it/s]Loading weights:  39%|███▉      | 157/398 [00:10<00:14, 16.66it/s]Loading weights:  40%|███▉      | 159/398 [00:10<00:19, 12.19it/s]Loading weights:  41%|████▏     | 165/398 [00:10<00:13, 17.20it/s]Loading weights:  42%|████▏     | 168/398 [00:11<00:14, 16.16it/s]Loading weights:  43%|████▎     | 170/398 [00:11<00:19, 11.86it/s]Loading weights:  44%|████▍     | 175/398 [00:11<00:16, 13.45it/s]Loading weights:  45%|████▌     | 180/398 [00:11<00:12, 17.71it/s]Loading weights:  46%|████▋     | 185/398 [00:12<00:10, 20.99it/s]Loading weights:  48%|████▊     | 190/398 [00:12<00:10, 20.57it/s]Loading weights:  48%|████▊     | 193/398 [00:12<00:12, 16.09it/s]Loading weights:  49%|████▉     | 197/398 [00:12<00:11, 17.33it/s]Loading weights:  51%|█████     | 201/398 [00:12<00:10, 19.21it/s]Loading weights:  51%|█████▏    | 204/398 [00:13<00:13, 14.35it/s]Loading weights:  53%|█████▎    | 209/398 [00:13<00:10, 17.54it/s]Loading weights:  53%|█████▎    | 212/398 [00:13<00:11, 16.70it/s]Loading weights:  54%|█████▍    | 214/398 [00:14<00:15, 12.22it/s]Loading weights:  55%|█████▌    | 220/398 [00:14<00:10, 17.37it/s]Loading weights:  56%|█████▌    | 223/398 [00:14<00:09, 18.31it/s]Loading weights:  57%|█████▋    | 226/398 [00:14<00:12, 13.93it/s]Loading weights:  58%|█████▊    | 230/398 [00:14<00:11, 14.85it/s]Loading weights:  59%|█████▉    | 234/398 [00:15<00:10, 16.37it/s]Loading weights:  59%|█████▉    | 236/398 [00:15<00:13, 12.35it/s]Loading weights:  61%|██████    | 242/398 [00:15<00:08, 17.43it/s]Loading weights:  62%|██████▏   | 245/398 [00:15<00:08, 17.08it/s]Loading weights:  62%|██████▏   | 247/398 [00:16<00:11, 12.58it/s]Loading weights:  64%|██████▎   | 253/398 [00:16<00:07, 18.20it/s]Loading weights:  64%|██████▍   | 256/398 [00:16<00:08, 17.50it/s]Loading weights:  65%|██████▌   | 259/398 [00:16<00:09, 14.09it/s]Loading weights:  66%|██████▌   | 262/398 [00:16<00:08, 16.07it/s]Loading weights:  67%|██████▋   | 268/398 [00:17<00:06, 18.69it/s]Loading weights:  68%|██████▊   | 271/398 [00:17<00:06, 18.26it/s]Loading weights:  69%|██████▉   | 275/398 [00:17<00:06, 20.34it/s]Loading weights:  70%|██████▉   | 278/398 [00:17<00:06, 19.43it/s]Loading weights:  71%|███████   | 281/398 [00:18<00:07, 15.16it/s]Loading weights:  72%|███████▏  | 285/398 [00:18<00:06, 17.22it/s]Loading weights:  73%|███████▎  | 289/398 [00:18<00:05, 18.58it/s]Loading weights:  73%|███████▎  | 292/398 [00:18<00:06, 15.88it/s]Loading weights:  75%|███████▍  | 297/398 [00:18<00:05, 19.37it/s]Loading weights:  75%|███████▌  | 300/398 [00:19<00:05, 18.04it/s]Loading weights:  76%|███████▌  | 302/398 [00:19<00:07, 12.99it/s]Loading weights:  77%|███████▋  | 308/398 [00:19<00:05, 15.52it/s]Loading weights:  78%|███████▊  | 312/398 [00:19<00:05, 16.59it/s]Loading weights:  79%|███████▉  | 314/398 [00:20<00:05, 15.38it/s]Loading weights:  80%|████████  | 319/398 [00:20<00:04, 19.62it/s]Loading weights:  81%|████████  | 322/398 [00:20<00:04, 18.58it/s]Loading weights:  81%|████████▏ | 324/398 [00:20<00:05, 14.03it/s]Loading weights:  83%|████████▎ | 330/398 [00:20<00:03, 20.08it/s]Loading weights:  84%|████████▎ | 333/398 [00:21<00:03, 19.20it/s]Loading weights:  84%|████████▍ | 336/398 [00:21<00:03, 15.95it/s]Loading weights:  85%|████████▌ | 340/398 [00:21<00:03, 18.65it/s]Loading weights:  86%|████████▋ | 344/398 [00:21<00:02, 19.32it/s]Loading weights:  87%|████████▋ | 347/398 [00:21<00:03, 16.13it/s]Loading weights:  88%|████████▊ | 352/398 [00:22<00:02, 20.19it/s]Loading weights:  89%|████████▉ | 355/398 [00:22<00:02, 19.70it/s]Loading weights:  90%|████████▉ | 358/398 [00:22<00:02, 16.36it/s]Loading weights:  91%|█████████ | 363/398 [00:22<00:01, 19.96it/s]Loading weights:  92%|█████████▏| 366/398 [00:22<00:01, 19.03it/s]Loading weights:  93%|█████████▎| 369/398 [00:23<00:01, 15.78it/s]Loading weights:  94%|█████████▎| 373/398 [00:23<00:01, 18.31it/s]Loading weights:  95%|█████████▍| 377/398 [00:23<00:01, 19.71it/s]Loading weights:  95%|█████████▌| 380/398 [00:23<00:01, 16.20it/s]Loading weights:  97%|█████████▋| 385/398 [00:23<00:00, 19.87it/s]Loading weights:  97%|█████████▋| 388/398 [00:24<00:00, 18.54it/s]Loading weights:  98%|█████████▊| 391/398 [00:24<00:00, 14.45it/s]Loading weights:  99%|█████████▉| 396/398 [00:24<00:00, 18.01it/s]Loading weights: 100%|██████████| 398/398 [00:24<00:00, 16.20it/s]
-streaming... THETA=0.7 POOL=512
-chunk 5/131 pool=3 ow=0 ev=0
-chunk 10/131 pool=10 ow=0 ev=0
-chunk 15/131 pool=14 ow=0 ev=0
-chunk 20/131 pool=17 ow=0 ev=0
-chunk 25/131 pool=21 ow=0 ev=0
-chunk 30/131 pool=25 ow=0 ev=0
-chunk 35/131 pool=25 ow=0 ev=0
-chunk 40/131 pool=27 ow=0 ev=0
-chunk 45/131 pool=30 ow=0 ev=0
-chunk 50/131 pool=35 ow=0 ev=0
-chunk 55/131 pool=38 ow=0 ev=0
-chunk 60/131 pool=39 ow=0 ev=0
-chunk 65/131 pool=41 ow=0 ev=0
-chunk 70/131 pool=45 ow=0 ev=0
-chunk 75/131 pool=49 ow=0 ev=0
-chunk 80/131 pool=55 ow=0 ev=0
-chunk 85/131 pool=60 ow=0 ev=0
-chunk 90/131 pool=60 ow=0 ev=0
-chunk 95/131 pool=62 ow=0 ev=0
-chunk 100/131 pool=67 ow=0 ev=0
-chunk 105/131 pool=69 ow=0 ev=0
-chunk 110/131 pool=74 ow=0 ev=0
-chunk 115/131 pool=77 ow=0 ev=0
-chunk 120/131 pool=82 ow=0 ev=0
-chunk 125/131 pool=84 ow=0 ev=0
-chunk 130/131 pool=85 ow=0 ev=0
-chunk 131/131 pool=85 ow=0 ev=0
-write done. pool_final=85 overwrites=0
-20/100 running SF=0.000
-40/100 running SF=0.025
-60/100 running SF=0.017
-80/100 running SF=0.013
-100/100 running SF=0.010
-FINAL groupB2 factconsolidation_sh_64k: SF=0.0100 n=100 pool=85 overwrites=0
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:01<08:09,  1.23s/it]Loading weights:   1%|▏         | 5/398 [00:01<01:21,  4.81it/s]Loading weights:   3%|▎         | 12/398 [00:01<00:29, 12.90it/s]Loading weights:   4%|▍         | 16/398 [00:01<00:29, 13.12it/s]Loading weights:   6%|▌         | 22/398 [00:01<00:19, 19.03it/s]Loading weights:   7%|▋         | 26/398 [00:02<00:25, 14.79it/s]Loading weights:   9%|▉         | 35/398 [00:02<00:14, 24.23it/s]Loading weights:  10%|█         | 40/398 [00:02<00:14, 24.51it/s]Loading weights:  12%|█▏        | 46/398 [00:02<00:11, 29.51it/s]Loading weights:  13%|█▎        | 51/398 [00:02<00:12, 28.73it/s]Loading weights:  15%|█▍        | 58/398 [00:03<00:10, 33.33it/s]Loading weights:  16%|█▌        | 63/398 [00:03<00:10, 30.82it/s]Loading weights:  17%|█▋        | 69/398 [00:03<00:09, 33.77it/s]Loading weights:  18%|█▊        | 73/398 [00:03<00:10, 32.32it/s]Loading weights:  19%|█▉        | 77/398 [00:03<00:09, 33.55it/s]Loading weights:  20%|██        | 81/398 [00:03<00:10, 31.69it/s]Loading weights:  21%|██▏       | 85/398 [00:03<00:09, 32.01it/s]Loading weights:  22%|██▏       | 89/398 [00:04<00:09, 31.34it/s]Loading weights:  23%|██▎       | 93/398 [00:04<00:14, 21.52it/s]Loading weights:  26%|██▌       | 102/398 [00:04<00:09, 30.70it/s]Loading weights:  27%|██▋       | 106/398 [00:04<00:09, 30.29it/s]Loading weights:  28%|██▊       | 112/398 [00:04<00:08, 34.19it/s]Loading weights:  29%|██▉       | 116/398 [00:05<00:10, 27.80it/s]Loading weights:  31%|███       | 124/398 [00:05<00:08, 32.90it/s]Loading weights:  32%|███▏      | 128/398 [00:05<00:08, 32.18it/s]Loading weights:  34%|███▍      | 135/398 [00:05<00:07, 36.48it/s]Loading weights:  35%|███▍      | 139/398 [00:05<00:07, 33.93it/s]Loading weights:  37%|███▋      | 146/398 [00:05<00:06, 38.21it/s]Loading weights:  38%|███▊      | 150/398 [00:05<00:07, 34.51it/s]Loading weights:  39%|███▉      | 157/398 [00:06<00:06, 37.66it/s]Loading weights:  40%|████      | 161/398 [00:06<00:06, 34.79it/s]Loading weights:  42%|████▏     | 168/398 [00:06<00:06, 33.03it/s]Loading weights:  43%|████▎     | 172/398 [00:06<00:07, 31.81it/s]Loading weights:  44%|████▍     | 177/398 [00:06<00:06, 35.47it/s]Loading weights:  45%|████▌     | 181/398 [00:06<00:08, 26.54it/s]Loading weights:  48%|████▊     | 190/398 [00:07<00:05, 35.45it/s]Loading weights:  49%|████▊     | 194/398 [00:07<00:06, 33.55it/s]Loading weights:  51%|█████     | 201/398 [00:07<00:05, 37.58it/s]Loading weights:  52%|█████▏    | 205/398 [00:07<00:05, 35.32it/s]Loading weights:  53%|█████▎    | 212/398 [00:07<00:04, 39.41it/s]Loading weights:  55%|█████▍    | 217/398 [00:07<00:04, 37.68it/s]Loading weights:  56%|█████▌    | 223/398 [00:07<00:04, 38.15it/s]Loading weights:  57%|█████▋    | 227/398 [00:08<00:04, 34.96it/s]Loading weights:  59%|█████▉    | 234/398 [00:08<00:04, 38.00it/s]Loading weights:  60%|█████▉    | 238/398 [00:08<00:04, 36.19it/s]Loading weights:  62%|██████▏   | 245/398 [00:08<00:03, 39.59it/s]Loading weights:  63%|██████▎   | 249/398 [00:08<00:04, 37.25it/s]Loading weights:  64%|██████▍   | 255/398 [00:08<00:03, 39.22it/s]Loading weights:  65%|██████▌   | 259/398 [00:08<00:03, 35.94it/s]Loading weights:  67%|██████▋   | 267/398 [00:09<00:03, 42.66it/s]Loading weights:  68%|██████▊   | 272/398 [00:09<00:03, 40.00it/s]Loading weights:  70%|██████▉   | 278/398 [00:09<00:02, 40.96it/s]Loading weights:  71%|███████   | 283/398 [00:09<00:02, 38.86it/s]Loading weights:  73%|███████▎  | 289/398 [00:09<00:02, 39.59it/s]Loading weights:  74%|███████▎  | 293/398 [00:09<00:02, 36.80it/s]Loading weights:  75%|███████▍  | 297/398 [00:09<00:02, 35.35it/s]Loading weights:  76%|███████▌  | 301/398 [00:10<00:02, 33.69it/s]Loading weights:  77%|███████▋  | 305/398 [00:10<00:02, 34.06it/s]Loading weights:  78%|███████▊  | 311/398 [00:10<00:02, 37.97it/s]Loading weights:  79%|███████▉  | 315/398 [00:10<00:02, 34.76it/s]Loading weights:  81%|████████  | 322/398 [00:10<00:01, 38.56it/s]Loading weights:  82%|████████▏ | 326/398 [00:10<00:01, 36.04it/s]Loading weights:  83%|████████▎ | 332/398 [00:10<00:01, 41.35it/s]Loading weights:  85%|████████▍ | 337/398 [00:11<00:02, 30.32it/s]Loading weights:  86%|████████▌ | 341/398 [00:11<00:01, 30.21it/s]Loading weights:  87%|████████▋ | 345/398 [00:11<00:01, 29.87it/s]Loading weights:  88%|████████▊ | 350/398 [00:11<00:01, 33.14it/s]Loading weights:  89%|████████▉ | 354/398 [00:11<00:01, 33.74it/s]Loading weights:  90%|████████▉ | 358/398 [00:11<00:01, 26.47it/s]Loading weights:  92%|█████████▏| 366/398 [00:12<00:00, 33.59it/s]Loading weights:  93%|█████████▎| 370/398 [00:12<00:00, 31.74it/s]Loading weights:  95%|█████████▍| 377/398 [00:12<00:00, 36.73it/s]Loading weights:  96%|█████████▌| 381/398 [00:12<00:00, 34.74it/s]Loading weights:  97%|█████████▋| 388/398 [00:12<00:00, 34.07it/s]Loading weights:  98%|█████████▊| 392/398 [00:12<00:00, 29.61it/s]Loading weights: 100%|██████████| 398/398 [00:12<00:00, 30.77it/s]
+=== ctx[:500] ===
+Here is a list of facts:
+0. Glenn L. Martin Company was founded by Glenn L. Martin.
+1. Ian Marter died in the city of London.
+2. Katniss Everdeen was created by Suzanne Collins.
+3. Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglicanism.
+4. Edward Cullen was performed by Robert Pattinson.
+5. Macbeth was created by William Shakespeare.
+6. Shawn Bradley plays the position of center.
+7. The author of Red Storm Rising is Tom Clancy.
+8. Meilen Tu is a citizen of United St
+extracted facts: 4580 (numbered+fallback)
+  fact[0] Glenn L. Martin Company was founded by Glenn L. Martin.
+  fact[1] Ian Marter died in the city of London.
+  fact[2] Katniss Everdeen was created by Suzanne Collins.
+  fact[3] Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglica
+  fact[4] Edward Cullen was performed by Robert Pattinson.
+streaming... THETA=0.72 POOL=5000
+chunk 5/131 pool=0 ow=0 ev=0
+chunk 10/131 pool=0 ow=0 ev=0
+chunk 15/131 pool=0 ow=0 ev=0
+chunk 20/131 pool=0 ow=0 ev=0
+chunk 25/131 pool=0 ow=0 ev=0
+chunk 30/131 pool=0 ow=0 ev=0
+chunk 35/131 pool=0 ow=0 ev=0
+chunk 40/131 pool=0 ow=0 ev=0
+chunk 45/131 pool=0 ow=0 ev=0
+chunk 50/131 pool=0 ow=0 ev=0
+chunk 55/131 pool=0 ow=0 ev=0
+chunk 60/131 pool=0 ow=0 ev=0
+chunk 65/131 pool=0 ow=0 ev=0
+chunk 70/131 pool=0 ow=0 ev=0
+chunk 75/131 pool=0 ow=0 ev=0
+chunk 80/131 pool=0 ow=0 ev=0
+chunk 85/131 pool=0 ow=0 ev=0
+chunk 90/131 pool=0 ow=0 ev=0
+chunk 95/131 pool=0 ow=0 ev=0
+chunk 100/131 pool=0 ow=0 ev=0
+chunk 105/131 pool=0 ow=0 ev=0
+chunk 110/131 pool=0 ow=0 ev=0
+chunk 115/131 pool=0 ow=0 ev=0
+chunk 120/131 pool=0 ow=0 ev=0
+chunk 125/131 pool=0 ow=0 ev=0
+chunk 130/131 pool=0 ow=0 ev=0
+chunk 131/131 pool=0 ow=0 ev=0
+write done. pool_final=2598 overwrites=2598
+20/100 running SF=0.850
+40/100 running SF=0.900
+60/100 running SF=0.883
+80/100 running SF=0.887
+100/100 running SF=0.870
+FINAL groupB2 factconsolidation_sh_64k: SF=0.8700 n=100 pool=2598 overwrites=2598
