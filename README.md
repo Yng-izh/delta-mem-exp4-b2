@@ -2,7 +2,28 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
-## 最终结论（v5，2026-10-17）
+## 最终结论（v6，2026-10-18）——一套代码通吃 sh + mh
+
+| 切片 | B2 v6 SF | B2 v5 | B2 v4 | A chunked 基线 | Δ vs v5 | Go/No-Go |
+|---|---|---|---|---|---|---|
+| factconsolidation_sh_6k | **0.940** | — | 0.860 | 0.12 | +8pp（vs v4） | **Go** |
+| factconsolidation_sh_64k | **0.890** | — | 0.870 | 0.23 | +2pp（vs v4） | **Go** |
+| factconsolidation_mh_6k | **0.670** | 0.510 | 0.080 | 0.02 | **+16pp** | **Go** |
+| factconsolidation_mh_64k | **0.590** | 0.450 | — | — | **+14pp** | **Go** |
+
+v6 = v5_slotpool.py 两处极小修补升级而来（`v6_slotpool.py`），同一套代码同时跑 sh 与 mh：
+
+1. **VP_RE 谓词正则补全 + 长谓词优先**：`parse_fact_triple` 优先匹配非裸系动词的具体谓词短语（禁止退化为 is/was）；新增 WHERE 倒装从句解析（双系动词句型 `The X where SUBJ was VERB is OBJ`，30 词条名词→谓词映射），修复教育类冲突对的 subj 解析污染（"The univeristy where Elena Ceaușescu was educated" → subj=Elena Ceaușescu, rel=educated at）。
+2. **(subj, rel) 精确组标识 gid 原位覆写**：`gid = f"{subj.lower()}||{rel.lower()}"` 命中即无条件原位覆写 texts/k_obj/E_obj（找回 v5 漏掉的覆写），双重命中余弦覆写退为二级兜底；每实体保留多条不同 rel 槽位，多跳检索命中跳板实体时展开其全部属性分支（Hop2+ 按问题谓词相关性 Top-2 进块）。
+
+### v6 实测
+
+- sh_6k：SF=0.94、pool=292、ow=163；sh_64k：SF=0.89、pool=2826、ow=1754
+- mh_6k：SF=0.67、pool=292、ow=163；mh_64k：SF=0.59、pool=2826、ow=1754
+- mh 残余失败主因：链尾候选语义竞争（Grosseto/Harrisville 类小城复用误答），检索侧已尽，需模型侧候选重排再推。
+- 复算验证：四路 jsonl 各 100 条，SF 与 FINAL 日志一致（EM=SF，missing=0）。
+
+## 历史结论（v5，2026-10-17）
 
 | 切片 | B2 v5 SF | B2 v4 | v3 | A chunked 基线 | Δ vs A | Go/No-Go（≥20pp） |
 |---|---|---|---|---|---|---|

@@ -1,0 +1,54 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<03:12,  2.07it/s]Loading weights:   3%|▎         | 11/398 [00:00<00:16, 23.90it/s]Loading weights:   4%|▍         | 17/398 [00:00<00:11, 31.98it/s]Loading weights:   7%|▋         | 26/398 [00:00<00:08, 45.09it/s]Loading weights:   9%|▉         | 36/398 [00:00<00:06, 57.70it/s]Loading weights:  11%|█         | 44/398 [00:01<00:05, 61.91it/s]Loading weights:  13%|█▎        | 52/398 [00:01<00:05, 64.04it/s]Loading weights:  15%|█▌        | 60/398 [00:01<00:05, 61.95it/s]Loading weights:  18%|█▊        | 70/398 [00:01<00:04, 69.88it/s]Loading weights:  20%|█▉        | 79/398 [00:01<00:04, 73.62it/s]Loading weights:  22%|██▏       | 88/398 [00:01<00:03, 77.63it/s]Loading weights:  24%|██▍       | 97/398 [00:01<00:04, 74.24it/s]Loading weights:  26%|██▋       | 105/398 [00:01<00:04, 70.99it/s]Loading weights:  29%|██▊       | 114/398 [00:01<00:03, 75.41it/s]Loading weights:  31%|███       | 124/398 [00:02<00:03, 80.75it/s]Loading weights:  33%|███▎      | 133/398 [00:02<00:03, 82.48it/s]Loading weights:  36%|███▌      | 142/398 [00:02<00:03, 79.35it/s]Loading weights:  38%|███▊      | 151/398 [00:02<00:03, 77.41it/s]Loading weights:  40%|███▉      | 159/398 [00:02<00:03, 70.78it/s]Loading weights:  42%|████▏     | 169/398 [00:02<00:02, 76.87it/s]Loading weights:  45%|████▍     | 179/398 [00:02<00:02, 80.50it/s]Loading weights:  47%|████▋     | 188/398 [00:02<00:02, 80.86it/s]Loading weights:  49%|████▉     | 197/398 [00:03<00:02, 78.93it/s]Loading weights:  52%|█████▏    | 205/398 [00:03<00:02, 73.18it/s]Loading weights:  54%|█████▎    | 213/398 [00:03<00:02, 71.95it/s]Loading weights:  56%|█████▌    | 223/398 [00:03<00:02, 78.25it/s]Loading weights:  58%|█████▊    | 231/398 [00:03<00:02, 77.89it/s]Loading weights:  60%|██████    | 239/398 [00:03<00:02, 75.74it/s]Loading weights:  62%|██████▏   | 247/398 [00:03<00:02, 68.98it/s]Loading weights:  65%|██████▍   | 257/398 [00:03<00:01, 75.48it/s]Loading weights:  67%|██████▋   | 267/398 [00:03<00:01, 81.10it/s]Loading weights:  69%|██████▉   | 276/398 [00:04<00:01, 81.71it/s]Loading weights:  72%|███████▏  | 285/398 [00:04<00:01, 78.46it/s]Loading weights:  74%|███████▎  | 293/398 [00:04<00:01, 74.05it/s]Loading weights:  76%|███████▌  | 301/398 [00:04<00:01, 73.61it/s]Loading weights:  78%|███████▊  | 311/398 [00:04<00:01, 78.41it/s]Loading weights:  80%|████████  | 319/398 [00:04<00:01, 78.37it/s]Loading weights:  82%|████████▏ | 327/398 [00:04<00:00, 76.67it/s]Loading weights:  84%|████████▍ | 335/398 [00:04<00:00, 69.95it/s]Loading weights:  87%|████████▋ | 345/398 [00:04<00:00, 76.40it/s]Loading weights:  89%|████████▉ | 355/398 [00:05<00:00, 81.01it/s]Loading weights:  91%|█████████▏| 364/398 [00:05<00:00, 82.58it/s]Loading weights:  94%|█████████▎| 373/398 [00:05<00:00, 79.89it/s]Loading weights:  96%|█████████▌| 382/398 [00:05<00:00, 76.70it/s]Loading weights:  98%|█████████▊| 390/398 [00:05<00:00, 70.27it/s]Loading weights: 100%|██████████| 398/398 [00:05<00:00, 70.86it/s]
+=== ctx[:500] ===
+Here is a list of facts:
+0. Glenn L. Martin Company was founded by Glenn L. Martin.
+1. Ian Marter died in the city of London.
+2. Katniss Everdeen was created by Suzanne Collins.
+3. Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglicanism.
+4. Edward Cullen was performed by Robert Pattinson.
+5. Macbeth was created by William Shakespeare.
+6. Shawn Bradley plays the position of center.
+7. The author of Red Storm Rising is Tom Clancy.
+8. Meilen Tu is a citizen of United St
+extracted facts: 4580 (numbered+fallback)
+  fact[0] Glenn L. Martin Company was founded by Glenn L. Martin.
+  fact[1] Ian Marter died in the city of London.
+  fact[2] Katniss Everdeen was created by Suzanne Collins.
+  fact[3] Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglica
+  fact[4] Edward Cullen was performed by Robert Pattinson.
+streaming... THETA=0.72 POOL=5000
+chunk 5/131 pool=0 ow=0 ev=0
+chunk 10/131 pool=0 ow=0 ev=0
+chunk 15/131 pool=0 ow=0 ev=0
+chunk 20/131 pool=0 ow=0 ev=0
+chunk 25/131 pool=0 ow=0 ev=0
+chunk 30/131 pool=0 ow=0 ev=0
+chunk 35/131 pool=0 ow=0 ev=0
+chunk 40/131 pool=0 ow=0 ev=0
+chunk 45/131 pool=0 ow=0 ev=0
+chunk 50/131 pool=0 ow=0 ev=0
+chunk 55/131 pool=0 ow=0 ev=0
+chunk 60/131 pool=0 ow=0 ev=0
+chunk 65/131 pool=0 ow=0 ev=0
+chunk 70/131 pool=0 ow=0 ev=0
+chunk 75/131 pool=0 ow=0 ev=0
+chunk 80/131 pool=0 ow=0 ev=0
+chunk 85/131 pool=0 ow=0 ev=0
+chunk 90/131 pool=0 ow=0 ev=0
+chunk 95/131 pool=0 ow=0 ev=0
+chunk 100/131 pool=0 ow=0 ev=0
+chunk 105/131 pool=0 ow=0 ev=0
+chunk 110/131 pool=0 ow=0 ev=0
+chunk 115/131 pool=0 ow=0 ev=0
+chunk 120/131 pool=0 ow=0 ev=0
+chunk 125/131 pool=0 ow=0 ev=0
+chunk 130/131 pool=0 ow=0 ev=0
+chunk 131/131 pool=0 ow=0 ev=0
+write done. pool_final=2826 overwrites=1754
+20/100 running SF=0.850
+40/100 running SF=0.800
+60/100 running SF=0.833
+80/100 running SF=0.875
+100/100 running SF=0.890
+FINAL groupB2 factconsolidation_sh_64k: SF=0.8900 n=100 pool=2826 overwrites=1754

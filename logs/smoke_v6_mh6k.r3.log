@@ -1,0 +1,75 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<03:14,  2.04it/s]Loading weights:   3%|▎         | 11/398 [00:00<00:16, 23.95it/s]Loading weights:   4%|▍         | 17/398 [00:00<00:11, 32.12it/s]Loading weights:   7%|▋         | 26/398 [00:00<00:08, 45.41it/s]Loading weights:   9%|▉         | 36/398 [00:00<00:06, 57.69it/s]Loading weights:  11%|█         | 44/398 [00:01<00:05, 63.09it/s]Loading weights:  13%|█▎        | 52/398 [00:01<00:05, 66.10it/s]Loading weights:  15%|█▌        | 60/398 [00:01<00:05, 63.04it/s]Loading weights:  18%|█▊        | 70/398 [00:01<00:04, 71.11it/s]Loading weights:  20%|██        | 80/398 [00:01<00:04, 76.56it/s]Loading weights:  22%|██▏       | 89/398 [00:01<00:03, 78.61it/s]Loading weights:  25%|██▍       | 98/398 [00:01<00:03, 78.08it/s]Loading weights:  27%|██▋       | 107/398 [00:01<00:03, 75.77it/s]Loading weights:  29%|██▉       | 115/398 [00:01<00:04, 68.89it/s]Loading weights:  31%|███▏      | 125/398 [00:02<00:03, 75.46it/s]Loading weights:  34%|███▍      | 135/398 [00:02<00:03, 80.15it/s]Loading weights:  36%|███▌      | 144/398 [00:02<00:03, 80.38it/s]Loading weights:  38%|███▊      | 153/398 [00:02<00:03, 77.85it/s]Loading weights:  40%|████      | 161/398 [00:02<00:03, 73.45it/s]Loading weights:  42%|████▏     | 169/398 [00:02<00:03, 73.42it/s]Loading weights:  45%|████▍     | 179/398 [00:02<00:02, 77.66it/s]Loading weights:  47%|████▋     | 187/398 [00:02<00:02, 77.53it/s]Loading weights:  49%|████▉     | 195/398 [00:03<00:02, 76.32it/s]Loading weights:  51%|█████     | 203/398 [00:03<00:02, 69.77it/s]Loading weights:  54%|█████▎    | 213/398 [00:03<00:02, 76.25it/s]Loading weights:  56%|█████▌    | 223/398 [00:03<00:02, 81.36it/s]Loading weights:  58%|█████▊    | 232/398 [00:03<00:02, 81.12it/s]Loading weights:  61%|██████    | 241/398 [00:03<00:02, 76.96it/s]Loading weights:  63%|██████▎   | 249/398 [00:03<00:02, 72.82it/s]Loading weights:  65%|██████▍   | 257/398 [00:03<00:01, 72.75it/s]Loading weights:  67%|██████▋   | 267/398 [00:03<00:01, 77.39it/s]Loading weights:  69%|██████▉   | 275/398 [00:04<00:01, 76.99it/s]Loading weights:  71%|███████   | 283/398 [00:04<00:01, 75.96it/s]Loading weights:  73%|███████▎  | 291/398 [00:04<00:01, 68.81it/s]Loading weights:  76%|███████▌  | 301/398 [00:04<00:01, 75.20it/s]Loading weights:  78%|███████▊  | 311/398 [00:04<00:01, 76.26it/s]Loading weights:  80%|████████  | 320/398 [00:04<00:00, 79.19it/s]Loading weights:  83%|████████▎ | 329/398 [00:04<00:00, 77.71it/s]Loading weights:  85%|████████▍ | 337/398 [00:04<00:00, 73.17it/s]Loading weights:  87%|████████▋ | 345/398 [00:04<00:00, 73.49it/s]Loading weights:  89%|████████▉ | 355/398 [00:05<00:00, 78.32it/s]Loading weights:  91%|█████████▏| 364/398 [00:05<00:00, 80.73it/s]Loading weights:  94%|█████████▎| 373/398 [00:05<00:00, 79.14it/s]Loading weights:  96%|█████████▌| 381/398 [00:05<00:00, 74.88it/s]Loading weights:  98%|█████████▊| 389/398 [00:05<00:00, 74.57it/s]Loading weights: 100%|██████████| 398/398 [00:05<00:00, 70.63it/s]
+=== ctx[:500] ===
+Here is a list of facts:
+0. Thomas Kyd was born in the city of London.
+1. The chairperson of Fatah is Mahmoud Abbas.
+2. Amy Winehouse died in the city of Camden Town.
+3. Hines Ward plays the position of wide receiver.
+4. Bengaluru is located in the continent of Asia.
+5. Pedro Pierluisi worked in the city of Washington, D.C..
+6. Rogério Ceni plays the position of goalkeeper.
+7. The director of British Broadcasting Corporation is Tony Hall, Baron Hall of Birkenhead.
+8. Victoria Beckham is married 
+extracted facts: 455 (numbered+fallback)
+  fact[0] Thomas Kyd was born in the city of London.
+  fact[1] The chairperson of Fatah is Mahmoud Abbas.
+  fact[2] Amy Winehouse died in the city of Camden Town.
+  fact[3] Hines Ward plays the position of wide receiver.
+  fact[4] Bengaluru is located in the continent of Asia.
+streaming... THETA=0.72 POOL=5000
+chunk 5/12 pool=0 ow=0 ev=0
+chunk 10/12 pool=0 ow=0 ev=0
+chunk 12/12 pool=0 ow=0 ev=0
+write done. pool_final=292 overwrites=163
+[smoke] Q0 block_lines=3 block_chars=142
+[smoke] Q0 input_tokens=241
+Q0: What is the country of citizenship of the spouse of the author of Our Mutual Friend?
+  A: ['Belgium']
+  P: Belgium
+[smoke] Q1 block_lines=2 block_chars=90
+[smoke] Q1 input_tokens=229
+Q1: In which location did the spouse of Igor of Kiev pass away?
+  A: ['Rodez']
+  P: Rodez
+[smoke] Q2 block_lines=3 block_chars=168
+[smoke] Q2 input_tokens=239
+Q2: Which country is the birthplace of the sport associated with Steve Sax?
+  A: ['Italy']
+  P: Italy
+[smoke] Q3 block_lines=7 block_chars=424
+[smoke] Q3 input_tokens=303
+Q3: Which city serves as the capital of the country of origin for the sport of the Tunisia national football team?
+  A: ['Russellville']
+  P: Oderzo
+[smoke] Q4 block_lines=8 block_chars=418
+[smoke] Q4 input_tokens=319
+Q4: What is the sport that Blair Walsh plays in which he is known for his position on the team?
+  A: ['rugby']
+  P: Rugby
+[smoke] Q5 block_lines=4 block_chars=295
+[smoke] Q5 input_tokens=283
+Q5: What is the name of the educational institution where the partner of Nicolae Ceaușescu was educated?
+  A: ['Baldwin Wallace University']
+  P: Baldwin Wallace University
+[smoke] Q6 block_lines=4 block_chars=197
+[smoke] Q6 input_tokens=249
+Q6: Which country does the current CEO of Twitter hold citizenship of?
+  A: ['France']
+  P: France
+[smoke] Q7 block_lines=1 block_chars=51
+[smoke] Q7 input_tokens=214
+Q7: On which continent was the place of birth of Thomas Arne located?
+  A: ['Oceania']
+  P: Answer: Asia
+[smoke] Q8 block_lines=3 block_chars=151
+[smoke] Q8 input_tokens=242
+Q8: To which continent does the country of citizenship of Colin Irwin pertain?
+  A: ['North America']
+  P: North America
+[smoke] Q9 block_lines=3 block_chars=159
+[smoke] Q9 input_tokens=246
+Q9: What is the location of work of the founder of the religion to which John Walsh belongs?
+  A: ['Berlin']
+  P: Berlin
+FINAL groupB2 factconsolidation_mh_6k: SF=0.8000 n=10 pool=292 overwrites=163
