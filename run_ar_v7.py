@@ -19,6 +19,9 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
      - plain：纯 top-K 块检索（≈ A chunked RAG 基线，无 rerank、无时序展开）
      - v7   ：MaxSim rerank + EventQA 时序窗口展开（定位"已发生事件"所在块，
               向后取窗口给"接下来发生什么"用）
+#      - v8   : 双模态潜槽位记忆 (DM-ELSM, v8_slotpool.py): 情景/状态自适应分流
+#               (3 句滑窗微块 + 时间戳继承)、EpisodicFastPool 全池无截断 IDF-MaxSim
+#               检索、邻域扩展。CR (DELTA_WRITE) 路径保持 v7 不动。
 
 支持的 source（parquet 内 metadata.source）：
     eventqa_65536 / eventqa_131072 / eventqa_full
@@ -51,7 +54,7 @@ import pyarrow.parquet as pq
 # ----------------------------- 运行参数 -----------------------------
 SRC   = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("AR_SRC", "")
 GPU   = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("AR_GPU", "0")
-MODE  = os.environ.get("AR_MODE", "v7")            # v7 | plain
+MODE  = os.environ.get("AR_MODE", "v7")            # v7 | v8 | plain
 CHUNK = int(os.environ.get("AR_CHUNK", "128"))     # 检索块 token 数
 CHUNK_MAX_TOK = max(256, CHUNK * 2)                # 句子切分可能超出，硬截断
 TOP_K       = int(os.environ.get("AR_TOP_K", "12"))        # 读出块数
@@ -249,6 +252,93 @@ def build_pool_for_context(ctx):
     return pool, len(tok(text, add_special_tokens=False).input_ids)
 
 
+# ----------------------------- v8 双模态潜槽位记忆 (DM-ELSM) -----------------------------
+v8_slotpool = None
+
+
+def v8_import():
+    """惰性导入 v8_slotpool 并注入 tok/EMB（CR 路径不触碰）。"""
+    global v8_slotpool
+    if v8_slotpool is None:
+        import importlib
+        v8_slotpool = importlib.import_module("v8_slotpool")
+        v8_slotpool.tok = tok
+        v8_slotpool.EMB = EMB
+    return v8_slotpool
+
+
+TOPK_STATE = int(os.environ.get("AR_V8_TOPK_STATE", "4"))   # 状态池附带单元数
+NEIGHBOR   = int(os.environ.get("AR_V8_NEIGHBOR", "2"))     # 情景邻域扩展窗口数
+CTX_SENTS  = int(os.environ.get("AR_V8_CTX_MAX_UNITS", "40"))  # 拼给 LLM 的单元上限
+
+
+def build_pool_for_context_v8(ctx):
+    """v8：情景/状态分流建池。返回 (epi_pool, state_pool, n_tok)。"""
+    sp = v8_import()
+    text = ctx
+    if CTX_MAX_TOK > 0:
+        ids = tok(text, add_special_tokens=False).input_ids
+        if len(ids) > CTX_MAX_TOK:
+            text = tok.decode(ids[-CTX_MAX_TOK:], skip_special_tokens=True)
+    epi, st = sp.build_pools_for_context(text)
+    return epi, st, len(tok(text, add_special_tokens=False).input_ids)
+
+
+def build_block_v8(epi, st, q, meta, qi):
+    """v8 读出：全池 IDF-MaxSim + 邻域扩展 + 状态单元补充，按句序拼块。"""
+    sp = v8_import()
+    if len(epi) == 0 and len(st) == 0:
+        return "", {}
+    q_core = core_question(q)
+
+    if FAMILY == "eventqa":
+        evs = parse_prev_events(meta, qi)
+        if evs:
+            anchor, cov = epi.best_unit_for(evs[-1])
+            used = "last"
+            if cov < 0.5 and len(evs) > 1:
+                a2, cov2 = epi.best_unit_for(evs[-2] + " " + evs[-1])
+                if cov2 > cov:
+                    anchor, cov, used = a2, cov2, "last2"
+            idxs = epi.neighbor_expand([(anchor, cov)], extra=EQA_WIN)
+            dbg = {"mode": "v8_anchor", "anchor": anchor, "anchor_cov": round(cov, 4),
+                   "anchor_used": used, "idxs": idxs}
+        else:
+            hits = epi.retrieve(q_core, top_k=TOP_K)
+            idxs = epi.neighbor_expand(hits, extra=NEIGHBOR)
+            dbg = {"mode": "v8_maxsim", "idxs": idxs}
+    else:
+        hits = epi.retrieve(q_core, top_k=TOP_K)
+        idxs = epi.neighbor_expand(hits, extra=NEIGHBOR)
+        dbg = {"mode": "v8_maxsim", "idxs": idxs}
+
+    # 状态单元补充（时间无关稳定事实）
+    if len(st) > 0:
+        st_hits = st.retrieve(q_core, top_k=TOPK_STATE)
+        st_idx = [i for i, _ in st_hits]
+        dbg["state_idxs"] = st_idx
+    else:
+        st_idx = []
+
+    # 按句序去重拼接；情景在前、状态在后；单元总量受限
+    lines_out, seen = [], set()
+    order = sorted([i for i in idxs if i >= 0], key=lambda i: epi.metas[i].get("start", i))
+    for i in order:
+        k = " ".join(epi.texts[i].split()).lower()
+        if k not in seen:
+            seen.add(k)
+            lines_out.append(epi.texts[i])
+    st_order = sorted([i for i in st_idx], key=lambda i: st.metas[i].get("start", i))
+    for i in st_order:
+        k = " ".join(st.texts[i].split()).lower()
+        if k not in seen:
+            seen.add(k)
+            lines_out.append(st.texts[i])
+    lines_out = lines_out[:CTX_SENTS]
+    dbg["n_units"] = len(lines_out)
+    return "\n".join(lines_out), dbg
+
+
 # ----------------------------- 读出块 -----------------------------
 def parse_prev_events(meta, qi):
     evs = meta.get("previous_events")
@@ -355,9 +445,15 @@ def main():
             qs, ans = qs[:LIMIT_Q], ans[:LIMIT_Q]
 
         print(f"[ctx {ci+1}/{len(rows)}] chars={len(ctx)} qs={len(qs)} 构建证据池...", flush=True)
-        pool, n_tok = build_pool_for_context(ctx)
-        print(f"[ctx {ci+1}/{len(rows)}] tokens={n_tok} chunks={len(pool)} dup={pool.n_dup} "
-              f"({time.time()-t_start:.0f}s)", flush=True)
+        if MODE == "v8":
+            epi, st, n_tok = build_pool_for_context_v8(ctx)
+            pool = epi
+            print(f"[ctx {ci+1}/{len(rows)}] tokens={n_tok} episodic={len(epi)} "
+                  f"state={len(st)} dup={epi.n_dup} ({time.time()-t_start:.0f}s)", flush=True)
+        else:
+            pool, n_tok = build_pool_for_context(ctx)
+            print(f"[ctx {ci+1}/{len(rows)}] tokens={n_tok} chunks={len(pool)} dup={pool.n_dup} "
+                  f"({time.time()-t_start:.0f}s)", flush=True)
 
         reset_delta_mem_states(model)
         set_delta_mem_write_enabled(model, False)
@@ -374,7 +470,10 @@ def main():
                 qtxt = qry_tpl.format(question=q)
 
             try:
-                block, dbg = build_block(pool, q, meta, qi)
+                if MODE == "v8":
+                    block, dbg = build_block_v8(epi, st, q, meta, qi)
+                else:
+                    block, dbg = build_block(pool, q, meta, qi)
             except Exception as e:                      # 单题失败不中断整轮
                 print(f"[warn] retrieve fail q={qi}: {e}", flush=True)
                 block, dbg = "", {"mode": "error", "err": str(e)}
@@ -384,10 +483,28 @@ def main():
                  {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
                 add_generation_prompt=True, tokenize=False)
             ids = tok(text, return_tensors="pt").input_ids.to(DEV)
-            with torch.no_grad():
-                out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
-                                     do_sample=False, use_cache=True,
-                                     pad_token_id=tok.eos_token_id or 0)
+            torch.cuda.empty_cache()                 # 建池/检索后的 GPU 碎片回收
+            try:
+                with torch.no_grad():
+                    out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
+                                         do_sample=False, use_cache=True,
+                                         pad_token_id=tok.eos_token_id or 0)
+            except torch.OutOfMemoryError:
+                for keep in (16000, 8000, 4000):
+                    torch.cuda.empty_cache()
+                    keep_n = min(keep, ids.shape[1])
+                    ids = ids[:, ids.shape[1] - keep_n:]
+                    print(f"[q {qi}] OOM retry keep={keep_n}", flush=True)
+                    try:
+                        with torch.no_grad():
+                            out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
+                                                 do_sample=False, use_cache=True,
+                                                 pad_token_id=tok.eos_token_id or 0)
+                        break
+                    except torch.OutOfMemoryError:
+                        if keep == 4000:
+                            raise
+
             pred = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True)
 
             m, extra = post_process(

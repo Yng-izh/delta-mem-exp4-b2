@@ -2,6 +2,41 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
+## 最新进展（v8，2026-10-19）——双模态潜槽位记忆 DM-ELSM（AR 管线）
+
+v8 针对 Accurate_Retrieval（AR）管线引入双模态潜槽位记忆（DM-ELSM: Dual-Modal Episodic Latent Slot Memory，
+`v8_slotpool.py`，经 `run_ar_v7.py` 的 `AR_MODE=v8` 启用）。**CR（FactConsolidation）路径保持 v7 不动，向后兼容。**
+
+### v8 方法
+
+1. **情景/状态自适应分流 `extract_adaptive_units`**：
+   - 情景微块（episodic）：3 句滑窗（stride=1），任一句含时间标记或过去时事件动词的窗口成为独立检索单元；
+   - 状态单元（state）：无时间标记、无事件动词的稳定事实句，单句成窗，StatePool 近重复语义合并（mean cos > `V8_STATE_THETA=0.92` 时新文本覆写旧槽）；
+   - 时间戳继承：显式时间标记（In 1997 / On March 3, 2001 / in the 1990s）写入 cur_ts，后续无标记窗口继承最近一次时间戳。
+2. **EpisodicFastPool：全池无截断 IDF-MaxSim 检索**：废除 v7 的 n>3500 时先取 mean-cos Top-2500 再精算 MaxSim 的截断；对全池每个微块分批（`V8_BATCH=64`）完成 ColBERT MaxSim，query 逐 token 用池内 IDF 加权。情景池只追加，永不覆写、永不淘汰（AR 无"新值覆盖旧值"语义）。
+3. **邻域扩展**：检索命中情景微块后，按句序向前后各扩展 `AR_V8_NEIGHBOR=2` 个相邻窗口（时间连续性）。
+4. 拼给 LLM 的单元上限 `AR_V8_CTX_MAX_UNITS=40`，状态池附带 `AR_V8_TOPK_STATE=4` 个状态单元。
+
+### v8 vs v7 对照表（AR 四切片，v100-2 全量）
+
+| 切片 | n | v7 基线 | v8 (DM-ELSM) | Δ |
+|---|---|---|---|---|
+| eventqa_65536 | 500 | 0.7240 | 0.7100 | −0.0140 |
+| eventqa_131072 | 500 | 0.5620 | 0.5120 | −0.0500 |
+| eventqa_full | 500 | 0.3500 | **0.3820** | **+0.0320** |
+| longmemeval_s* | 300 | 0.2767 | **0.3167** | **+0.0400** |
+
+详细分题型与运行备注见 `results/summary_ar_v8.md`。
+
+### v8 结论与披露
+
+1. **长上下文切片 v8 超基线**：eventqa_full（40.7万–74.6万 token）+0.0320、longmemeval_s*（36万–39万 token）+0.0400。全池无截断检索（废除 n>3500 截断）在超长上下文上收益最大。
+2. **短上下文略低**：eventqa_65536 −0.0140、eventqa_131072 −0.0500。微块粒度（3 句滑窗）+ 40 单元拼块上限在 65k/131k 上弱于 v7 的 128-token 块检索。
+3. **长上下文建池成本高**：eventqa_full 各 ctx 建池 627–8894s（episodic 1.2万–2.2万 / state 1.2k–4.9k 单元，dup=0）。
+4. **长上下文 OOM 修复**：`v8_slotpool.encode_words` 分批编码（`V8_ENCODE_BS=1024`）+ 逐切片 `.cpu()` 回传；`run_ar_v7.py` generate 前 `empty_cache`，OOM 渐进截短重试（16k/8k/4k）。
+5. **GPU 环境**：GPU1 全程被外部进程占用（28GB），四切片用 GPU0+GPU2 并行跑完；GPU 选择不影响指标（greedy decode）。
+6. 上表的 v7 基线为 2026-10-18 同脚本 `AR_MODE=v7` 的全量结果（见下节），四切片均为 500/500（eventqa）与 300（longmemeval 5 ctx × 60 题）。
+
 ## 最终结论（v7，2026-10-18）——自适应弹性槽位池打通 6K→262K 全长度
 
 Conflict_Resolution 全量 8 切片 × 100 题（共 800 题，无采样）：
@@ -133,12 +168,15 @@ v2 架构（clean 重编码读出）：
 
 ## 文件
 
-- `v7_slotpool.py` — **v7 自适应弹性槽位池**（当前主力，覆盖内置 SlotPool；默认无损弹性容量，8 切片全量结果见上）
+- `v8_slotpool.py` — **v8 双模态潜槽位记忆 DM-ELSM**（`extract_adaptive_units` 情景/状态分流 + EpisodicFastPool 全池无截断 IDF-MaxSim；经 `run_ar_v7.py AR_MODE=v8` 启用，AR 四切片结果见顶部）
+- `test_v8_slotpool.py` — v8 CPU 单测（stub tok + 小 EMB）
+- `results/summary_ar_v8.md` — v8 vs v7 四切片对照表与 longmemeval 分题型
+- `v7_slotpool.py` — **v7 自适应弹性槽位池**（CR 主力，覆盖内置 SlotPool；默认无损弹性容量，8 切片全量结果见上）
 - `run_group_b2_v7.py` — v7 runner（`import v7_slotpool` 注入 tok/EMB 后 `from v7_slotpool import *`）
 - `v6_slotpool.py` / `run_group_b2_v6.py` — v6（gid 精确覆写 + WHERE 倒装解析，POOL_MAX=5000）
 - `v5_slotpool.py` — v5（三元组解耦潜键 + Beam Chaining）
 - `run_group_b2.py` — B2 主脚本 **v4**（大池 + 主谓组去重 + Top-15 检索读出 + 加权 key，SF=0.86/0.87）
-- `run_ar_v7.py` — Accurate_Retrieval runner（分块证据池；四切片已全部跑完，见下节）
+- `run_ar_v7.py` — Accurate_Retrieval runner（`AR_MODE=v7|v8|plain`；v7 四切片结果见下节，v8 见顶部）
 - `smoke_b2.py` — smoke 测试（1 chunk + 2 个已知答案问题，验证召回/覆写/输出内容）
 - `run_group_b.py` — B1 chunk 级增益脚本（已放弃，留作参考）
 - `diag1_golden_chunk.py` — 诊断1：golden chunk 单块读出（证明 delta state 无独立读出能力，SF=0.12）
@@ -159,7 +197,7 @@ B2_POOL_MAX=5000 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_mh_2
 python smoke_b2.py
 ```
 
-## Accurate_Retrieval（v7 已跑完，2026-10-18）
+## Accurate_Retrieval（v7 已跑完，2026-10-18；v8 见顶部 "最新进展"）
 
 跨任务族验证：`run_ar_v7.py` 在 v100-2（V100 32GB）上完成全部 4 个可用切片。
 数据从磁盘读（`/share/latent/MemoryAgentBench/data/Accurate_Retrieval-00000-of-00001.parquet`），
