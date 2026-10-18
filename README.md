@@ -138,6 +138,7 @@ v2 架构（clean 重编码读出）：
 - `v6_slotpool.py` / `run_group_b2_v6.py` — v6（gid 精确覆写 + WHERE 倒装解析，POOL_MAX=5000）
 - `v5_slotpool.py` — v5（三元组解耦潜键 + Beam Chaining）
 - `run_group_b2.py` — B2 主脚本 **v4**（大池 + 主谓组去重 + Top-15 检索读出 + 加权 key，SF=0.86/0.87）
+- `run_ar_v7.py` — Accurate_Retrieval runner（分块证据池；四切片已全部跑完，见下节）
 - `smoke_b2.py` — smoke 测试（1 chunk + 2 个已知答案问题，验证召回/覆写/输出内容）
 - `run_group_b.py` — B1 chunk 级增益脚本（已放弃，留作参考）
 - `diag1_golden_chunk.py` — 诊断1：golden chunk 单块读出（证明 delta state 无独立读出能力，SF=0.12）
@@ -158,7 +159,54 @@ B2_POOL_MAX=5000 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_mh_2
 python smoke_b2.py
 ```
 
-环境：v100-1（V100 32GB），transformers 5.19.0，BASE=Qwen3-4B-Instruct-2507，ADAPTER=declare-lab/delta-mem_qwen3_4b-instruct。SRC 参数须传完整名（如 `factconsolidation_sh_6k`）。
+## Accurate_Retrieval（v7 已跑完，2026-10-18）
+
+跨任务族验证：`run_ar_v7.py` 在 v100-2（V100 32GB）上完成全部 4 个可用切片。
+数据从磁盘读（`/share/latent/MemoryAgentBench/data/Accurate_Retrieval-00000-of-00001.parquet`），
+按 `metadata.source` 过滤。与 CR 管线刻意不同的两点：池语义改为"保留"而非"覆写"（`ChunkPool`，
+句子块 128 token + 文本去重 + 只追加，永不淘汰）；检索加时序锚定（EventQA 用
+`metadata.previous_events` 最后一条事件定位块，mean 粗筛 → MaxSim 精排，向后取 `AR_EQA_WIN=4` 块；
+LongMemEval_s* 用 MaxSim rerank 的 top-12 块）。`AR_MODE=plain` 关掉锚定与 rerank，作同脚本内基线。
+
+### AR 最终结果
+
+| 切片 | SF | eventqa_recall | n | 上下文 tokens | 结果文件 |
+|---|---|---|---|---|---|
+| eventqa_65536 | **0.7240** | 0.7240 | 500 | 65,755–66,426 | `results/ar_v7_eventqa_65536.jsonl` |
+| eventqa_131072 | **0.5620** | 0.5620 | 500 | 131,512–133,024 | `results/ar_v7_eventqa_131072.jsonl` |
+| eventqa_full | **0.3500** | 0.3500 | 500 | 407,175–745,586 | `results/ar_v7_eventqa_full.jsonl` |
+| longmemeval_s* | **0.2767** | 0.0000（不适用） | 300 | 360,057–392,906 | `results/ar_v7_longmemeval_s.jsonl` |
+
+### 四点披露（必读）
+
+1. **`AR_CTX_MAX_TOK=0` 全上下文不截断**：证据池只做块检索，不受模型 262k 窗口约束
+   （eventqa_full 上下文最高 745k tokens 也不截尾部）。这是本方法与官方 stuff-context 基线的
+   结构性差异，报告时须写明。
+2. **LongMemEval 超窗为已知优势**：360k+ 上下文超出模型 262k 窗口，stuff 基线无法完整处理，
+   而本方法（块检索 + clean 重编码）不受影响，该切片分数需结合此结构性优势解读。
+3. **ruler_qa1_197K / ruler_qa2_421K 未跑**：被 `run_ar_v7.py` 显式拒绝——这两个切片需要
+   choice 专用指标（非 substring exact match），脚本未实现，未产出任何结果。
+4. **GPU 环境备注**：eventqa_full 原计划 v100-2 GPU1，但 GPU1 被外部进程占满（30.7GB，
+   宿主 pid 不可见），改用 GPU0（与 claim_gpu 叠加峰值 ~11.8GB，无 OOM）。GPU 选择不影响
+   指标（greedy decode、do_sample=False）。
+
+### AR 运行环境
+
+- 机器：v100-2（V100 32GB），复用 `launch_ar2.sh` 环境
+- transformers 5.19.0，BASE=Qwen3-4B-Instruct-2507，ADAPTER=declare-lab/delta-mem_qwen3_4b-instruct
+- 全部 500/500（eventqa）与 300 行（longmemeval 5 ctx × 60 题）落盘，SF 与 FINAL 日志一致
+- 指标走官方 `post_process`：SF（`substring_exact_match`）+ EventQA 的 `eventqa_recall`
+
+```bash
+# eventqa_65536 / longmemeval_s* 各一次；GPU6/7 目前空闲（各 3.3 GiB 占用）
+DELTA_MEM_SCAN_IMPL=torch PYTHONPATH=/share/delta-Mem:/share/MemoryAgentBench \
+/opt/conda/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
+/opt/conda/bin/python /share/exp4group/run_ar_v7.py 'longmemeval_s*' 7
+# 同脚本内基线（纯均值 top-K，不 rerank/不锚定）
+AR_MODE=plain /opt/conda/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
+# smoke（1 个上下文 × 3 题）
+AR_LIMIT_ROWS=1 AR_LIMIT_Q=3 /opt/conda/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
+```
 
 ## 技术备注（transformers 5.19.0）
 
