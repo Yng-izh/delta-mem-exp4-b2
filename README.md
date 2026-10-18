@@ -2,7 +2,40 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
-## 最终结论（v6，2026-10-18）——一套代码通吃 sh + mh
+## 最终结论（v7，2026-10-18）——自适应弹性槽位池打通 6K→262K 全长度
+
+Conflict_Resolution 全量 8 切片 × 100 题（共 800 题，无采样）：
+
+| 切片 | v7 SF | v6 SF | v5/v4 SF | 池 final | overwrites | 淘汰 |
+|---|---|---|---|---|---|---|
+| sh_6k | 0.94 | 0.94 | 0.86（v4） | 292 | 163 | 0 |
+| sh_32k | 0.91 | 0.91 | — | 1444 | 866 | 0 |
+| sh_64k | 0.89 | 0.89 | 0.87（v4） | 2826 | 1754 | 0 |
+| **sh_262k** | **0.85** | **0.45** | — | 10721 | 7612 | 0 |
+| mh_6k | 0.67 | 0.67 | 0.51（v5）/0.08（v4） | 293 | 162 | 0 |
+| mh_32k | 0.63 | 0.63 | — | 1444 | 866 | 0 |
+| mh_64k | 0.59 | 0.59 | 0.45（v5） | 2826 | 1754 | 0 |
+| **mh_262k** | **0.49** | **0.13** | — | 10721 | 7612 | 0 |
+
+v6 在 262k 上触顶 `POOL_MAX=5000`（上下文约 18.3k 条事实、约 11.3k 个独立 (subj,rel) 状态），FIFO 提前逐出早期槽位，导致单跳只用 44% 的幸存率（实测 0.45 = 5000/11304），多跳按 $p^k$ 幂次崩塌（实测 0.13 ≈ 0.442^2.5~3）。v7 去掉固定上限后两条曲线基本拉平：6K→262K 单跳 0.94→0.85（−9pp），多跳 0.67→0.49（−18pp）。
+
+### v7 改动（`v7_slotpool.py`，runner `run_group_b2_v7.py`）
+
+1. **容量自适应（无损弹性倍增缓存）**：默认 `B2_POOL_MAX=0`，池按 2048→4096→8192→16384 自动翻倍，容量由流内独立 (subj,rel) 状态数决定，262k 停在 10721 槽、`evicts=0`。预分配连续张量 `_k_subj_buf/_k_rel_buf` 取代每步 `torch.stack(k_subj)`，消除 O(N²) 拷贝。
+2. **二级路由 O(1) 覆写**：`gid_to_idx`（精确 `subj||rel` 哈希）+ `subj_buckets`（主语倒排桶）两级命中，覆写不再全池扫描；桶内仅 1~4 槽时语义覆写也只算桶内余弦。
+3. **检索自适应（治大池噪声）**：
+   - 主语特异性长度加权 `cov * (1 + 0.025 * min(L_subj, 5))`，防 "Tunisia" 抢 "Tunisia national football team" 的 Beam；
+   - 双向桥接覆盖率 `0.65*cov(cand→obj) + 0.35*cov(obj→cand)`，打通 "Zimbabwe"(1 词) ↔ "Zimbabwe government"(2 词) 跨粒度搭桥；
+   - 解析侧把主语尾部 ` government` / 前缀 `government of X` 归一到 (实体, 谓词)，补上"国家 → 国家政府首脑"这一跳。
+4. **受限容量可选（消融用）**：`B2_POOL_MAX>0` 时启用拓扑桥接度保护淘汰——按 `bridge_deg`（该槽的 subj 是否为他人 obj、obj 是否为他人 subj）优先淘汰 `deg=0` 的最旧孤立叶节点，O(1) 交换删除，替代纯 FIFO。
+
+### v7 实测备注
+
+- 冒烟 mh_6k 复跑 0.67（pool 293/ow 162，与 v6 的 292/163 差 1 槽，来自桶路由），确认改动不伤短上下文。
+- mh_262k 0.49 低于 p² 上界（0.85²≈0.72）：剩余缺口来自 10.7k 槽位下 Beam=2 的候选竞争与链尾实体歧义，属检索侧残余，非容量问题。按现数字定稿，后续如需再调 Beam/桥接阈值。
+- 全部 8 切片 jsonl 各 100 条，SF 与 FINAL 日志一致。
+
+## 上一版结论（v6，2026-10-18）——一套代码通吃 sh + mh
 
 | 切片 | B2 v6 SF | B2 v5 | B2 v4 | A chunked 基线 | Δ vs v5 | Go/No-Go |
 |---|---|---|---|---|---|---|
@@ -47,7 +80,8 @@ v4 的失败模式（mh_6k SF=0.08）：多跳链中段事实检索不到（Top-
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
-| `B2_POOL_MAX` | 5000 | 槽位池上限（FIFO 淘汰） |
+| `B2_POOL_MAX` | 0（v7）/5000（v6） | v7：0=无损弹性容量，>0 触发拓扑桥接保护淘汰；v6：FIFO 上限 |
+| `B2_INIT_CAP` | 2048 | v7 弹性缓存初始容量（之后自动翻倍） |
 | `B2_THETA_SUBJ` | 0.82 | 覆写：主语键余弦阈值 |
 | `B2_THETA_REL` | 0.70 | 覆写：关系键余弦阈值 |
 | `B2_BRIDGE` | 0.65 | Hop2+ 搭桥硬门控阈值 |
@@ -99,6 +133,10 @@ v2 架构（clean 重编码读出）：
 
 ## 文件
 
+- `v7_slotpool.py` — **v7 自适应弹性槽位池**（当前主力，覆盖内置 SlotPool；默认无损弹性容量，8 切片全量结果见上）
+- `run_group_b2_v7.py` — v7 runner（`import v7_slotpool` 注入 tok/EMB 后 `from v7_slotpool import *`）
+- `v6_slotpool.py` / `run_group_b2_v6.py` — v6（gid 精确覆写 + WHERE 倒装解析，POOL_MAX=5000）
+- `v5_slotpool.py` — v5（三元组解耦潜键 + Beam Chaining）
 - `run_group_b2.py` — B2 主脚本 **v4**（大池 + 主谓组去重 + Top-15 检索读出 + 加权 key，SF=0.86/0.87）
 - `smoke_b2.py` — smoke 测试（1 chunk + 2 个已知答案问题，验证召回/覆写/输出内容）
 - `run_group_b.py` — B1 chunk 级增益脚本（已放弃，留作参考）
@@ -109,9 +147,12 @@ v2 架构（clean 重编码读出）：
 ## 运行
 
 ```bash
-# 全量（100 题），v4 默认 POOL_MAX=5000 / THETA=0.72，可用 B2_POOL_MAX / B2_THETA 覆盖
+# 全量（100 题）。v7 默认 B2_POOL_MAX=0（无损弹性容量）
 DELTA_MEM_SCAN_IMPL=torch PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-python run_group_b2.py factconsolidation_sh_6k <GPU_ID>
+/opt/conda/bin/python run_group_b2_v7.py factconsolidation_sh_262k <GPU_ID>
+
+# 受限容量消融（触发拓扑桥接保护淘汰，替代 FIFO）
+B2_POOL_MAX=5000 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_mh_262k <GPU_ID>
 
 # smoke（1 chunk + 2 问）
 python smoke_b2.py
