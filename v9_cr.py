@@ -335,7 +335,14 @@ class CRStatePool(v9.StatePool):
 
     # ---------------- 检索 ----------------
     def retrieve_multihop_context(self, query_text, hops=None, beam=None):
-        """多跳读出：返回按 serial 升序编号的 facts 块；dbg 写入 self.last_dbg。"""
+        """多跳读出，返回可直接拼进 prompt 的证据块；dbg 写入 self.last_dbg。
+
+        两种渲染（V9_CR_PATH_VIEW）：
+          - 1（默认）：先给至多 CR_PATHS 条完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标`，
+                       再列其余已选事实（OTHER SELECTED FACTS）；
+          - 0：平铺，按 serial 升序。
+        两种渲染的事实行都保留**全局 serial 编号**，反事实 Prompt 的"编号越大越新"仍成立。
+        """
         n = len(self)
         self.last_dbg = {"n_pool": n}
         if n == 0:

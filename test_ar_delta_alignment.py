@@ -69,6 +69,7 @@ def setup():
     R.tok = FakeTok()
     R.EMB = torch.randn(10000, 8)
     R.INPUTS_EMBEDS = False
+    R.READOUT_MODE = "prompt"      # 读出模式默认值（旧开关仅作别名）
     R.DELTA_RESTORE = True
     R.DELTA_WRITE = False
     R.model = FakeModel()
