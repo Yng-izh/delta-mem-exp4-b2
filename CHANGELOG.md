@@ -95,6 +95,19 @@
 | `test_v8_slotpool.py` | 57 | 全绿 |
 | `ar_diag.py --selftest` | 57 | 全绿 |
 
+### 环境阻塞（2026-10-20 实测，非本仓库问题）
+
+- `latent2` 的 transformers 4.51.3 **缺 `models/smollm3`**，而 `/share/delta-Mem/deltamem/core/
+  backbone_compat.py:3` 无条件 import 它 → `import deltamem` 直接 `ImportError`，
+  **任何评测都跑不起来**（`run_ar_v7.py` 会打印"缺少真实跑分依赖"）。
+- 同环境还缺 `nltk` / `rouge_score` / `editdistance` / `tiktoken`（`post_process` 依赖）。
+- 处理：不改共享 conda 环境，装 overlay 目录 `/share/exp4group/pylib_tf57`
+  （transformers 4.57.1 + tokenizers 0.22.2 + 上述四个包），运行时
+  `PYTHONPATH=/share/exp4group/pylib_tf57:/share/delta-Mem:/share/MemoryAgentBench`。
+  已实测 `import deltamem` + 模型加载 + 3 题冒烟通过（SF=1.0）。
+- 副作用：transformers 版本与历史 v7 结果不同，**跨版本数字不可直接比较**；
+  窗口扫描四组同栈，内部可比。
+
 ### 未做 / 未验证（不得在论文中声称）
 
 1. 真实 GPU 跑分：v9 AR、CR v9、EventQA 窗口扫描四组**均未执行**。

@@ -7,6 +7,10 @@
 #   SRC=eventqa_65536 GPU=0 OUTDIR=/share/exp4group/results/sweep bash ...
 set -euo pipefail
 
+# latent2 自带的 transformers 4.51.3 没有 models/smollm3，而 /share/delta-Mem 无条件
+# import 它 -> 直接 ImportError。用本地 overlay（4.57.1）覆盖，不动共享环境。
+OVERLAY="${OVERLAY:-/share/exp4group/pylib_tf57}"
+export PYTHONPATH="$OVERLAY:/share/delta-Mem:/share/MemoryAgentBench${PYTHONPATH:+:$PYTHONPATH}"
 PY="${PY:-/share/conda/envs/latent2/bin/python}"
 SRC="${SRC:-eventqa_65536}"
 GPU="${GPU:-0}"

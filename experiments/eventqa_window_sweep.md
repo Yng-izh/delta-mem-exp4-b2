@@ -20,6 +20,32 @@ v7/v8 的 EventQA 读出是**只向后取**：锚点单元之后 `EQA_WIN=4` 块
 - `anchor_answer_hit` 高、`answer_in_context` 低 → 定位对但窗口方向/宽度不够，正是本实验要测的。
 - 两者都高、SF 低 → 检索没问题，问题在生成或判分。
 
+## 环境前置（2026-10-20 实测，必须先修）
+
+`latent2` 自带 transformers 4.51.3 **没有** `models/smollm3`，而 `/share/delta-Mem` 的
+`deltamem/core/backbone_compat.py:3` 无条件 `from transformers.models.smollm3...`，
+于是 `import deltamem` 直接 `ImportError` —— **整个评测栈跑不起来**（不是本仓库的问题）。
+同环境还缺 `nltk` / `rouge_score` / `editdistance` / `tiktoken`（`post_process` 依赖）。
+
+处理：不改共享 conda 环境，装一个 overlay 目录，用 `PYTHONPATH` 覆盖：
+
+```bash
+pip install --target /share/exp4group/pylib_tf57 --no-deps transformers==4.57.1
+pip install --target /share/exp4group/pylib_tf57 --no-deps "tokenizers>=0.22.0,<=0.23.0"
+pip install --target /share/exp4group/pylib_tf57 nltk rouge_score editdistance tiktoken
+
+export PYTHONPATH=/share/exp4group/pylib_tf57:/share/delta-Mem:/share/MemoryAgentBench
+```
+
+`run_eventqa_window_sweep.sh` 已内置这段 `PYTHONPATH`。
+
+## 指标口径（必读）
+
+`anchor_answer_hit` / `answer_in_context` 都是**字符串包含**判定：gold answer 原文是否出现在
+锚点单元 / 最终窗口里。EventQA 的答案句在上下文中常用代词改写（"Debbie wore…" vs "She wore…"），
+所以**绝对值偏低是口径问题，不等于检索失败**。本实验只用它做四组窗口的**相对比较**；
+要绝对覆盖度必须引入事件 ID 或人工标注，当前管线没有。
+
 ## 扫描配置
 
 | 组 | Back | Ahead | 检验的假设 |
