@@ -2,6 +2,23 @@
 
 本仓库的实验记录按版本追加。指标一律注明"由哪一版代码产出"，避免把重构前数字误当重构后结果。
 
+## [docs] — 2026-10-20 — 新增 `ARCHITECTURE.md`（预期架构）+ 环境路径订正
+
+### Added
+
+- **`ARCHITECTURE.md`**：描述当前**预期架构**（DM-ELSM 双模态弹性潜槽位记忆），而非完成清单。
+  含 4 条设计不变量（全池不截断 / 先分数后位置 / 时间是数据 / 读出走潜层）、数据流图、组件契约表、
+  两条合法潜层读出路径（A: delta 状态 + 快照恢复；B: `inputs_embeds` + 槽位潜向量）、参数表、
+  实现状态矩阵（`已实现` / `已接线·未验证` / `规划中`）、5 项已知风险与 P0–P5 演进路线。
+- README 顶部与"文件"章节加入指向该文档的入口。
+
+### Changed
+
+- README「运行」章节补充**环境订正**：`/share/conda/envs/latent2/bin/python`（Python 3.12.4 +
+  torch 2.8.0+cu126 + transformers 4.51.3，2026-10-20 重建）；明确**不得再带 `t28` / `pylib5`
+  叠加层**（新环境下会使 `import torch` 失败、dry-run 退化为 `cuda_initialized=n/a`）。
+- 「v9 真实跑分」示例命令由 `/opt/conda/bin/python` 改为重建后的解释器路径。
+
 ## [v9] — 2026-10-20 — 确定性 Bug 修复 + 逐题诊断 + AR 检索重写 + CR 强化 + Delta 对齐
 
 **性质：代码 / 可诊断性重构，不含任何新指标。** 本轮按硬约束只做 dry-run（`py_compile` / CPU 单测 / `--dry-run`），

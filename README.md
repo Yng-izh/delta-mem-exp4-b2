@@ -2,6 +2,9 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
+> **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+> 本文按时间倒序记录版本进展与实测数字。
+
 ## 最新进展（v9，2026-10-20）——确定性 Bug 修复 + 逐题诊断 + AR 检索重写 + CR 强化 + Delta 对齐
 
 **结论先行**：v9 是**代码 / 可诊断性重构**。本轮按硬约束只做 dry-run（`py_compile` / CPU 单测 / `--dry-run`），
@@ -271,6 +274,7 @@ v2 架构（clean 重编码读出）：
 
 ## 文件
 
+- `ARCHITECTURE.md` — **当前预期架构设计**（设计不变量、数据流、组件契约、两条潜层读出路径、参数表、实现状态矩阵、风险与演进路线）
 - `v9_slotpool.py` — **v9 AR 检索**（非重叠单句/微块索引 + 分数优先 Top-K + EventQA 后向非对称扩展 + 时间戳参与打分/时序重排 + 第 18 层混合稠密打分；`AR_MODE=v9`）
 - `v9_cr.py` — **v9 CR 强化**（主语+关系双阈值覆写 + Beam=6 ego-graph + 双跳链联合打分 + 反事实 Prompt；`CR_MODE=v9`）
 - `ar_diag.py` — 逐题诊断（`retrieved_* / answer_in_retrieved / answer_in_context / recall_at_k`）+ Recall@K 汇总 CLI
@@ -292,6 +296,14 @@ v2 架构（clean 重编码读出）：
 - `results/` — 运行日志与 jsonl 结果（v4 最终 + 历史版本见 git 历史）
 
 ## 运行
+
+> **环境（2026-10-20 重建）**：`/share/conda/envs/latent2/bin/python`
+> = Python 3.12.4 + torch 2.8.0+cu126 + transformers 4.51.3。
+> 重建脚本 `env_rebuild.sh`，日志 `logs/env_rebuild.log`。
+> **不要再带 `t28` / `pylib5` 这两个 PYTHONPATH 叠加层**——它们是旧环境缺包时的补丁，
+> 在新环境下会让 `import torch` 直接失败（`cuda_initialized` 退化为 `n/a`）。
+> 正确前缀：`PYTHONPATH=/share/delta-Mem:/share/MemoryAgentBench`。
+> 架构说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ```bash
 # 全量（100 题）。v7 默认 B2_POOL_MAX=0（无损弹性容量）
@@ -330,7 +342,7 @@ python3 eval_longmemeval_judge.py --input results/ar_v9_eventqa_65536.jsonl \
 ```bash
 # AR v9（非重叠索引 + 分数优先 + EventQA 非对称扩展）
 AR_MODE=v9 DELTA_MEM_SCAN_IMPL=torch PYTHONPATH=/share/delta-Mem:/share/MemoryAgentBench \
-/opt/conda/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
+/share/conda/envs/latent2/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
 
 # 叠第 18 层混合稠密打分（默认关闭）
 AR_MODE=v9 AR_V9_L18=1 ... run_ar_v7.py eventqa_65536 6
@@ -339,7 +351,7 @@ AR_MODE=v9 AR_V9_L18=1 ... run_ar_v7.py eventqa_65536 6
 AR_MODE=v9 AR_DELTA_WRITE=1 ... run_ar_v7.py eventqa_65536 6
 
 # CR 强化
-CR_MODE=v9 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_sh_64k 6
+CR_MODE=v9 /share/conda/envs/latent2/bin/python run_group_b2_v7.py factconsolidation_sh_64k 6
 ```
 
 ## Accurate_Retrieval（v7 已跑完，2026-10-18；v8 见顶部"上一版进展"，v9 见顶部"最新进展"）
