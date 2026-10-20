@@ -13,6 +13,13 @@
 #       检索同用 IDF-MaxSim。
 # 依赖调用方注入（同 v6/v7 约定）：v8_slotpool.tok = tok ; v8_slotpool.EMB = EMB。
 # CPU 可测：注入 stub tok + 小 EMB 即可跑全部逻辑单测。
+#
+# v8.1（确定性 Bug 修复，接口不变）：
+#   Bug1 cur_ts 第二轮污染 —— 逐句预计算 resolved_ts[i]，窗口/状态两轮只读；
+#        窗口继承"起点之前最近一次"显式时间戳，不再继承全篇末尾时间戳。
+#   Bug2 512 词 span 偏移 —— 先按 UNIT_MAX_WORDS 截断再记 span；零 token 兜底不再推进 off。
+#   Bug3 ev 时间触发 —— ev = 事件动词 or 显式时间标记（与 README/设计一致）；
+#        state 只收无时间标记、无事件动词的稳定陈述句。
 
 import os
 import re
@@ -73,22 +80,32 @@ def extract_adaptive_units(context, win=WIN):
     """情景/状态自适应分流。
     返回 (episodic_units, state_units)：
       episodic unit: {"text", "sents", "start", "end", "ts", "ts_inherited"}
-      state unit:    {"text", "start", "end", "ts"}
+      state unit:    {"text", "start", "end", "ts", "ts_inherited"}
     规则：
-      - 3 句滑窗（stride=1）为情景微块；窗口任一句含时间标记或事件动词 → episodic；
-      - 不落入任何情景窗口核心句（单句成窗判定）的稳定陈述句 → state；
-      - 时间戳继承：窗口无显式标记时继承窗口起点前最近的时间戳。
+      - 3 句滑窗（stride=1）为情景微块；窗口任一句含【显式时间标记】或【事件动词】→ episodic；
+      - 不落入任何情景窗口的稳定陈述句（无显式时间标记、无事件动词）→ state；
+      - 时间戳继承：窗口内无显式标记时，继承窗口起点之前最近的一次显式时间戳
+        （不是全篇末尾时间戳）。
+    v8.1 修复三个确定性 Bug：
+      Bug1 cur_ts 第二轮污染：旧版首轮扫描结束后 cur_ts 停留在全篇最后一个时间戳，
+           第二轮窗口/状态判定直接复用它（且状态轮还继续改写它），导致【位于任何时间标记之前】
+           的单元被写入【文档末尾】的时间戳。现改为首轮一次性预计算逐句 resolved_ts[i]
+           （= 该位置之前最近显式时间戳），两轮只读、不再跨轮改写。
+      Bug3 ev 时间触发：旧版 ev 只看事件动词，纯时间句（含 "In 2001" 但无过去时动词）落进
+           state，与"时间标记或事件动词 → episodic"的设计矛盾。现 ev 同时接受显式时间标记。
     """
     sents = split_sentences(context)
     n = len(sents)
-    ts_at = [None] * n          # 每句自己的显式时间戳
-    is_event = [False] * n      # 每句是否事件句
-    cur_ts = None
+    ts_at = [None] * n          # 每句自己的显式时间戳（仅显式，用于触发与 ts_inherited）
+    resolved_ts = [None] * n    # 逐句"最近一次显式时间戳"（含自身），继承用，只读
+    is_event = [False] * n      # 每句是否事件句（仅事件动词）
+    last_ts = None
     for i, s in enumerate(sents):
         m = TIMESTAMP_RE.search(s)
         if m:
-            cur_ts = m.group(0)
-            ts_at[i] = cur_ts
+            last_ts = m.group(0)
+            ts_at[i] = last_ts
+        resolved_ts[i] = last_ts
         is_event[i] = bool(EVENT_HINT_RE.search(s))
 
     episodic, state = [], []
@@ -99,8 +116,11 @@ def extract_adaptive_units(context, win=WIN):
             break
         end = min(i + win - 1, n - 1)
         explicit = next((ts_at[j] for j in range(i, end + 1) if ts_at[j]), None)
-        inherited = explicit if explicit is not None else cur_ts
-        ev = any(is_event[j] for j in range(i, end + 1))
+        # 继承源：窗口起点之前最近一次显式时间戳（i==0 时无前文可继承）
+        prev_ts = resolved_ts[i - 1] if i > 0 else None
+        inherited = explicit if explicit is not None else prev_ts
+        # Bug3：显式时间标记同样触发 episodic（纯时间句不再落入 state）
+        ev = any(is_event[j] or ts_at[j] is not None for j in range(i, end + 1))
         if ev:
             episodic.append({
                 "text": " ".join(w), "sents": list(w), "start": i, "end": end,
@@ -109,14 +129,13 @@ def extract_adaptive_units(context, win=WIN):
             for j in range(i, end + 1):
                 state_covered[j] = True
 
-    # 状态单元：未被情景窗口覆盖的稳定陈述句（无事件动词）
+    # 状态单元：未被情景窗口覆盖的稳定陈述句（无显式时间标记、无事件动词）
     for i, s in enumerate(sents):
-        if state_covered[i] or is_event[i]:
+        if state_covered[i] or is_event[i] or ts_at[i] is not None:
             continue
-        m = TIMESTAMP_RE.search(s)
-        if m:
-            cur_ts = m.group(0)
-        state.append({"text": s, "start": i, "end": i, "ts": m.group(0) if m else cur_ts})
+        # Bug1：只读 resolved_ts[i]（该句之前最近的时间戳），不再复用/改写跨轮 cur_ts
+        state.append({"text": s, "start": i, "end": i, "ts": resolved_ts[i],
+                      "ts_inherited": resolved_ts[i] is not None})
     return episodic, state
 
 
@@ -137,6 +156,7 @@ def _content_words(text):
 
 
 ENCODE_BS = int(os.environ.get("V8_ENCODE_BS", "1024"))   # 词级编码分批大小（防长上下文 OOM）
+UNIT_MAX_WORDS = int(os.environ.get("V8_UNIT_MAX_WORDS", "512"))  # 单元词级硬截断（建池与 IDF 共用）
 
 
 def encode_words(words):
@@ -194,11 +214,14 @@ class _UnitStore:
         if not uniq:
             return
         # 展平全部词一次编码
+        # Bug2 512 词 span 偏移：旧版 spans 用未截断的 len(ws) 记账，却只 extend(ws[:512])，
+        # 长单元（>512 词）的 span 会越过自身边界、吃进后续单元的词，并让 off 偏移累积，
+        # 导致后续单元的 tokv/words/df 全部错位。现改为【先截断再记账】。
         all_words, spans = [], []
         for text, _, _ in uniq:
-            ws = _content_words(text)
+            ws = _content_words(text)[:UNIT_MAX_WORDS]
             spans.append((len(all_words), len(all_words) + len(ws)))
-            all_words.extend(ws[:512])
+            all_words.extend(ws)
         vecs_flat, counts = encode_words(all_words)       # [Σtokens, d]
         off = 0
         for wi, (text, meta, k) in enumerate(uniq):
@@ -206,14 +229,14 @@ class _UnitStore:
             w_list = all_words[s:e]
             c_counts = counts[s:e]
             L = sum(c_counts)
-            if L == 0:
-                L = 1
-                v = torch.zeros((1, vecs_flat.shape[1]))
-                tokv = F.normalize(v, dim=-1)
+            if L <= 0:
+                # 兜底：零 token 单元用零向量占位。vecs_flat 没有对应行，
+                # 因此【不推进 off】——推进会让后续所有单元整体偏移。
+                tokv = torch.zeros((1, vecs_flat.shape[1]), dtype=torch.float32)
                 w_list, c_counts = [w_list[0] if w_list else "<empty>"], [1]
             else:
                 tokv = vecs_flat[off:off + L]
-            off += L
+                off += L
             self.texts.append(text)
             self.metas.append(meta)
             self.tokv.append(tokv)
@@ -377,7 +400,7 @@ class StatePool(_UnitStore):
 
     def _mean_only(self, text):
         dev = EMB.device if EMB is not None else torch.device("cpu")
-        ws = _content_words(text)[:512]
+        ws = _content_words(text)[:UNIT_MAX_WORDS]
         qv, _c = encode_words(ws)
         qe = F.normalize(qv.to(dev), dim=-1)
         qm = F.normalize(qe.mean(dim=0), dim=0)

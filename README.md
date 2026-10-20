@@ -2,17 +2,120 @@
 
 基于 delta-mem（declare-lab/delta-mem_qwen3_4b-instruct）+ MemoryAgentBench（Conflict_Resolution 切片）的对照实验，验证"流式事实槽位原位覆写（B2）"能否提升 Conflict Resolution 的 SF（substring exact match）。
 
-## 最新进展（v8，2026-10-19）——双模态潜槽位记忆 DM-ELSM（AR 管线）
+## 最新进展（v9，2026-10-20）——确定性 Bug 修复 + 逐题诊断 + AR 检索重写 + CR 强化 + Delta 对齐
+
+**结论先行**：v9 是**代码 / 可诊断性重构**。本轮按硬约束只做 dry-run（`py_compile` / CPU 单测 / `--dry-run`），
+**未跑任何真实评测、未加载模型权重、未初始化 CUDA、未占用 GPU**，因此**没有任何新指标数字**。
+下文出现的 v7 / v8 指标全部是重构前代码的历史结果，不能当作 v9 效果。
+
+### 1. v8 三个确定性 Bug 修复（`v8_slotpool.py`，接口零变更）
+
+| Bug | 症状 | 修复 |
+|---|---|---|
+| Bug1 `cur_ts` 第二轮污染 | 首轮扫描结束后 `cur_ts` 停在**全篇最后一个**时间戳，第二轮窗口/状态判定直接复用它（状态轮还继续改写它），导致位于任何时间标记**之前**的单元被写入"文档末尾"时间戳 | 首轮一次性预计算逐句 `resolved_ts[i]`（= 该位置之前最近一次显式时间戳），两轮只读；窗口无显式标记时继承 `resolved_ts[i-1]` |
+| Bug2 512 词 span 偏移 | `spans` 用未截断的 `len(ws)` 记账、却只 `extend(ws[:512])`，长单元 span 越过自身边界吃进后续单元的词；零 token 兜底分支还 `off += 1`，使后续单元 tokv 整体错位 | 先按 `UNIT_MAX_WORDS=512`（env `V8_UNIT_MAX_WORDS`）截断再记 span；零 token 分支**不**推进 `off` |
+| Bug3 `ev` 时间触发 | `ev` 只看事件动词，纯时间句（含 `In 2001` 但无过去时动词）落入 state，与"时间标记或事件动词 → episodic"的设计矛盾 | `ev` = 事件动词 **or** 窗口内显式时间标记；state 只收无显式时间标记且无事件动词的稳定陈述句 |
+
+- 合成 150 句上下文：旧版有 31 个情景单元被写入"文档末尾时间戳"，新版仅剩 2 个（窗口内确实含该时间戳句，属正常显式标记）。
+- 接口零变更：episodic unit 字段不变；state unit 只新增附加字段 `ts_inherited`。`run_ar_v7.py` 只用 `start/end/texts/metas`，无需改动。
+- **披露**：v8 四切片指标（0.7100 / 0.5120 / 0.3820 / 0.3167）由**修复前**代码产出，修复后**未重跑**。
+
+### 2. AR 检索重构（`v9_slotpool.py`，`AR_MODE=v9`）
+
+针对 v8 的五个检索问题逐条改：
+
+1. **非重叠索引**：v8 用 3 句滑窗 stride=1，同一句最多出现在 3 个单元里（池膨胀 3 倍、Top-K 实际只覆盖 K/3 个不同句、位置排序有歧义）。v9 改为 `stride == block_sents`，`V9_BLOCK_SENTS=1` 即单句索引，每句恰好属于一个单元，Recall@K 与位置排序良定义。
+2. **先按分数选 Top-K、再按原文位置排序**：`retrieve()` 只按分数降序返回；`retrieve_ordered()` / `readout()` 只对**已选中的 K 个**按 `start` 排序，绝不做"全池按位置排序后截断"。
+3. **EventQA 后向非对称扩展**：`expand_backward(anchor, back=16, ahead=4)`——以"已发生事件"锚点为准，向前多取、向后少取（env `V9_EQA_BACK` / `V9_EQA_AHEAD`，含低/高边界裁剪）。v7 只向后取 4 块、v8 只在命中窗口两侧各扩 2 个，锚点之前的证据都拿不到。
+4. **时间戳参与打分与时序重排**：单元编码文本 = `In <ts>: <原文>`（`ts` 可为显式或继承），日期 token 因此参与 IDF-MaxSim；`texts` 仍保存原文，**拼给 LLM 的上下文没有人工前缀**。`temporal_rerank` 按 `|year_unit − year_query|` 指数衰减加成（`V9_TEMPORAL_TAU=2.0` / `V9_TEMPORAL_BONUS=0.15`），无年份单元不加分也不罚分。
+5. **第 18 层隐状态混合稠密打分**：`hybrid = (1−α)·IDF-MaxSim + α·((cos+1)/2)`，`α=V9_L18_ALPHA=0.3`、层号 `V9_L18_LAYER=18`；provider 注入（`fn(texts, kind) -> [N,d]`）或手工 `attach_layer18()` + `retrieve(q_hidden=...)`。provider 缺失 / 抛错 / 形状不符一律**静默退化为纯词面**，无模型路径不崩。
+
+另修一处 v8 读出缺陷：新增 `_cap_before_sort()`，把"全候选按位置排序 → `lines[:CTX_SENTS]`"改为"先按分数优先裁到情景配额（EventQA 以 anchor 为中心裁窗）→ 再按原文位置排序"。旧写法会截掉高分尾部单元（单测构造 11 个候选、旧实现丢 8 个）。
+
+### 3. 逐题诊断 JSONL + LongMemEval judge（两个新文件，仅脚本，未跑）
+
+- **`ar_diag.py`**：`record()` 产出逐题字段 `retrieved_slot_ids / retrieved_scores / retrieved_texts / retrieved_starts / used_slot_ids / answer_in_retrieved / answer_in_context / answer_hit_slot / answer_matches / recall_at_k / diag_status`。`hits` 必须是**分数降序**（Recall@K 依赖此顺序），`used_ids` 是实际拼进 prompt 的槽位。口径：NFKC + 小写 + 撇号删除 + 连字符折叠后子串匹配；gold 为 rubric（偏好类）标 `rubric_not_applicable` 并**剔除分母**；只有 `idxs` 的 legacy 记录标 `legacy_idxs_only`，分母只算可计算记录。CLI 支持 `--input / --summary-out / --enrich / --selftest`。
+- **`eval_longmemeval_judge.py`**：官方 `evaluate_qa` 口径的 LLM-as-Judge 后处理。6 题型模板（通用 / temporal off-by-one / knowledge-update 旧值容忍 / preference rubric）+ abstention 模板；`--prompt-source official` 可直接 import 官方 `get_anscheck_prompt`。OpenAI 兼容 `/chat/completions`（`temperature=0, max_tokens=10`）、线程池并发、重试退避、sha1 缓存断点续跑；verdict 复刻官方 `'yes' in text` 语义，另存 `verdict_strict` 审计。汇总含 overall / by_question_type，`parse_fail`/`error` 单列，abstention 单列不进主分母。`--dry-run` 只渲染 prompt 落盘（**零网络**），`--selftest` 用 monkeypatch 哨兵保证零网络。
+- **接入**：`run_ar_v7.py` 的 v7 / v8 / v9 / plain 四种模式每题都写诊断字段；诊断异常只写 `diag_status=diag_error`，不影响主指标。
+
+### 4. CR 强化（`v9_cr.py`，`CR_MODE=v9`；默认 `CR_MODE=v7`，历史行为不变）
+
+1. **主语 + 关系双阈值覆写**：`StatePool._should_merge` 覆写为"主语归一化精确匹配 + 关系谓词余弦 > `V9_CR_REL_THETA=0.80`"，替换 v8 的 mean-cos(0.92) 单阈值；以 `add_batch` 的 argmax 槽（实际覆写目标）为准。
+2. **Beam=6 ego-graph 第 1 跳**：Hop1 取 6 个主语门控种子后立刻并入每个种子的 ego 邻域（同主语其他属性 + 出边实体，`V9_CR_EGO_K=12`），不再只留 2 个孤立种子。
+3. **双跳链谓词联合打分**：`Score_chain = 0.40·subj_cov(target) + 0.30·(bridge1+bridge2)/2 + 0.30·(rel_mid+rel_tgt)/2`，两条边的谓词都与 query 谓词比较；输出按 serial 升序（配合"编号越大越新"）。
+4. **反事实强约束 Prompt**（`build_cr_prompt`）：OUTDATED 值禁止输出 / 冲突时只认最大编号 / 作答前做反事实自检 / 缺证据回 `unknown`。
+5. **接线**：`run_group_b2_v7.py` 加 `CR_MODE=v7|v9`（默认 v7），v9 分支注入 `v9_cr`、可选 CF Prompt、每题追加 `cr_dbg`，OUT 改 `v9groupB2_*.jsonl`，FINAL 打印 `CR_MODE`；非法值直接退出。
+
+### 5. Delta Memory 读出对齐（`run_ar_v7.py`）
+
+1. **写入移到查询前**：每个 context 起点 `reset_delta_mem_states` **一次**；随后、建池之前 `prepare_delta_memory(ctx)`——开写 → 512-token chunk 流式 forward → `finally` 关写 → 快照 clone。原"所有题目问完后才写 delta"的块已删除。先写后建池，保证 `AR_V9_L18=1` 时单元编码与 query 编码看到同一记忆状态。
+2. **查询期禁止 reset**：题目循环内不再出现 `reset_delta_mem_states`。
+3. **逐题快照恢复**：每题生成前 `delta_restore(snap)`（官方 `load_delta_mem_online_state`；缺该 API 时退回 `iter_delta_mem_modules` 手工 clone/restore；两套都缺则 `[warn]` 退化为 no-op，不中断跑分）。`AR_DELTA_RESTORE=0` 可关。
+4. **`inputs_embeds` 读出路径**：`AR_INPUTS_EMBEDS=1` 时 `EMB[ids]` → `model.generate(inputs_embeds=..., attention_mask=...)`，`output_len` 按"只返回新 token"计；OOM 渐进截短在两条路径下都生效。
+5. **可观测性**：每题 JSONL 新增 `delta: {write, restore, inputs_embeds, snapshot_layers}`；`--dry-run` 打印 delta 开关与 `state_api=ok/fallback`。
+
+### 6. dry-run 结论（本轮唯一的验证形式）
+
+| 检查 | 结果 |
+|---|---|
+| `py_compile` | 仓库内 **21/21** 个 `.py` 通过 |
+| CPU 单测 5 个文件 | `test_v9_slotpool` 95 / `test_v9_cr` 56 / `test_v8_slotpool` 56 / `test_ar_v9_wiring` 36 / `test_ar_delta_alignment` 27 断言，**全部 PASS** |
+| `ar_diag.py --selftest` | 43/43 |
+| `eval_longmemeval_judge.py --selftest` | 45/45（零网络） |
+| `run_ar_v7.py --dry-run` | `AR_MODE=v7 / v8 / v9 / plain` 四种均退出码 0，末行 `cuda_initialized=False model_loaded=False` |
+| `eval_longmemeval_judge.py --dry-run` | 合成 3 题渲染 3 条 prompt，未发起任何网络请求 |
+| 守卫断言 | 零网络、零 `transformers/pyarrow/deltamem` 导入、无文件写入、无残留进程 |
+
+环境事实：本机 Python 3.9.6 + torch 2.8.0（CPU，`device_count=0`），`transformers` / `pyarrow` / `deltamem` **缺失**——真实跑分路径本机不可执行，dry-run 已证明不依赖它们。
+
+### 7. 未验证项声明（必读）
+
+以下**全部未验证**，引用本文档时须一并说明：
+
+1. **没有任何 v9 指标**。真实 tokenizer / 模型下的 v9 建池与生成、以及五项检索改动对 SF / Recall 的影响，均未测量。
+2. **v8 三个 Bug 修复对历史指标的影响未知**：0.7100 / 0.5120 / 0.3820 / 0.3167 是修复前数字，未重跑对照。
+3. **`AR_V9_L18=1` 的 provider 前向未跑**（仅静态审查，默认关闭）；真实模型取 `hidden_states[18]` 的显存与耗时未知。
+4. **Delta Memory**：`/share/delta-Mem` 实际版本是否含 `get/load_delta_mem_online_state` 未确认（已做 fallback）；真实 Qwen3 `generate(inputs_embeds=...)` 行为、写入/恢复开销与指标影响未测。
+5. **`run_group_b2_v7.py` 未运行**：模块级 `from_pretrained` + `/share` 路径、无 `--dry-run`；CR v9 只由 `test_v9_cr.py` 覆盖池 / 双跳链 / Prompt / 调用序列。
+6. **`eval_longmemeval_judge.py` 未做真实判题**（未配 API key、未联网），只验证了 prompt 渲染与自测。
+7. **`ar_diag.py` 未跑真实 AR 结果**：只在 legacy CR JSONL 上验证不崩（全部标 `legacy_idxs_only`，applicable=0）。
+
+### v9 env 参数表
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `AR_MODE` | `v7` | `v7` / `v8` / `v9` / `plain` |
+| `AR_V9_EQA_BACK` | 16 | EventQA 锚点**前**取几句 |
+| `AR_V9_EQA_AHEAD` | 4 | EventQA 锚点**后**取几句（非对称） |
+| `AR_V9_CTX_MAX_UNITS` | 40 | 拼给 LLM 的单元上限 |
+| `AR_V9_TOPK_STATE` | 4 | 状态池附带单元数 |
+| `AR_V9_L18` | 0 | 第 18 层隐状态混合稠密打分开关 |
+| `AR_V9_L18_LAYER` | 18 | 取哪一层 hidden_states |
+| `V9_BLOCK_SENTS` | 1 | 非重叠单元句数（1=单句索引） |
+| `V9_UNIT_MAX_WORDS` | 512 | 单元词级硬截断 |
+| `V9_TOKV_BF16` | 1 | 逐 token 向量 bf16 存储（省内存） |
+| `V9_TEMPORAL_TAU` / `V9_TEMPORAL_BONUS` | 2.0 / 0.15 | 时序重排衰减尺度 / 加成上限 |
+| `V9_L18_ALPHA` | 0.3 | 稠密通道权重 α |
+| `V9_CR_REL_THETA` | 0.80 | CR 双阈值覆写的谓词余弦阈值 |
+| `CR_MODE` | `v7` | `v7`（基线）/ `v9`（CR 强化） |
+| `V9_CR_BEAM` / `V9_CR_EGO_K` | 6 / 12 | CR Hop1 种子数 / ego 邻域上限 |
+| `V9_CR_CF_PROMPT` | 1 | 反事实强约束 Prompt 开关（仅 CR_MODE=v9） |
+| `AR_DELTA_WRITE` / `AR_DELTA_RESTORE` | 0 / 1 | 查询前写 delta / 逐题恢复快照 |
+| `AR_INPUTS_EMBEDS` | 0 | 读出走 `inputs_embeds` 路径 |
+
+## 上一版进展（v8，2026-10-19）——双模态潜槽位记忆 DM-ELSM（AR 管线）
 
 v8 针对 Accurate_Retrieval（AR）管线引入双模态潜槽位记忆（DM-ELSM: Dual-Modal Episodic Latent Slot Memory，
 `v8_slotpool.py`，经 `run_ar_v7.py` 的 `AR_MODE=v8` 启用）。**CR（FactConsolidation）路径保持 v7 不动，向后兼容。**
+
+> ⚠️ 本节四切片指标由 **v8.1 Bug 修复前**的代码产出（见顶部 v9 第 1 节三个确定性 Bug），修复后**未重跑**。
 
 ### v8 方法
 
 1. **情景/状态自适应分流 `extract_adaptive_units`**：
    - 情景微块（episodic）：3 句滑窗（stride=1），任一句含时间标记或过去时事件动词的窗口成为独立检索单元；
    - 状态单元（state）：无时间标记、无事件动词的稳定事实句，单句成窗，StatePool 近重复语义合并（mean cos > `V8_STATE_THETA=0.92` 时新文本覆写旧槽）；
-   - 时间戳继承：显式时间标记（In 1997 / On March 3, 2001 / in the 1990s）写入 cur_ts，后续无标记窗口继承最近一次时间戳。
+   - 时间戳继承：显式时间标记（In 1997 / On March 3, 2001 / in the 1990s）记为逐句 `resolved_ts`，后续无标记窗口继承"起点之前最近一次"时间戳（v8.1 修复，见顶部）。
 2. **EpisodicFastPool：全池无截断 IDF-MaxSim 检索**：废除 v7 的 n>3500 时先取 mean-cos Top-2500 再精算 MaxSim 的截断；对全池每个微块分批（`V8_BATCH=64`）完成 ColBERT MaxSim，query 逐 token 用池内 IDF 加权。情景池只追加，永不覆写、永不淘汰（AR 无"新值覆盖旧值"语义）。
 3. **邻域扩展**：检索命中情景微块后，按句序向前后各扩展 `AR_V8_NEIGHBOR=2` 个相邻窗口（时间连续性）。
 4. 拼给 LLM 的单元上限 `AR_V8_CTX_MAX_UNITS=40`，状态池附带 `AR_V8_TOPK_STATE=4` 个状态单元。
@@ -168,15 +271,20 @@ v2 架构（clean 重编码读出）：
 
 ## 文件
 
-- `v8_slotpool.py` — **v8 双模态潜槽位记忆 DM-ELSM**（`extract_adaptive_units` 情景/状态分流 + EpisodicFastPool 全池无截断 IDF-MaxSim；经 `run_ar_v7.py AR_MODE=v8` 启用，AR 四切片结果见顶部）
-- `test_v8_slotpool.py` — v8 CPU 单测（stub tok + 小 EMB）
+- `v9_slotpool.py` — **v9 AR 检索**（非重叠单句/微块索引 + 分数优先 Top-K + EventQA 后向非对称扩展 + 时间戳参与打分/时序重排 + 第 18 层混合稠密打分；`AR_MODE=v9`）
+- `v9_cr.py` — **v9 CR 强化**（主语+关系双阈值覆写 + Beam=6 ego-graph + 双跳链联合打分 + 反事实 Prompt；`CR_MODE=v9`）
+- `ar_diag.py` — 逐题诊断（`retrieved_* / answer_in_retrieved / answer_in_context / recall_at_k`）+ Recall@K 汇总 CLI
+- `eval_longmemeval_judge.py` — LongMemEval 官方口径 LLM-as-Judge 后处理（`--dry-run` / `--selftest` 零网络）
+- `test_v9_slotpool.py` / `test_v9_cr.py` / `test_ar_v9_wiring.py` / `test_ar_delta_alignment.py` — v9 CPU 单测（stub tok + 小 EMB，无需模型/GPU）
+- `v8_slotpool.py` — **v8 双模态潜槽位记忆 DM-ELSM**（v8.1 已修 3 个确定性 Bug；`extract_adaptive_units` 情景/状态分流 + EpisodicFastPool 全池无截断 IDF-MaxSim；经 `run_ar_v7.py AR_MODE=v8` 启用，AR 四切片结果见顶部，**为修复前数字**）
+- `test_v8_slotpool.py` — v8 CPU 单测（stub tok + 小 EMB，含 3 个 Bug 的回归用例）
 - `results/summary_ar_v8.md` — v8 vs v7 四切片对照表与 longmemeval 分题型
 - `v7_slotpool.py` — **v7 自适应弹性槽位池**（CR 主力，覆盖内置 SlotPool；默认无损弹性容量，8 切片全量结果见上）
-- `run_group_b2_v7.py` — v7 runner（`import v7_slotpool` 注入 tok/EMB 后 `from v7_slotpool import *`）
+- `run_group_b2_v7.py` — v7 runner（`import v7_slotpool` 注入 tok/EMB 后 `from v7_slotpool import *`；`CR_MODE=v7|v9`，默认 v7）
 - `v6_slotpool.py` / `run_group_b2_v6.py` — v6（gid 精确覆写 + WHERE 倒装解析，POOL_MAX=5000）
 - `v5_slotpool.py` — v5（三元组解耦潜键 + Beam Chaining）
 - `run_group_b2.py` — B2 主脚本 **v4**（大池 + 主谓组去重 + Top-15 检索读出 + 加权 key，SF=0.86/0.87）
-- `run_ar_v7.py` — Accurate_Retrieval runner（`AR_MODE=v7|v8|plain`；v7 四切片结果见下节，v8 见顶部）
+- `run_ar_v7.py` — Accurate_Retrieval runner（`AR_MODE=v7|v8|v9|plain`，含 `--dry-run`；每题写诊断字段；v7 四切片结果见下节，v8 见顶部）
 - `smoke_b2.py` — smoke 测试（1 chunk + 2 个已知答案问题，验证召回/覆写/输出内容）
 - `run_group_b.py` — B1 chunk 级增益脚本（已放弃，留作参考）
 - `diag1_golden_chunk.py` — 诊断1：golden chunk 单块读出（证明 delta state 无独立读出能力，SF=0.12）
@@ -197,7 +305,44 @@ B2_POOL_MAX=5000 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_mh_2
 python smoke_b2.py
 ```
 
-## Accurate_Retrieval（v7 已跑完，2026-10-18；v8 见顶部 "最新进展"）
+### dry-run（零模型 / 零 GPU，本机可跑）
+
+```bash
+# 配置 + 依赖可导入性 + 两项纯 CPU 自检；四种 AR_MODE 都可
+python3 run_ar_v7.py eventqa_65536 --dry-run
+AR_MODE=v9 python3 run_ar_v7.py eventqa_65536 --dry-run
+
+# CPU 单测（stub tok + 小 EMB）
+for f in test_v9_slotpool.py test_v9_cr.py test_v8_slotpool.py \
+         test_ar_v9_wiring.py test_ar_delta_alignment.py; do python3 $f; done
+
+# 诊断 / 判题脚本自测（零网络）
+python3 ar_diag.py --selftest
+python3 eval_longmemeval_judge.py --selftest
+
+# judge 只渲染 prompt，不联网
+python3 eval_longmemeval_judge.py --input results/ar_v9_eventqa_65536.jsonl \
+    --dry-run --prompts-out /tmp/lme_prompts.jsonl
+```
+
+### v9 真实跑分（未执行，需 GPU 机器）
+
+```bash
+# AR v9（非重叠索引 + 分数优先 + EventQA 非对称扩展）
+AR_MODE=v9 DELTA_MEM_SCAN_IMPL=torch PYTHONPATH=/share/delta-Mem:/share/MemoryAgentBench \
+/opt/conda/bin/python /share/exp4group/run_ar_v7.py eventqa_65536 6
+
+# 叠第 18 层混合稠密打分（默认关闭）
+AR_MODE=v9 AR_V9_L18=1 ... run_ar_v7.py eventqa_65536 6
+
+# 查询前写 delta + 逐题恢复快照
+AR_MODE=v9 AR_DELTA_WRITE=1 ... run_ar_v7.py eventqa_65536 6
+
+# CR 强化
+CR_MODE=v9 /opt/conda/bin/python run_group_b2_v7.py factconsolidation_sh_64k 6
+```
+
+## Accurate_Retrieval（v7 已跑完，2026-10-18；v8 见顶部"上一版进展"，v9 见顶部"最新进展"）
 
 跨任务族验证：`run_ar_v7.py` 在 v100-2（V100 32GB）上完成全部 4 个可用切片。
 数据从磁盘读（`/share/latent/MemoryAgentBench/data/Accurate_Retrieval-00000-of-00001.parquet`），

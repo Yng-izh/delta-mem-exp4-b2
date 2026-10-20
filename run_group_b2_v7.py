@@ -32,11 +32,17 @@ KEY_TAIL_CUT   = 2          # 主谓 key：切掉句尾最后 2 个词
 WHITEN_MIN     = 10         # 去中心化仅当池内 key 数 > 10
 MAX_NEW_TOKENS = 24
 
+# CR 强化开关：v7=基线（默认，行为与历史结果完全一致）；v9=CR 强化路径
+CR_MODE   = os.environ.get("CR_MODE", "v7").strip().lower()
+CF_PROMPT = os.environ.get("V9_CR_CF_PROMPT", "1") == "1"   # 反事实强约束 Prompt（仅 v9）
+if CR_MODE not in ("v7", "v9"):
+    raise SystemExit(f"CR_MODE must be v7 or v9, got {CR_MODE!r}")
+
 SRC = sys.argv[1]; GPU = sys.argv[2]
 BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554"
 ADAPTER = "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5"
 PQ = "/share/hf_home/hub/datasets--ai-hyz--MemoryAgentBench/snapshots/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet"
-OUT = f"/share/exp4group/results/v7groupB2_{SRC}.jsonl"
+OUT = f"/share/exp4group/results/{'v9' if CR_MODE == 'v9' else 'v7'}groupB2_{SRC}.jsonl"
 
 tok = AutoTokenizer.from_pretrained(BASE)
 model = AutoModelForCausalLM.from_pretrained(BASE, torch_dtype=torch.bfloat16,
@@ -263,11 +269,20 @@ class SlotPool:
         return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
 
 reset_delta_mem_states(model)
-import v7_slotpool  # noqa: E402  (needs re/torch/F/tok/EMB in scope)
-v7_slotpool.tok = tok
-v7_slotpool.EMB = EMB
-from v7_slotpool import *  # noqa: E402,F403  覆盖本地 v4 SlotPool
-pool = SlotPool()
+if CR_MODE == "v9":
+    import v9_slotpool  # noqa: E402
+    import v9_cr        # noqa: E402
+    v9_slotpool.tok = tok
+    v9_slotpool.EMB = EMB
+    v9_cr.set_encoder(tok, EMB)
+    pool = v9_cr.CRStatePool()
+else:
+    import v7_slotpool  # noqa: E402  (needs re/torch/F/tok/EMB in scope)
+    v7_slotpool.tok = tok
+    v7_slotpool.EMB = EMB
+    from v7_slotpool import *  # noqa: E402,F403  覆盖本地 v4 SlotPool
+    pool = SlotPool()
+print(f"CR_MODE={CR_MODE} pool={type(pool).__name__}", flush=True)
 
 all_facts = extract_all_facts(ctx)
 print(f"extracted facts: {len(all_facts)} (numbered+fallback)", flush=True)
@@ -301,9 +316,13 @@ with torch.no_grad():
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
         block = pool.retrieve_multihop_context(q)
+        if CR_MODE == "v9" and CF_PROMPT:
+            user_msg = v9_cr.build_cr_prompt(qtxt, block)   # 反事实强约束 Prompt
+        else:
+            user_msg = f"{block}\n\n{qtxt}" if block else qtxt
         text = tok.apply_chat_template(
             [{"role": "system", "content": sys_msg},
-             {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
+             {"role": "user", "content": user_msg}],
             add_generation_prompt=True, tokenize=False)
         ids = tok(text, return_tensors="pt").input_ids.to(DEV)
         out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
@@ -319,6 +338,8 @@ with torch.no_grad():
              "memory_construction_time": 0, "query_time_len": 0},
             ans_norm, {"sub_dataset": SRC, "debug": False})
         rec = {"question_idx": qi, "query": q, "answer": a, "output": pred, **m}
+        if CR_MODE == "v9":
+            rec["cr_dbg"] = pool.last_dbg
         results.append(rec)
         with open(OUT, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -326,5 +347,5 @@ with torch.no_grad():
             sf = sum(r["substring_exact_match"] for r in results) / len(results)
             print(f"{qi+1}/{len(qs)} running SF={sf:.3f}", flush=True)
 sf = sum(r["substring_exact_match"] for r in results) / len(results)
-print(f"FINAL groupB2 {SRC}: SF={sf:.4f} n={len(results)} "
+print(f"FINAL groupB2 {SRC} [{CR_MODE}]: SF={sf:.4f} n={len(results)} "
       f"pool={len(pool)} overwrites={pool.n_overwrites}", flush=True)
