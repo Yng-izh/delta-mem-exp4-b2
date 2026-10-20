@@ -291,6 +291,35 @@ def test_inplace_replace_keeps_graph_keys():
     ok("retrieval sees new value", "Lyon" in block and "Paris" not in block)
 
 
+def test_subject_index_survives_eviction():
+    """索引唯一会伤精度的方式是"陈旧"：淘汰/覆写后必须指向活槽。
+
+    主语倒排只做候选枚举、不参与打分；但一旦残留死槽，覆写就会打到错位置。
+    这里逐条 upsert 检查索引与槽内容一致，并验证淘汰后覆写仍命中同主语槽。
+    """
+    pool = v9_cr.CRStatePool(pool_max=3)
+    for i, t in enumerate(["Alice was born in Paris.", "Bob was born in Rome.",
+                           "Carol was born in Lyon.", "Dave was born in Nice.",
+                           "Eve was born in Oslo."], 1):
+        pool.upsert(t, i)
+        bad = [(k, j) for k, v in pool._subj_index.items() for j in v
+               if j >= len(pool) or pool.cr_subj[j] != k]
+        ok(f"index consistent after upsert {i}", bad == [])
+        ok(f"index covers every slot {i}",
+           all(pool._subj_index.get(k) for k in set(pool.cr_subj)))
+    ok("capacity enforced", len(pool) <= 3)
+    ok("evictions counted", pool.n_evicts >= 1)
+
+    subj = pool.texts[0].split()[0]
+    n_before = len(pool)
+    pool.upsert(f"{subj} was born in Madrid.", 99)
+    ok("overwrite after eviction reuses slot", len(pool) == n_before)
+    ok("overwrite after eviction wrote new value", any("Madrid" in t for t in pool.texts))
+    ok("index still consistent after post-eviction overwrite",
+       all(j < len(pool) and pool.cr_subj[j] == k
+           for k, v in pool._subj_index.items() for j in v))
+
+
 # ---------------- 6. Hop1 矩阵初筛（P1 性能） ----------------
 def test_hop1_matrix_prefilter():
     """P1：Hop1 先主语均值向量矩阵初筛，再逐 token MaxSim；大池截断、召回不丢。"""
@@ -356,6 +385,7 @@ if __name__ == "__main__":
     test_runner_wiring_smoke()
     test_empty_and_evict()
     test_inplace_replace_keeps_graph_keys()
+    test_subject_index_survives_eviction()
     test_hop1_matrix_prefilter()
     test_path_view_and_flat_fallback()
     print("ALL V9 CR CPU TESTS PASSED")
