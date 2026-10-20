@@ -41,7 +41,24 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
 #   每个 context 起点 reset_delta_mem_states 一次；AR_DELTA_WRITE=1 时在【查询前】
 #   完成流式写入 -> 关闭写开关 -> get_delta_mem_online_state 快照 clone；
 #   每题生成前 load_delta_mem_online_state 恢复同一快照（查询期不再 reset）。
-#   AR_INPUTS_EMBEDS=1 时读出走 inputs_embeds（而非 input_ids），默认关闭。
+#   写入开启但快照为空 -> 直接报错（除非 AR_ALLOW_EMPTY_DELTA_SNAP=1）：
+#   空快照会让逐题恢复退化为 no-op，题目之间互相污染，指标不可解释。
+#
+# 读出模式（诚实命名，避免把明文嵌入说成 latent memory）：
+#   AR_READOUT_MODE=prompt       默认：input_ids 走明文 prompt
+#   AR_READOUT_MODE=text_embeds  用 EMB[ids] 走 inputs_embeds —— 这是【明文 token 的嵌入】，
+#                                **没有**注入槽位内部状态或压缩 latent tokens；
+#                                论文里不得当作已实现的 latent memory 方法
+#   AR_READOUT_MODE=latent       未实现（真正的潜槽位读出仍在规划中）-> 显式报错
+#   AR_INPUTS_EMBEDS=1 等价于 text_embeds（兼容旧命令）。
+#
+# 结果文件与 manifest（P0）：
+#   输出默认带配置指纹 ar_{MODE}_{SRC}_{config_id}.jsonl，并写 <out>.manifest.json。
+#   续跑前校验 manifest（配置 / 参数 / 代码 commit），不一致直接拒绝恢复，
+#   避免 AR_DELTA_WRITE=0/1、AR_V9_L18=0/1 等消融写进同一个文件互相覆盖。
+#   AR_OUT 可显式指定输出；AR_RESUME_MANIFEST=0 可关闭校验（不建议）。
+#   AR_STRICT_RETRIEVAL=auto/1/0：auto 在稠密/潜层通道开启时让检索异常直接抛出，
+#   否则 runner 的"单题失败不中断"会把设备/形状错误伪装成指标骤降。
 
 支持的 source（parquet 内 metadata.source）：
     eventqa_65536 / eventqa_131072 / eventqa_full
@@ -114,6 +131,14 @@ except Exception as _e:
     ar_diag = None
     _DIAG_ERR = _e
 
+# 实验 manifest / 配置指纹 / 续跑校验（纯标准库）
+try:
+    import run_manifest
+    _MANIFEST_ERR = None
+except Exception as _e:
+    run_manifest = None
+    _MANIFEST_ERR = _e
+
 
 # ----------------------------- 运行参数 -----------------------------
 DRY_RUN = "--dry-run" in sys.argv[1:]
@@ -128,11 +153,23 @@ RERANK_M    = int(os.environ.get("AR_RERANK_M", "64"))     # stage-2 候选数
 EQA_WIN     = int(os.environ.get("AR_EQA_WIN", "4"))       # EventQA 锚点后取几块
 CTX_MAX_TOK = int(os.environ.get("AR_CTX_MAX_TOK", "0"))   # 0=不截断，>0=保留尾部
 DELTA_WRITE = os.environ.get("AR_DELTA_WRITE", "0") == "1"  # 查询前流式写 delta（写后快照）
-INPUTS_EMBEDS = os.environ.get("AR_INPUTS_EMBEDS", "0") == "1"  # 读出走 inputs_embeds 路径
+INPUTS_EMBEDS = os.environ.get("AR_INPUTS_EMBEDS", "0") == "1"  # 兼容旧命令：读出走 inputs_embeds
 DELTA_RESTORE = os.environ.get("AR_DELTA_RESTORE", "1") == "1"  # 逐题恢复 delta 状态快照
 LIMIT_ROWS  = int(os.environ.get("AR_LIMIT_ROWS", "0"))    # smoke：限制上下文数
 LIMIT_Q     = int(os.environ.get("AR_LIMIT_Q", "0"))       # smoke：限制每题数
 RESUME      = os.environ.get("AR_RESUME", "1") == "1"
+
+# 读出模式：prompt | text_embeds | latent（latent 未实现，显式拒绝而不是假装支持）
+READOUT_MODE = os.environ.get("AR_READOUT_MODE", "").strip().lower()
+if not READOUT_MODE:
+    READOUT_MODE = "text_embeds" if INPUTS_EMBEDS else "prompt"
+if READOUT_MODE not in ("prompt", "text_embeds", "latent"):
+    raise SystemExit(f"[ERR] AR_READOUT_MODE={READOUT_MODE!r} 非法；"
+                     f"可选 prompt | text_embeds | latent")
+INPUTS_EMBEDS = READOUT_MODE == "text_embeds"
+
+# 检索异常策略：auto = 稠密/潜层通道开启时必须报错（否则故障伪装成指标骤降）
+STRICT_RETRIEVAL = os.environ.get("AR_STRICT_RETRIEVAL", "auto").strip().lower()
 
 MAX_NEW = {"eventqa": 40, "longmemeval": 50}
 
@@ -142,10 +179,75 @@ PQ      = os.environ.get(
     "AR_PARQUET",
     "/share/latent/MemoryAgentBench/data/Accurate_Retrieval-00000-of-00001.parquet",
 )
-OUT = os.environ.get(
-    "AR_OUT",
-    f"/share/exp4group/results/ar_{MODE}_{SRC.replace('*', 'star')}.jsonl",
-)
+
+# 输出路径与 manifest：由 init_manifest() 惰性初始化（见文件末），
+# 因为参数（V9_* 等）在下面才定义。未初始化前 OUT 为 None。
+OUT = None
+MANIFEST = None
+RUN_ID = ""
+
+
+def _manifest_params():
+    """影响结果的全部配置（改这里必须同步 init_manifest 的调用方）。"""
+    p = {
+        "mode": MODE,
+        "chunk": CHUNK,
+        "top_k": TOP_K,
+        "rerank_m": RERANK_M,
+        "eqa_win": EQA_WIN,
+        "ctx_max_tok": CTX_MAX_TOK,
+        "delta_write": DELTA_WRITE,
+        "delta_restore": DELTA_RESTORE,
+        "readout_mode": READOUT_MODE,
+        "strict_retrieval": STRICT_RETRIEVAL,
+        "limit_rows": LIMIT_ROWS,
+        "limit_q": LIMIT_Q,
+    }
+    if MODE == "v8":
+        p["v8"] = {"topk_state": TOPK_STATE, "neighbor": NEIGHBOR, "ctx_units": CTX_SENTS}
+    if MODE == "v9":
+        # 索引/打分常量住在 v9_slotpool 模块里（只读导入，不注入 tok/EMB）
+        import importlib
+        sp = importlib.import_module("v9_slotpool")
+        p["v9"] = {
+            "block_sents": sp.BLOCK_SENTS, "unit_max_words": sp.UNIT_MAX_WORDS,
+            "eqa_back": EQA_BACK, "eqa_ahead": EQA_AHEAD,
+            "temporal_tau": sp.TEMPORAL_TAU, "temporal_bonus": sp.TEMPORAL_BONUS,
+            "l18": V9_L18, "l18_layer": V9_L18_LAYER, "l18_alpha": sp.L18_ALPHA,
+            "topk_state": V9_TOPK_STATE, "ctx_units": V9_CTX_UNITS,
+            "session_reset": sp.SESSION_RESET, "split_newline": sp.SPLIT_ON_NEWLINE,
+            "state_theta": sp.STATE_THETA, "cr_rel_theta": sp.CR_REL_THETA,
+        }
+    return p
+
+
+def init_manifest():
+    """构建 manifest 并确定输出路径（幂等；main / dry_run 各调用一次）。"""
+    global OUT, MANIFEST, RUN_ID
+    if MANIFEST is not None:
+        return MANIFEST
+    if run_manifest is None:
+        RUN_ID = "nomf"
+        MANIFEST = {"schema": 0, "config_id": RUN_ID, "kind": "ar", "src": SRC,
+                    "params": _manifest_params(), "git": {}, "env": {}}
+    else:
+        MANIFEST = run_manifest.build(kind="ar", src=SRC, params=_manifest_params(),
+                                      extra={"mode": MODE, "argv": sys.argv[1:]})
+        RUN_ID = MANIFEST["config_id"]
+    OUT = os.environ.get("AR_OUT") or (
+        run_manifest.default_out("/share/exp4group/results", f"ar_{MODE}", SRC, RUN_ID)
+        if run_manifest is not None
+        else f"/share/exp4group/results/ar_{MODE}_{SRC.replace('*', 'star')}.jsonl")
+    return MANIFEST
+
+
+def strict_retrieval_enabled():
+    """是否把检索异常直接抛出（auto：稠密/潜层通道开启即严格）。"""
+    if STRICT_RETRIEVAL in ("1", "true", "yes", "on"):
+        return True
+    if STRICT_RETRIEVAL in ("0", "false", "no", "off"):
+        return False
+    return bool(V9_L18 or DELTA_WRITE or INPUTS_EMBEDS)
 
 def family_of(src):
     if src.startswith("eventqa"):
@@ -274,8 +376,13 @@ def prepare_delta_memory(ctx):
     finally:
         set_delta_mem_write_enabled(model, False)
     snap = delta_snapshot(model)
-    if not snap and get_delta_mem_online_state is None and iter_delta_mem_modules is None:
-        print("[warn] deltamem 无状态快照 API，逐题恢复退化为 no-op", flush=True)
+    if not snap:
+        msg = ("delta 写入已开启，但写后快照为空：逐题恢复会退化为 no-op，"
+               "题目之间会互相污染（指标不可解释）。请检查 deltamem 版本/快照 API。")
+        if os.environ.get("AR_ALLOW_EMPTY_DELTA_SNAP", "0") == "1":
+            print(f"[warn] {msg}（AR_ALLOW_EMPTY_DELTA_SNAP=1，继续）", flush=True)
+        else:
+            raise RuntimeError(msg)
     if collect_delta_mem_state_stats is not None:
         try:
             print(f"[delta] state after write: {collect_delta_mem_state_stats(model)}",
@@ -286,7 +393,11 @@ def prepare_delta_memory(ctx):
 
 
 def generate_readout(block, qtxt):
-    """生成答案。AR_INPUTS_EMBEDS=1 时走 inputs_embeds 读出路径。
+    """生成答案。READOUT_MODE=text_embeds 时用 EMB[ids] 走 inputs_embeds。
+
+    ⚠️ text_embeds 只是把**同一段明文 prompt** 换成嵌入矩阵查表结果（EMB[ids]），
+    没有注入槽位内部状态或压缩 latent tokens，因此**不是** latent memory 读出，
+    不能作为"已实现潜槽位记忆"参与论文比较（真正的路径 B 仍是规划中）。
 
     返回 (pred, input_len, output_len)：
       - 正常路径：out 含 prompt，output_len = out.shape[1] - input_len；
@@ -297,7 +408,7 @@ def generate_readout(block, qtxt):
          {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
         add_generation_prompt=True, tokenize=False)
     ids = tok(text, return_tensors="pt").input_ids.to(DEV)
-    use_emb = bool(INPUTS_EMBEDS and EMB is not None)
+    use_emb = bool(READOUT_MODE == "text_embeds" and EMB is not None)
     emb = EMB[ids] if use_emb else None
     torch.cuda.empty_cache()                 # 建池/检索后的 GPU 碎片回收
 
@@ -597,8 +708,10 @@ def build_pool_for_context_v9(ctx):
 def _layer18_provider(texts, kind):
     """fn(texts, kind) -> [N,d]：取模型第 V9_L18_LAYER 层隐状态做 mask mean-pool。
 
-    仅 AR_V9_L18=1 时注入；分批前向控制显存。异常/形状不符由 v9_slotpool 侧
-    静默退化为纯词面打分，不中断评测。
+    仅 AR_V9_L18=1 时注入；分批前向控制显存。统一返回 **CPU fp32**：
+    词面分在 GPU、稠密分在 CPU，由 v9_slotpool.hybrid_scores 在最后一步对齐设备
+    （v9 早期版本直接相加 -> 设备不一致报错，且被 runner 的宽 except 吞成空证据块）。
+    注入时 strict=True：provider 失败/形状不符直接报错，不再静默退化为纯词面。
     """
     if model is None or tok is None or EMB is None:
         return None
@@ -752,14 +865,24 @@ def dry_run():
     if MODE not in ("v7", "v8", "v9", "plain"):
         print(f"[dry-run][ERR] AR_MODE={MODE} 非法；可选 v7 | v8 | v9 | plain")
         return 2
+    init_manifest()
     print(f"[dry-run] SRC={SRC or '<unset>'} family={fam or '<unset>'} MODE={MODE} "
           f"GPU={GPU} OUT={OUT}")
+    print(f"[dry-run] manifest: "
+          f"{(run_manifest.describe(MANIFEST) if run_manifest else 'unavailable')}"
+          f"{'' if _MANIFEST_ERR is None else f' ({_MANIFEST_ERR})'}")
     print(f"[dry-run] CHUNK={CHUNK} TOP_K={TOP_K} RERANK_M={RERANK_M} EQA_WIN={EQA_WIN} "
           f"CTX_MAX_TOK={CTX_MAX_TOK}")
-    print(f"[dry-run] delta: WRITE={int(DELTA_WRITE)} INPUTS_EMBEDS={int(INPUTS_EMBEDS)} "
-          f"RESTORE={int(DELTA_RESTORE)} "
+    print(f"[dry-run] readout: mode={READOUT_MODE} latent_slots=False "
+          f"(text_embeds = EMB[ids] 明文 token 嵌入，不是槽位潜向量)")
+    print(f"[dry-run] strict_retrieval={int(strict_retrieval_enabled())} "
+          f"(raw={STRICT_RETRIEVAL})")
+    print(f"[dry-run] delta: WRITE={int(DELTA_WRITE)} RESTORE={int(DELTA_RESTORE)} "
           f"state_api={'ok' if get_delta_mem_online_state is not None else 'fallback'}"
           f"{'' if _STATE_API_ERR is None else f'({_STATE_API_ERR})'}")
+    if READOUT_MODE == "latent":
+        print("[dry-run][ERR] AR_READOUT_MODE=latent 未实现（真正的潜槽位读出仍是规划中）")
+        return 2
     if MODE == "v9":
         print(f"[dry-run] v9: EQA_BACK={EQA_BACK} EQA_AHEAD={EQA_AHEAD} "
               f"CTX_UNITS={V9_CTX_UNITS} TOPK_STATE={V9_TOPK_STATE} "
@@ -790,7 +913,9 @@ def dry_run():
         d = ar_diag.record(pool=_DryPool(), hits=[(0, 1.0)], used_ids=[0],
                            answer="Paris", query="Where did Alice move?", flat=True)
         print(f"[dry-run] ar_diag.record ok; answer_in_retrieved="
-              f"{d['answer_in_retrieved']} recall_at_k={d['recall_at_k']}")
+              f"{d['answer_in_retrieved']} "
+              f"answer_recall_at_k={d.get('answer_recall_at_k')} "
+              f"evidence_recall_at_k={d.get('evidence_recall_at_k')}")
     print(f"[dry-run] cuda_initialized="
           f"{torch.cuda.is_initialized() if torch is not None else 'n/a'} "
           f"model_loaded={model is not None}")
@@ -815,6 +940,12 @@ def main():
         raise SystemExit(f"[ERR] 不支持的 source={SRC}；只支持 eventqa_* / longmemeval_*"
                          f"（ruler_* 需 choice 指标）")
     MAX_NEW_TOKENS = MAX_NEW[FAMILY]
+    if READOUT_MODE == "latent":
+        raise SystemExit(
+            "[ERR] AR_READOUT_MODE=latent 未实现：当前槽位存的是明文 + 可选第 18 层向量，"
+            "真正的 latent slot readout（ARCHITECTURE.md 路径 B）仍是规划中。"
+            "请用 prompt 或 text_embeds；不要用未实现的能力跑论文对比。")
+    init_manifest()
     init_templates()
     claim_gpu()     # 先占显存，再慢慢加载权重
     init_model()
@@ -822,8 +953,10 @@ def main():
     set_delta_mem_write_enabled(model, False)
     if MODE == "v9" and V9_L18:
         # 第 18 层稠密通道：建池时按单元文本前向取隐状态，查询期同层 mean-pool。
-        v9_import().set_layer18_provider(_layer18_provider)
-        print(f"[v9] layer18 dense channel enabled: {v9_slotpool.layer18_spec()}", flush=True)
+        # strict=True：provider 失败/形状不符必须报错，禁止静默退化成纯词面。
+        v9_import().set_layer18_provider(_layer18_provider, strict=True)
+        print(f"[v9] layer18 dense channel enabled (strict): "
+              f"{v9_slotpool.layer18_spec()}", flush=True)
     rows_all = pq.read_table(PQ).to_pylist()
     rows = [x for x in rows_all if (x.get("metadata") or {}).get("source") == SRC]
     if not rows:
@@ -832,12 +965,24 @@ def main():
         rows = rows[:LIMIT_ROWS]
     print(f"[cfg] SRC={SRC} MODE={MODE} CHUNK={CHUNK} TOP_K={TOP_K} RERANK_M={RERANK_M} "
           f"EQA_WIN={EQA_WIN} CTX_MAX_TOK={CTX_MAX_TOK} "
-          f"DELTA_WRITE={int(DELTA_WRITE)} INPUTS_EMBEDS={int(INPUTS_EMBEDS)} "
-          f"DELTA_RESTORE={int(DELTA_RESTORE)} rows={len(rows)} OUT={OUT}", flush=True)
+          f"DELTA_WRITE={int(DELTA_WRITE)} READOUT={READOUT_MODE} "
+          f"DELTA_RESTORE={int(DELTA_RESTORE)} strict_retrieval="
+          f"{int(strict_retrieval_enabled())} rows={len(rows)}", flush=True)
+    print(f"[manifest] {(run_manifest.describe(MANIFEST) if run_manifest else 'unavailable')} "
+          f"OUT={OUT}", flush=True)
 
     done = set()
     prev_sf = []
     if RESUME and os.path.exists(OUT):
+        if run_manifest is not None and os.environ.get("AR_RESUME_MANIFEST", "1") == "1":
+            ok_mf, why = run_manifest.check_resume(OUT, MANIFEST)
+            if not ok_mf:
+                raise SystemExit(
+                    f"[resume][ERR] 拒绝续跑：{why}\n"
+                    f"  已有文件：{OUT}\n"
+                    f"  处理：删除该文件 / 指定新的 AR_OUT / "
+                    f"AR_RESUME_MANIFEST=0（不建议，会把不同配置混在一个文件里）")
+            print(f"[resume][manifest] {why}", flush=True)
         with open(OUT) as f:
             for line in f:
                 line = line.strip()
@@ -852,6 +997,8 @@ def main():
         print(f"[resume] 已完成 {len(done)} 题", flush=True)
     elif os.path.exists(OUT) and not RESUME:
         os.remove(OUT)
+    if run_manifest is not None:
+        run_manifest.write(OUT, MANIFEST)      # 先落 manifest，崩溃后也能校验
 
     results = []
     t_start = time.time()
@@ -902,6 +1049,12 @@ def main():
                 else:
                     block, dbg, diag_ctx = build_block(pool, q, meta, qi)
             except Exception as e:                      # 单题失败不中断整轮
+                if strict_retrieval_enabled():
+                    # 稠密/潜层通道开启时不允许静默吞掉检索异常：空证据块会让指标
+                    # 骤降，看起来像"方法变差"，实际是设备/形状 bug。
+                    raise RuntimeError(
+                        f"retrieve fail q={qi} (AR_STRICT_RETRIEVAL={STRICT_RETRIEVAL}): {e}"
+                    ) from e
                 print(f"[warn] retrieve fail q={qi}: {e}", flush=True)
                 block, dbg = "", {"mode": "error", "err": str(e)}
                 _p = epi if MODE in ("v8", "v9") else pool
@@ -927,11 +1080,16 @@ def main():
                 "query": q, "answer": a, "output": pred,
                 "retrieval": dbg, "block_chunks": len(dbg.get("idxs", []) or []),
                 "delta": {"write": bool(DELTA_WRITE), "restore": bool(DELTA_RESTORE),
-                          "inputs_embeds": bool(INPUTS_EMBEDS),
                           "snapshot_layers": len(snap)},
+                "readout": {"mode": READOUT_MODE, "latent_slots": False,
+                            "note": "text_embeds 只是 EMB[ids] 的明文 token 嵌入，"
+                                    "不是槽位潜向量读出"},
+                "run_id": RUN_ID,
+                "window": ({"back": EQA_BACK, "ahead": EQA_AHEAD}
+                           if FAMILY == "eventqa" else None),
                 **{k: v for k, v in m.items()}, **extra,
             }
-            # 逐题诊断（Recall@K / answer_in_retrieved / answer_in_context）：
+            # 逐题诊断（answer_recall@K / answer_in_retrieved / answer_in_context）：
             # hits 必须是分数降序；used_ids/used_texts 是实际拼进 prompt 的槽位。
             if ar_diag is not None:
                 try:
@@ -939,6 +1097,17 @@ def main():
                 except Exception as e:                  # 诊断失败不影响主指标
                     rec["diag_status"] = "diag_error"
                     rec["diag_error"] = str(e)
+            # EventQA 检索方向诊断：锚点单元本身是否含答案 vs 窗口是否覆盖答案。
+            # 分开记才能区分"锚点定位失败"与"锚点之后覆盖不足"。
+            if FAMILY == "eventqa" and ar_diag is not None and MODE == "v9":
+                try:
+                    ai = dbg.get("anchor")
+                    if ai is not None and 0 <= int(ai) < len(epi.texts):
+                        hit, _mt, _ix = ar_diag.answer_in_texts(a, [epi.texts[int(ai)]])
+                        rec["anchor_answer_hit"] = hit
+                    rec["anchor_window_hit"] = rec.get("answer_in_context")
+                except Exception:
+                    pass
             results.append(rec)
             with open(OUT, "a") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")

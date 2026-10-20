@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""ar_diag.py — AR 逐题诊断基建（Recall@K / answer_in_retrieved）
+"""ar_diag.py — AR 逐题诊断基建（答案命中代理 recall / answer_in_retrieved）
 
 纯标准库实现，**不 import torch / transformers / deltamem**，因此：
   - 可被 `run_ar_v7.py` 在模块顶层直接 import（不触发模型加载、不占显存）；
@@ -10,7 +10,8 @@
 一、为什么需要它
 =====================================================================
 现有 AR 结果 JSONL 只记 `retrieval.idxs`（槽位下标），无法回答两个关键问题：
-  1. **检索侧**：gold answer 到底有没有出现在 Top-K 检索结果里？（Recall@K）
+  1. **检索侧**：gold answer 到底有没有出现在 Top-K 检索结果里？
+     （answer_recall_at_k：答案命中代理，**不是**证据级召回）
   2. **读出侧**：检索命中但模型仍答错，是"没检索到"还是"喂进去了但没读出来"？
      （answer_in_retrieved vs answer_in_context）
 两者分开统计，才能把 AR 的损失定位到检索器或 Reader。
@@ -45,7 +46,11 @@ v9 池（`v9_slotpool.py`）已提供现成入口：
     answer_in_context    bool|None    gold 是否出现在实际拼块文本中
     answer_hit_slot      int|None     首个命中槽位（分数序）
     answer_matches       list[str]    命中的 gold 变体
-    recall_at_k          dict[str,int] {"1":0/1, "3":..., "full":...}（仅 applicable 时有值）
+    answer_recall_at_k  dict[str,int] {"1":0/1, "3":..., "full":...}（仅 applicable 时有值）
+                                      答案命中代理：gold 答案字符串是否出现在 Top-K 槽位文本里
+    evidence_recall_at_k dict|None    证据级召回：Top-K 槽位 id 是否命中 gold 证据 id
+                                      **当前管线没有 gold 证据 span，默认 None（不伪造数值）**
+    recall_at_k          dict[str,int] 已废弃：等价于 answer_recall_at_k，仅为旧 JSONL 兼容保留
     diag_status          str          ok | no_hits | no_texts | rubric_not_applicable
 
 兼容 v7 `ChunkPool`（只有 `.texts`）与 v8/v9 池（`.texts` + `.metas`）。
@@ -54,7 +59,7 @@ v9 池（`v9_slotpool.py`）已提供现成入口：
 =====================================================================
 三、用法 B：离线后处理（对已跑完的 JSONL 补诊断）
 =====================================================================
-    # 汇总 Recall@K（只读，不改原文件）
+    # 汇总答案命中代理 recall（answer_recall_at_k；旧名 recall_at_k 仍可读）
     python ar_diag.py --input results/ar_v9_longmemeval_s*.jsonl
 
     # 补写诊断字段到新文件（原文件不动）
@@ -79,8 +84,15 @@ v9 池（`v9_slotpool.py`）已提供现成入口：
   （小写、去标点、压空白）后做子串匹配。
 - **answer_in_context**：实际拼进 prompt 的槽位文本里是否包含 gold。
   与 answer_in_retrieved 的差集即"扩展/重排带来的新增命中"。
-- **Recall@K**：K ∈ {1,3,5,10,12,20} ∩ [1, len(retrieved)]，外加 "full"。
-  AR 每题只有 1 个 gold，故 Recall@K 是 0/1 命中率，不做多 gold 归一。
+- **answer_recall_at_k**（答案命中代理 recall）：K ∈ {1,3,5,10,12,20} ∩ [1, len(retrieved)]，
+  外加 "full"。AR 每题只有 1 个 gold，故它是 0/1 命中率，不做多 gold 归一。
+  它只回答「gold 答案字符串是否出现在 Top-K 槽位文本里」，**不等于证据级召回**：
+  答案原文可能出现在非证据槽位，证据槽位也可能不含答案原文。
+  旧名 `recall_at_k` 是它的废弃别名（同值），仅为兼容旧 JSONL 保留。
+- **evidence_recall_at_k**（证据级召回）：只看分数序 Top-K 的槽位 id 是否命中
+  gold 证据槽位 id（`evidence_ids`）。这需要逐题标注 gold 证据 span，
+  **当前管线没有该标注**，故 `record()` 默认输出 None，绝不伪造数值；
+  只有调用方显式传入 `evidence_ids` 时才有值，汇总只在有样本时输出。
 - **不适用（None）**：gold 是长 rubric（single-session-preference 类）时
   子串匹配无意义，标记 `rubric_not_applicable` 并从分母中剔除。
 """
@@ -314,6 +326,7 @@ def record(
     ks: Sequence[int] = RECALL_KS,
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
     flat: bool = False,
+    evidence_ids: Optional[Sequence[int]] = None,
 ) -> Dict[str, Any]:
     """构造逐题诊断字段。
 
@@ -327,6 +340,15 @@ def record(
     texts       : 直接给槽位原文时可不传 pool（离线场景）
     used_texts  : 直接给拼块原文时可不传 pool/used_ids
     flat        : True -> 平铺字段；False -> {"diag": {...}}（便于嵌进 retrieval 子字典）
+    evidence_ids: gold 证据槽位 id 列表（可选）。给定时按分数序 Top-K 的槽位 id
+                  是否命中这些 id 计算 evidence_recall_at_k；未给定时该字段为 None。
+
+    口径说明
+    --------
+    answer_recall_at_k 是**答案命中代理**：只判断 gold 答案字符串是否出现在 Top-K
+    槽位文本里，不等于证据级召回。evidence_recall_at_k 才是证据级召回，但它需要
+    每题标注 gold 证据 span——**当前管线没有该标注，因此默认必须是 None，
+    这里绝不伪造证据级召回数值**。
     """
     pairs = _norm_hits(hits)
 
@@ -379,7 +401,15 @@ def record(
                 if g not in matched:
                     matched.append(g)
 
-    recall_at = compute_recall_at_k(hit_flags, ks) if status == "ok" else {}
+    # 答案命中代理 recall：gold 答案字符串是否出现在 Top-K 槽位文本里
+    answer_recall_at = compute_recall_at_k(hit_flags, ks) if status == "ok" else {}
+    # 证据级召回：分数序 Top-K 的槽位 id 是否命中 gold 证据 id。
+    # 当前管线没有 gold 证据 span -> evidence_ids 默认 None -> 字段保持 None，绝不伪造数值。
+    evidence_recall_at: Optional[Dict[str, int]] = None
+    if evidence_ids is not None and pairs:
+        gold_evidence = {int(i) for i in evidence_ids}
+        ev_flags = [1 if i in gold_evidence else 0 for i in ids]
+        evidence_recall_at = compute_recall_at_k(ev_flags, ks)
 
     diag: Dict[str, Any] = {
         "query": query,
@@ -392,7 +422,9 @@ def record(
         "answer_in_context": in_context,
         "answer_hit_slot": hit_slot,
         "answer_matches": matched,
-        "recall_at_k": recall_at,
+        "answer_recall_at_k": answer_recall_at,
+        "evidence_recall_at_k": evidence_recall_at,
+        "recall_at_k": answer_recall_at,  # 已废弃：等价于 answer_recall_at_k，仅为旧 JSONL 兼容保留
         "diag_status": status,
     }
     if flat:
@@ -412,6 +444,7 @@ def _get_diag(rec: Dict[str, Any]) -> Dict[str, Any]:
             "retrieved_slot_ids", "retrieved_scores", "retrieved_texts",
             "retrieved_starts", "used_slot_ids", "answer_in_retrieved",
             "answer_in_context", "answer_hit_slot", "answer_matches",
+            "answer_recall_at_k", "evidence_recall_at_k",
             "recall_at_k", "diag_status")}
     r = rec.get("retrieval")
     if isinstance(r, dict) and (r.get("idxs") is not None):
@@ -437,7 +470,18 @@ def _rate(num: int, den: int) -> Optional[float]:
 def _bucket() -> Dict[str, Any]:
     return {"n": 0, "n_applicable": 0, "retrieved_hit": 0, "context_hit": 0,
             "retrieved_hit_context_miss": 0, "context_hit_retrieved_miss": 0,
-            "recall_at_k": {}}
+            "recall_at_k": {}, "evidence_recall_at_k": {}}
+
+
+def _accum_recall(bucket: Dict[str, Dict[str, int]],
+                  rk: Dict[str, Any], ks: Sequence[int]) -> None:
+    """把一个 {"1":0/1,...,"full":...} 累加进 bucket（每个 K 独立分母）。"""
+    for k in list(ks) + ["full"]:
+        key = str(k)
+        if key in rk:
+            slot = bucket.setdefault(key, {"n": 0, "hit": 0})
+            slot["n"] += 1
+            slot["hit"] += int(bool(rk[key]))
 
 
 def _accumulate(b: Dict[str, Any], d: Dict[str, Any], ks: Sequence[int]) -> None:
@@ -455,32 +499,46 @@ def _accumulate(b: Dict[str, Any], d: Dict[str, Any], ks: Sequence[int]) -> None
         b["retrieved_hit_context_miss"] += 1
     if aic and air is False:
         b["context_hit_retrieved_miss"] += 1
-    rk = d.get("recall_at_k") or {}
-    for k in list(ks) + ["full"]:
-        key = str(k)
-        if key in rk:
-            slot = b["recall_at_k"].setdefault(key, {"n": 0, "hit": 0})
-            slot["n"] += 1
-            slot["hit"] += int(bool(rk[key]))
+    # 优先新键 answer_recall_at_k；缺失时回退旧键 recall_at_k（旧记录）
+    rk = d.get("answer_recall_at_k")
+    if rk is None:
+        rk = d.get("recall_at_k") or {}
+    _accum_recall(b["recall_at_k"], rk, ks)
+    # 证据级召回单独累加：只有真正算过的记录（非 None）才进分母
+    erk = d.get("evidence_recall_at_k")
+    if erk:
+        _accum_recall(b["evidence_recall_at_k"], erk, ks)
+
+
+def _recall_sort_key(kv: Tuple[str, Any]) -> Tuple[int, int]:
+    return (kv[0] == "full", int(kv[0]) if kv[0] != "full" else 0)
+
+
+def _fmt_recall(bucket: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
+    return {k: {"n": v["n"], "hit": v["hit"], "rate": _rate(v["hit"], v["n"])}
+            for k, v in sorted(bucket.items(), key=_recall_sort_key)}
 
 
 def _finalize(b: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(b)
     out["answer_in_retrieved_rate"] = _rate(b["retrieved_hit"], b["n_applicable"])
     out["answer_in_context_rate"] = _rate(b["context_hit"], b["n_applicable"])
-    out["recall_at_k"] = {
-        k: {"n": v["n"], "hit": v["hit"], "rate": _rate(v["hit"], v["n"])}
-        for k, v in sorted(b["recall_at_k"].items(),
-                           key=lambda kv: (kv[0] == "full",
-                                           int(kv[0]) if kv[0] != "full" else 0))
-    }
+    # 规范键：答案命中代理 recall（旧别名 recall_at_k 不再出现在汇总输出里）
+    out.pop("recall_at_k", None)
+    out["answer_recall_at_k"] = _fmt_recall(b["recall_at_k"])
+    # 证据级召回只在有样本时输出（当前管线没有 gold 证据 span -> 通常为空）
+    ev = b.get("evidence_recall_at_k") or {}
+    if ev:
+        out["evidence_recall_at_k"] = _fmt_recall(ev)
+    else:
+        out.pop("evidence_recall_at_k", None)
     return out
 
 
 def summarize(records: Iterable[Dict[str, Any]],
               ks: Sequence[int] = RECALL_KS,
               group_by: Sequence[str] = ("question_type", "source")) -> Dict[str, Any]:
-    """汇总 Recall@K / answer_in_retrieved，支持按 question_type / source 分组。"""
+    """汇总 answer_recall_at_k / evidence_recall_at_k / answer_in_retrieved，支持按 question_type / source 分组。"""
     overall = _bucket()
     groups: Dict[str, Dict[str, Dict[str, Any]]] = {g: {} for g in group_by}
     group_seen: Dict[str, bool] = {g: False for g in group_by}
@@ -536,8 +594,9 @@ def enrich_record(rec: Dict[str, Any], ks: Sequence[int] = RECALL_KS,
                   max_text_chars: int = DEFAULT_MAX_TEXT_CHARS) -> Dict[str, Any]:
     """对单条记录重算/补写诊断字段（输入需已有 retrieved_texts）。
 
-    已有 `diag` 且状态为 ok 时只重算 recall_at_k（口径可能变了），
+    已有 `diag` 且状态为 ok 时只重算 answer_recall_at_k（口径可能变了），
     不覆盖 runner 记录的原值，避免"后处理把运行时事实改写掉"。
+    重算时同时写规范键 `answer_recall_at_k` 与废弃别名 `recall_at_k`（同值）。
     """
     d = dict(_get_diag(rec))
     if _status_of(d) != "ok":
@@ -548,11 +607,13 @@ def enrich_record(rec: Dict[str, Any], ks: Sequence[int] = RECALL_KS,
     if is_rubric_answer(rec.get("answer")):
         d.update({"diag_status": "rubric_not_applicable", "answer_in_retrieved": None,
                   "answer_in_context": None, "answer_hit_slot": None,
-                  "answer_matches": [], "recall_at_k": {}})
+                  "answer_matches": [],
+                  "answer_recall_at_k": {}, "recall_at_k": {}})
         out["diag"] = d
         for k in ("retrieved_slot_ids", "retrieved_scores", "retrieved_texts",
                   "retrieved_starts", "used_slot_ids", "answer_in_retrieved",
                   "answer_in_context", "answer_hit_slot", "answer_matches",
+                  "answer_recall_at_k", "evidence_recall_at_k",
                   "recall_at_k", "diag_status"):
             out.pop(k, None)
         return out
@@ -563,7 +624,8 @@ def enrich_record(rec: Dict[str, Any], ks: Sequence[int] = RECALL_KS,
         flags = [1 if _text_hits_gold(t, golds_norm) else 0 for t in texts]
         if "answer_in_retrieved" not in d or d.get("answer_in_retrieved") is None:
             d["answer_in_retrieved"] = bool(any(flags))
-        d["recall_at_k"] = compute_recall_at_k(flags, ks)
+        d["answer_recall_at_k"] = compute_recall_at_k(flags, ks)
+        d["recall_at_k"] = d["answer_recall_at_k"]  # 已废弃：等价于 answer_recall_at_k，仅为旧 JSONL 兼容保留
         if d.get("answer_hit_slot") is None and any(flags):
             d["answer_hit_slot"] = flags.index(1)
         # 截断只影响落盘体积，命中判定始终基于未截断原文；
@@ -576,6 +638,7 @@ def enrich_record(rec: Dict[str, Any], ks: Sequence[int] = RECALL_KS,
     for k in ("retrieved_slot_ids", "retrieved_scores", "retrieved_texts",
               "retrieved_starts", "used_slot_ids", "answer_in_retrieved",
               "answer_in_context", "answer_hit_slot", "answer_matches",
+              "answer_recall_at_k", "evidence_recall_at_k",
               "recall_at_k", "diag_status"):
         out.pop(k, None)
     return out
@@ -596,16 +659,20 @@ def print_summary(summary: Dict[str, Any], title: str = "") -> None:
           f"answer_in_context={_fmt_rate(o['answer_in_context_rate'])}  "
           f"retrieved_hit_ctx_miss={o['retrieved_hit_context_miss']}  "
           f"ctx_hit_retrieved_miss={o['context_hit_retrieved_miss']}")
-    rk = o["recall_at_k"]
+    rk = o["answer_recall_at_k"]
     if rk:
-        print("Recall@K: " + "  ".join(
+        print("answer_recall@K（答案命中代理，非证据级召回）: " + "  ".join(
             f"@{k}={_fmt_rate(v['rate'])}(n={v['n']})" for k, v in rk.items()))
+    ev = o.get("evidence_recall_at_k") or {}
+    if ev:
+        print("evidence_recall@K（证据级召回）: " + "  ".join(
+            f"@{k}={_fmt_rate(v['rate'])}(n={v['n']})" for k, v in ev.items()))
     for g, buckets in summary["by"].items():
         if not buckets:
             continue
         print(f"[by {g}]")
         for key, b in buckets.items():
-            rk_s = "  ".join(f"@{k}={_fmt_rate(v['rate'])}" for k, v in b["recall_at_k"].items()
+            rk_s = "  ".join(f"@{k}={_fmt_rate(v['rate'])}" for k, v in b["answer_recall_at_k"].items()
                              if k != "full")
             print(f"  {key:<26} n={b['n_applicable']:<4} "
                   f"air={_fmt_rate(b['answer_in_retrieved_rate'])}  "
@@ -659,21 +726,44 @@ def _selftest() -> int:
     ok("answer_in_retrieved True", dg["answer_in_retrieved"] is True)
     ok("answer_in_context True", dg["answer_in_context"] is True)
     ok("hit_slot = 0（分数序首位）", dg["answer_hit_slot"] == 0)
-    ok("Recall@1 = 1", dg["recall_at_k"]["1"] == 1)
-    ok("Recall@3 = 1", dg["recall_at_k"]["3"] == 1)
+    ok("answer_recall@1 = 1", dg["answer_recall_at_k"]["1"] == 1)
+    ok("answer_recall@3 = 1", dg["answer_recall_at_k"]["3"] == 1)
+    ok("answer_recall_at_k 等于废弃别名 recall_at_k",
+       dg["answer_recall_at_k"] == dg["recall_at_k"])
+    ok("evidence_recall_at_k 默认 None（当前管线无 gold 证据 span）",
+       dg["evidence_recall_at_k"] is None)
     ok("status ok", dg["diag_status"] == "ok")
 
-    # 3. 命中在 K 之外：Recall@1=0 / Recall@5=1
+    # 2b. 证据级召回：显式传 evidence_ids 时才计算（基于分数序槽位 id）
+    d_ev = record(pool=pool, hits=hits, answer=["The Fairly OddParents"],
+                  evidence_ids=[1])["diag"]        # 分数序首位命中证据 -> @1=1
+    ok("evidence@1 = 1（证据 id 排首位）", d_ev["evidence_recall_at_k"]["1"] == 1)
+    ok("evidence full = 1", d_ev["evidence_recall_at_k"]["full"] == 1)
+    d_ev2 = record(pool=pool, hits=hits, answer=["The Fairly OddParents"],
+                   evidence_ids=[2])["diag"]       # 证据在第 2 位 -> @1=0 / @3=1
+    ok("evidence@1 = 0（证据不在首位）", d_ev2["evidence_recall_at_k"]["1"] == 0)
+    ok("evidence@3 = 1", d_ev2["evidence_recall_at_k"]["3"] == 1)
+    ok("evidence 不影响 answer_recall",
+       d_ev2["answer_recall_at_k"] == d_ev2["recall_at_k"])
+    ok("evidence 未命中 -> 全 0 而非 None",
+       all(v == 0 for v in record(pool=pool, hits=hits, answer=["India"],
+                                  evidence_ids=[99])["diag"]["evidence_recall_at_k"].values()))
+    ok("无检索结果时 evidence 仍为 None",
+       record(pool=pool, hits=[], answer=["India"],
+              evidence_ids=[1])["diag"]["evidence_recall_at_k"] is None)
+
+    # 3. 命中在 K 之外：answer_recall@1=0 / @3=1
     hits2 = [(0, 0.9), (2, 0.8), (1, 0.1)]
     d2 = record(pool=pool, hits=hits2, answer=["The Fairly OddParents"])
-    ok("Recall@1=0（gold 排第 3）", d2["diag"]["recall_at_k"]["1"] == 0)
-    ok("Recall@3=1", d2["diag"]["recall_at_k"]["3"] == 1)
-    ok("Recall@20 用 full 兜底", d2["diag"]["recall_at_k"]["20"] == 1)
+    ok("answer_recall@1=0（gold 排第 3）", d2["diag"]["answer_recall_at_k"]["1"] == 0)
+    ok("answer_recall@3=1", d2["diag"]["answer_recall_at_k"]["3"] == 1)
+    ok("answer_recall@20 用 full 兜底", d2["diag"]["answer_recall_at_k"]["20"] == 1)
 
     # 4. 未命中 + 不适用
     d3 = record(pool=pool, hits=hits, answer=["India"])
     ok("未命中 answer_in_retrieved False", d3["diag"]["answer_in_retrieved"] is False)
-    ok("未命中 recall 全 0", all(v == 0 for v in d3["diag"]["recall_at_k"].values()))
+    ok("未命中 answer_recall 全 0",
+       all(v == 0 for v in d3["diag"]["answer_recall_at_k"].values()))
     d4 = record(pool=pool, hits=hits, answer=["x" * (RUBRIC_MAX_CHARS + 1)])
     ok("rubric -> None + status", d4["diag"]["answer_in_retrieved"] is None
        and d4["diag"]["diag_status"] == "rubric_not_applicable")
@@ -727,8 +817,14 @@ def _selftest() -> int:
     s = summarize(recs)
     ok("汇总 n_records=4", s["n_records"] == 4)
     ok("汇总 n_applicable=2（rubric+legacy 剔除）", s["n_applicable"] == 2)
-    ok("汇总 Recall@1 = 0.5", abs(s["overall"]["recall_at_k"]["1"]["rate"] - 0.5) < 1e-9)
-    ok("汇总 Recall@3 = 1.0", abs(s["overall"]["recall_at_k"]["3"]["rate"] - 1.0) < 1e-9)
+    ok("汇总 Recall@1 = 0.5",
+       abs(s["overall"]["answer_recall_at_k"]["1"]["rate"] - 0.5) < 1e-9)
+    ok("汇总 Recall@3 = 1.0",
+       abs(s["overall"]["answer_recall_at_k"]["3"]["rate"] - 1.0) < 1e-9)
+    ok("汇总有 answer_recall_at_k、无废弃别名 recall_at_k",
+       "answer_recall_at_k" in s["overall"] and "recall_at_k" not in s["overall"])
+    ok("无证据样本时汇总不输出 evidence_recall_at_k",
+       "evidence_recall_at_k" not in s["overall"])
     ok("分组 single-session-user 存在",
        "single-session-user" in s["by"]["question_type"])
     ok("legacy 记录计数",
@@ -740,6 +836,24 @@ def _selftest() -> int:
     ok("缺失 source 时丢弃该分组", "source" not in s_nosrc["by"])
     ok("缺失分组不影响 overall", s_nosrc["overall"]["n_applicable"] == 1)
 
+    # 7b. 汇总：有证据级样本时才输出 evidence_recall_at_k（分母只算有值的记录）
+    s_ev = summarize([
+        {"question_type": "x", "diag": record(pool=pool, hits=hits,
+                                              answer=["The Fairly OddParents"],
+                                              evidence_ids=[1])["diag"]},
+        {"question_type": "x", "diag": record(pool=pool, hits=hits,
+                                              answer=["India"])["diag"]},
+    ])
+    ok("有证据样本时汇总输出 evidence_recall_at_k",
+       abs(s_ev["overall"]["evidence_recall_at_k"]["1"]["rate"] - 1.0) < 1e-9
+       and s_ev["overall"]["evidence_recall_at_k"]["1"]["n"] == 1)
+    # 7c. 旧记录只有废弃别名 recall_at_k 时仍能汇总（兼容旧 JSONL）
+    s_old = summarize([{"diag": {"diag_status": "ok", "answer_in_retrieved": True,
+                                 "answer_in_context": True,
+                                 "recall_at_k": {"1": 1, "3": 1, "full": 1}}}])
+    ok("旧记录只有 recall_at_k 也能汇总",
+       s_old["overall"]["answer_recall_at_k"]["1"]["rate"] == 1.0)
+
     # 8. 离线补写：不改原记录、重算 recall
     #    注意：retrieved_texts 必须与 retrieved_slot_ids 同序（分数序），
     #    这是 record() 的契约；下面按 ids=[1,2,0] 重排文本构造真实形态。
@@ -750,7 +864,9 @@ def _selftest() -> int:
                    "diag_status": "ok"}
     e = enrich_record(legacy_flat)
     ok("enrich 收进 diag", "diag" in e and "retrieved_texts" not in e)
-    ok("enrich 重算 recall@1=1", e["diag"]["recall_at_k"]["1"] == 1)
+    ok("enrich 重算 recall@1=1", e["diag"]["answer_recall_at_k"]["1"] == 1)
+    ok("enrich 同时写废弃别名",
+       e["diag"]["recall_at_k"] == e["diag"]["answer_recall_at_k"])
     ok("enrich 不改原对象", "diag" not in legacy_flat)
 
     failed = [n for n, c in checks if not c]
@@ -764,13 +880,15 @@ def _selftest() -> int:
 
 # ----------------------------- CLI -----------------------------
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="AR 逐题诊断：Recall@K / answer_in_retrieved")
+    ap = argparse.ArgumentParser(
+        description="AR 逐题诊断：answer_recall_at_k（答案命中代理）/ "
+                    "evidence_recall_at_k（证据级召回）/ answer_in_retrieved")
     ap.add_argument("--input", nargs="*", default=[], help="AR 结果 JSONL（可多个）")
     ap.add_argument("--enrich", action="store_true", help="补写诊断字段到 --enrich-out")
     ap.add_argument("--enrich-out", default="", help="补写输出路径（默认 <input>.diag.jsonl）")
     ap.add_argument("--summary-out", default="", help="汇总 JSON 落盘路径")
     ap.add_argument("--ks", default=",".join(str(k) for k in RECALL_KS),
-                    help="Recall@K 的 K 列表，逗号分隔（默认 1,3,5,10,12,20）")
+                    help="answer_recall_at_k 的 K 列表，逗号分隔（默认 1,3,5,10,12,20）")
     ap.add_argument("--max-text-chars", type=int, default=DEFAULT_MAX_TEXT_CHARS,
                     help="记录原文单槽位截断（0=不截断）")
     ap.add_argument("--quiet", action="store_true", help="只写文件不打印")

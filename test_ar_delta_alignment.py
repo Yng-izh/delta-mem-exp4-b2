@@ -178,8 +178,12 @@ def test_generate_readout_input_ids():
 
 def test_generate_readout_inputs_embeds():
     setup()
-    R.INPUTS_EMBEDS = True
-    pred, in_len, out_len = R.generate_readout("block", "q")
+    saved = R.READOUT_MODE
+    R.READOUT_MODE = "text_embeds"          # 显式模式（旧的 AR_INPUTS_EMBEDS 等价写法）
+    try:
+        pred, in_len, out_len = R.generate_readout("block", "q")
+    finally:
+        R.READOUT_MODE = saved
     ok("embeds path pred", pred == "answer")
     ok("embeds path input_len", in_len == 3)
     ok("embeds path output_len (only new tokens)", out_len == 3)

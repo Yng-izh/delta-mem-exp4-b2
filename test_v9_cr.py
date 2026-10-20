@@ -6,6 +6,7 @@
 #   3. 双跳链谓词联合打分 Score_chain（谓词匹配的链分数更高、排序更靠前）
 #   4. 反事实强约束 Prompt（OUTDATED / counterfactual / 最大编号 / unknown）
 import os
+import re
 import sys
 
 import torch
@@ -208,8 +209,12 @@ def test_chain_joint_score():
     ok("best two-hop chain is predicate-matching", chains[0][1] == 1 and chains[0][2] == 3)
     ok("chain order descending", chains[0][0] >= chains[-1][0])
     ok("target fact retrieved", "Europe" in block)
-    serials = [int(ln.split(".")[0]) for ln in block.splitlines() if ln.strip()]
-    ok("chain block sorted by serial", serials == sorted(serials))
+    ok("path view on by default", dbg["path_view"] is True and v9_cr.CR_PATH_VIEW is True)
+    ok("best path is the predicate-matching chain",
+       dbg["paths"][0]["facts"][:2] == [0, 1] and dbg["paths"][0]["target"] == 3)
+    serials = [int(m.group(1)) for m in
+               (re.match(r"\s*(\d+)\.\s", ln) for ln in block.splitlines()) if m]
+    ok("every selected fact appears once", sorted(serials) == [1, 2, 3, 4, 5])
 
 
 # ---------------- 4. 反事实强约束 Prompt ----------------
@@ -264,6 +269,83 @@ def test_empty_and_evict():
     ok("retrieval after eviction", small.retrieve_multihop_context("Bob") is not None)
 
 
+# ---------------- 5. 原位覆写：槽 id / 图键 / 子句索引一致 ----------------
+def test_inplace_replace_keeps_graph_keys():
+    """P1：覆写不再 drop+append，槽 id 稳定且图键随槽原位更新。"""
+    pool = v9_cr.CRStatePool()
+    pool.upsert("Alice was born in Paris.", 1)
+    pool.upsert("Bob was born in Rome.", 2)
+    ok("two slots before overwrite", len(pool) == 2)
+    ok("overwrite detected", pool.upsert("Alice was born in Lyon.", 3) is True)
+    ok("slot count stable after overwrite", len(pool) == 2)
+    ok("slot 0 updated in place", "Lyon" in pool.texts[0] and "Alice" in pool.texts[0])
+    ok("slot 1 untouched", pool.texts[1] == "Bob was born in Rome.")
+    ok("serial refreshed on same slot", pool.metas[0].get("serial") == 3)
+    ok("graph keys follow slot", pool.cr_subj_norm[0] == v9._cr_norm("Alice")
+       and pool.cr_obj_norm[0] == v9._cr_norm("Lyon"))
+    ok("graph key lists stay aligned",
+       len(pool.cr_E_subj) == len(pool) == len(pool.cr_k_obj) == len(pool.cr_n_subj))
+    ok("subject index consistent", pool._subj_index.get(v9._cr_norm("Alice")) == [0])
+    ok("overwrite counter", pool.n_overwrites == 1)
+    block = pool.retrieve_multihop_context("Where was Alice born?")
+    ok("retrieval sees new value", "Lyon" in block and "Paris" not in block)
+
+
+# ---------------- 6. Hop1 矩阵初筛（P1 性能） ----------------
+def test_hop1_matrix_prefilter():
+    """P1：Hop1 先主语均值向量矩阵初筛，再逐 token MaxSim；大池截断、召回不丢。"""
+    n = 120
+    pool = v9_cr.CRStatePool()
+    for i in range(n):
+        pool.upsert(f"Entity{i} is affiliated with Org{i}.", i + 1)
+    ok("prefilter pool size", len(pool) == n)
+
+    E_q, _k, _ = v9_cr._enc("Entity7")
+    cand = pool.hop1_candidates(E_q)
+    ok("candidates capped at V9_CR_HOP1_M", len(cand) == v9_cr.CR_HOP1_M < n)
+    ok("candidates deterministic", cand == pool.hop1_candidates(E_q))
+    ok("gold subject survives prefilter", 7 in cand)
+    ok("hop1 top1 is gold", pool.hop1_scores(E_q)[0][1] == 7)
+
+    # 小池不截断：n <= M 时与全量扫描等价
+    small = v9_cr.CRStatePool()
+    for i in range(5):
+        small.upsert(f"Entity{i} is affiliated with Org{i}.", i + 1)
+    ok("small pool scans all",
+       small.hop1_candidates(v9_cr._enc("Entity3")[0]) == [0, 1, 2, 3, 4])
+
+
+# ---------------- 7. 路径式读出 / 平铺回退 ----------------
+def test_path_view_and_flat_fallback():
+    embed("alice", basis(0))
+    embed("springfield", basis(1))
+    embed("france", basis(3))
+    embed("born", basis(6))
+    embed("located", basis(7))
+
+    pool = v9_cr.CRStatePool()
+    pool.upsert("Alice was born in Springfield.", 1)
+    pool.upsert("Springfield is located in France.", 2)
+    pool.upsert("Springfield is famous for pizza.", 3)
+    pool.upsert("France was born in Europe.", 4)     # 提供第二跳目标
+
+    block = pool.retrieve_multihop_context("Alice was born in?")
+    ok("path header rendered", block.startswith("PATH 1"))
+    ok("path shows entity chain", "->" in block and "was born in" in block)
+    ok("path keeps global serials", re.search(r"^1\. Alice", block, re.M) is not None)
+
+    old = v9_cr.CR_PATH_VIEW
+    v9_cr.CR_PATH_VIEW = False
+    try:
+        flat = pool.retrieve_multihop_context("Alice was born in?")
+        ok("flat fallback has no path header", "PATH " not in flat)
+        flat_serials = [int(m.group(1)) for m in
+                        (re.match(r"\s*(\d+)\.\s", ln) for ln in flat.splitlines()) if m]
+        ok("flat block sorted by serial", flat_serials == sorted(flat_serials))
+    finally:
+        v9_cr.CR_PATH_VIEW = old
+
+
 if __name__ == "__main__":
     test_state_pool_dual_threshold()
     test_cr_pool_upsert_dual_threshold()
@@ -273,4 +355,7 @@ if __name__ == "__main__":
     test_counterfactual_prompt()
     test_runner_wiring_smoke()
     test_empty_and_evict()
+    test_inplace_replace_keeps_graph_keys()
+    test_hop1_matrix_prefilter()
+    test_path_view_and_flat_fallback()
     print("ALL V9 CR CPU TESTS PASSED")

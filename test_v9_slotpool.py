@@ -310,8 +310,8 @@ def test_state_pool_and_build():
     ok("state merge overwrite", len(st2) == 1 and st2.n_dup == 1)
 
     class NoMerge(v9.StatePool):
-        def _should_merge(self, text, meta, qm, base):
-            return False
+        def _merge_target(self, text, meta, qm, pending=None):
+            return None
 
     nm = NoMerge()
     nm.add_batch([("Paris is the capital of France.",
@@ -435,6 +435,149 @@ def test_env_defaults_and_dtype():
     ok("stats", epi.stats()["n"] == 3 and epi.stats()["mean_tokens"] > 0)
 
 
+# ---------------- 6. CR 覆写：必须找到同主语的旧槽（P0 回归） ----------------
+def test_cr_overwrite_finds_same_subject_slot():
+    """P0 回归：另一条事实整体更像时，也不能放弃覆写同主语的旧槽。
+
+    构造：槽 0 = Alice 的旧值，槽 1 = Bob 的事实。把槽 1 的均值向量直接改成新事实
+    自己的向量，全池 argmax 必然落在槽 1。旧实现只看 argmax 槽的主语 -> 判"主语不同"
+    而拒绝覆写，Alice 的旧值与新值同时存活（CR 语义失效）。
+    """
+    st = v9.StatePool()
+    st.add_batch([("Alice was born in Paris.", {"start": 0, "serial": 1})])
+    st.add_batch([("Bob was born in Lyon.", {"start": 1, "serial": 2})])
+    ok("two subjects two slots", len(st) == 2)
+    ok("subject index built", st._subj_index.get(v9._cr_norm("Alice")) == [0])
+
+    new_text = "Alice was born in Lyon."
+    qm = st._mean_only(v9.build_index_text(None, new_text)).cpu()
+    st.mean[1] = qm                        # 让全局 argmax 落在 Bob 的槽上
+    st._mean_mat = None
+
+    st.add_batch([(new_text, {"start": 2, "serial": 3})])
+    ok("overwrite happened", st.n_dup == 1)
+    ok("slot count stable", len(st) == 2)
+    ok("same-subject slot updated in place", "Lyon" in st.texts[0] and "Alice" in st.texts[0])
+    ok("stale value gone", not any("Paris" in t for t in st.texts))
+    ok("other slot untouched", st.texts[1] == "Bob was born in Lyon.")
+    ok("slot id stable, serial refreshed", st.metas[0]["serial"] == 3)
+    ok("index consistent after replace", st._subj_index.get(v9._cr_norm("Alice")) == [0])
+
+
+def test_cr_pending_merge_and_stable_ids():
+    """同一批里的冲突事实也要合并（目标在 pending），且槽 id 稳定、df 一致。"""
+    st = v9.StatePool()
+    st.add_batch([("Alice was born in Paris.", {"start": 0, "serial": 1}),
+                  ("Alice was born in Lyon.", {"start": 1, "serial": 2})])
+    ok("batch-internal conflict merged", len(st) == 1 and st.n_dup == 1)
+    ok("newest wins", "Lyon" in st.texts[0])
+    ok("meta refreshed", st.metas[0]["serial"] == 2)
+    ok("df consistent", sum(st.word_df.values()) == sum(len(set(w)) for w in st.words))
+
+    st2 = v9.StatePool()
+    st2.add_batch([("Alice was born in Paris.", {"start": 0})])
+    st2.add_batch([("Alice was educated at Oxford.", {"start": 1})])
+    ok("different relation -> new slot", len(st2) == 2)
+    ok("reject counted", st2.n_merge_rejected == 1)
+
+
+# ---------------- 7. Session 边界与换行切分（P1 / I3） ----------------
+def test_session_boundary_ts():
+    """I3：Session 2 的事实不得继承 Session 1 的年份。"""
+    ctx = ("Session 1\nIn 2020, Alice moved to Paris.\n"
+           "Session 2\nAlice prefers quiet restaurants.\n")
+    units = v9.extract_units(ctx, block_sents=1)
+    by_text = {u["text"]: u for u in units}
+    u1 = by_text["In 2020, Alice moved to Paris."]
+    u2 = by_text["Alice prefers quiet restaurants."]
+    ok("session 1 ts explicit", u1["session_id"] == 0 and u1["ts"] == "2020")
+    ok("session 2 is separate", u2["session_id"] == 1)
+    ok("no cross-session inheritance", u2["ts"] is None and u2["year"] is None)
+    ok("event_time not inherited", u2["event_time"] is None)
+    ok("ingestion order tracks write order", u2["ingestion_order"] > u1["ingestion_order"])
+
+    # 每个 Session 有日期头时：新 Session 继承【自己的】头日期，而不是上一段的
+    ctx2 = ("2020/03/01\nAlice moved to Paris.\n2021/07/15\nAlice prefers quiet.\n")
+    units2 = v9.extract_units(ctx2, block_sents=1)
+    u = {x["text"]: x for x in units2}
+    ok("session 2 uses own header date",
+       u["Alice prefers quiet."]["ts"] == "2021" and u["Alice prefers quiet."]["year"] == 2021)
+    ok("session 1 keeps its own date", u["Alice moved to Paris."]["year"] == 2020)
+
+
+def test_split_newline_chat():
+    """P1：无句末标点的多轮聊天消息不能并成一个检索单元。"""
+    ctx = ("User: what time is it\nAssistant: it is noon\n"
+           "User: and the day\nAssistant: Tuesday")
+    sents = v9.split_sentences(ctx)
+    ok("newline splits chat turns", len(sents) == 4)
+    ok("no newline left inside unit", all("\n" not in s for s in sents))
+
+    old = v9.SPLIT_ON_NEWLINE
+    v9.SPLIT_ON_NEWLINE = False
+    try:
+        ok("legacy mode merges turns", len(v9.split_sentences(ctx)) == 1)
+    finally:
+        v9.SPLIT_ON_NEWLINE = old
+
+
+# ---------------- 8. 第 18 层：设备一致 + 严格模式（P0） ----------------
+def test_hybrid_device_consistency():
+    """P0 回归：词面分在加速设备、稠密分在 CPU 时，混合打分不得抛设备不一致。"""
+    if torch.cuda.is_available():
+        dev = torch.device("cuda")
+    elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        dev = torch.device("mps")
+    else:
+        dev = torch.device("cpu")
+    epi = v9.EpisodicIndex()
+    epi.add_units([mk_unit("zebra", 0), mk_unit("quokka", 1)])
+    epi.attach_layer18(torch.tensor([[1.0, 0.0], [0.0, 1.0]]))
+    ok("l18 stored on cpu", epi.l18.device.type == "cpu")
+
+    real_lex = epi.lexical_scores
+
+    def lex_on_dev(q):
+        return real_lex(q).to(dev)
+
+    epi.lexical_scores = lex_on_dev
+    s = epi.hybrid_scores("quokka", q_hidden=torch.tensor([1.0, 0.0]), alpha=0.5)
+    ok("hybrid follows lexical device", s.device.type == dev.type)
+    ok("hybrid finite", bool(torch.isfinite(s).all()))
+    ok("hybrid covers full pool", s.shape == (2,))
+
+
+def test_layer18_strict_mode():
+    """P1：启用稠密通道时失败必须报错，禁止静默退化成纯词面。"""
+    def boom(texts, kind):
+        raise RuntimeError("no model")
+
+    # 先在没有 provider 的情况下建一个带 l18 的池，再切到严格 provider 查询
+    epi_q = v9.EpisodicIndex()
+    epi_q.add_units([mk_unit("zebra", 0)])
+    epi_q.attach_layer18(torch.tensor([[1.0, 0.0]]))
+
+    v9.set_layer18_provider(boom, strict=True)
+    try:
+        ok("strict flag set", v9.L18_STRICT is True)
+        epi = v9.EpisodicIndex()
+        ok("strict provider error raises",
+           _raises(lambda: epi.add_units([mk_unit("zebra", 0)])))
+        ok("strict query error raises",
+           _raises(lambda: epi_q.dense_scores("q")))
+    finally:
+        v9.set_layer18_provider(None, strict=False)
+    ok("strict flag reset", v9.L18_STRICT is False)
+
+    v9.set_layer18_provider(boom)
+    try:
+        epi2 = v9.EpisodicIndex()
+        epi2.add_units([mk_unit("zebra", 0)])
+        ok("lenient mode degrades silently", epi2.l18 is None)
+    finally:
+        v9.set_layer18_provider(None)
+
+
 if __name__ == "__main__":
     test_non_overlapping_index()
     test_ts_inheritance_v9()
@@ -454,4 +597,10 @@ if __name__ == "__main__":
     test_mean_pool_hidden()
     test_layer18_end_to_end_pooling()
     test_empty()
+    test_cr_overwrite_finds_same_subject_slot()
+    test_cr_pending_merge_and_stable_ids()
+    test_session_boundary_ts()
+    test_split_newline_chat()
+    test_hybrid_device_consistency()
+    test_layer18_strict_mode()
     print("ALL V9 CPU TESTS PASSED")

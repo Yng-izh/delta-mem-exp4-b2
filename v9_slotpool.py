@@ -62,6 +62,8 @@ TEMPORAL_BONUS = float(os.environ.get("V9_TEMPORAL_BONUS", "0.15"))  # 时序加
 L18_ALPHA      = float(os.environ.get("V9_L18_ALPHA", "0.3"))     # 稠密通道权重
 L18_LAYER      = int(os.environ.get("V9_L18_LAYER", "18"))        # 调用方应取的隐状态层号
 STATE_THETA    = float(os.environ.get("V9_STATE_THETA", "0.92"))  # 状态池语义合并阈值
+SPLIT_ON_NEWLINE = os.environ.get("V9_SPLIT_ON_NEWLINE", "1") == "1"  # 换行也切句（聊天多轮）
+SESSION_RESET  = os.environ.get("V9_SESSION_RESET", "1") == "1"   # Session 边界不继承时间戳
 
 STOPWORDS = {
     "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "by", "from",
@@ -94,11 +96,67 @@ YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 WORD_RE = re.compile(r"[A-Za-z0-9_\u00C0-\u024F'-]+")
 _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Session / 日期头：LongMemEval 每个 session 前有一行日期；也覆盖 Session 1 / ## Session 等写法。
+# 只在【行首】匹配，避免把句中的 "2023-05-20" 误判成新会话。
+SESSION_RE = re.compile(
+    r"^\s*(?:"
+    r"\[?\s*(?:session|conversation|dialogue|chat)\s*#?\s*\d+"
+    r"|#{1,6}\s*(?:session|conversation)"
+    r"|={3,}\s*(?:session|conversation)"
+    r"|\[?\s*(?:date|time)\s*[:：]"
+    r"|\[?\s*(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}"
+    r")",
+    flags=re.IGNORECASE,
+)
+
 
 def split_sentences(text):
-    """简单句切分（可被调用方覆盖：v9_slotpool.split_sentences = fn）。"""
-    parts = _SENT_SPLIT_RE.split(text.strip())
-    return [p.strip() for p in parts if p.strip()]
+    """句切分（可被调用方覆盖：v9_slotpool.split_sentences = fn）。
+
+    V9_SPLIT_ON_NEWLINE=1（默认）时先按换行切、再按句末标点切：
+    聊天/对话数据常有多轮消息没有句末标点，只按 ". " 切会把多轮并成一个单元，
+    再被 UNIT_MAX_WORDS 截断，检索单元与原文轮次对不上。
+    V9_SPLIT_ON_NEWLINE=0 时退化为旧行为（整段按标点切），便于与历史结果对齐。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if not SPLIT_ON_NEWLINE:
+        return [p.strip() for p in _SENT_SPLIT_RE.split(text) if p.strip()]
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        out.extend(p.strip() for p in _SENT_SPLIT_RE.split(line) if p.strip())
+    return out
+
+
+def split_sessions(context):
+    """按显式 Session / 日期头把上下文切成段：[(session_id, header_ts, text)]。
+
+    没有任何 Session 头时返回单段（session_id=0, header_ts=None）。
+    V9_SESSION_RESET=0 时始终返回单段（等价旧行为）。
+    设计不变量 I3：时间戳不得跨 Session 继承，因此必须先切出会话边界。
+    """
+    text = (context or "").strip()
+    if not text:
+        return []
+    if not SESSION_RESET:
+        return [(0, None, text)]
+    blocks, cur, cur_ts = [], [], None
+    for line in text.splitlines():
+        if SESSION_RE.match(line):
+            if any(s.strip() for s in cur):
+                blocks.append((len(blocks), cur_ts, "\n".join(cur)))
+            cur = [line]
+            tm = TIMESTAMP_RE.search(line)
+            cur_ts = tm.group(0) if tm else None
+        else:
+            cur.append(line)
+    if any(s.strip() for s in cur):
+        blocks.append((len(blocks), cur_ts, "\n".join(cur)))
+    return blocks or [(0, None, text)]
 
 
 def extract_year(ts):
@@ -127,36 +185,56 @@ def extract_units(context, block_sents=None):
     block_sents=1 -> 单句索引；block_sents>1 -> 连续 b 句成一块（stride == b，无重叠）。
     每个句子恰好属于一个单元（不丢句、不重复），因此 Top-K / 位置排序 / 邻域扩展良定义。
 
+    时间语义（不变量 I3）：
+      - 显式时间戳（句子自带）> Session 头日期 > 本 Session 内前文最近一次显式时间戳；
+      - **跨 Session 一律不继承**：新 Session 起点把 last_ts 重置为该 Session 的头日期
+        （无头日期则为 None），避免 Session 2 的偏好事实继承 Session 1 的年份；
+      - `event_time` 只记"事件发生时间"（本句显式时间或 Session 头日期），
+        `ingestion_order` 记"写入顺序"（句序号），二者分开维护。
+
     返回 list[dict]：
-      text       原文（拼上下文用，不含人工前缀）
-      index_text 打分文本（"In <ts>: <text>"，ts 可为显式或继承）
-      start/end  句索引区间（闭区间）
-      ts         该单元的时间戳（单元内首个显式标记，否则继承起点之前最近一次）
+      text        原文（拼上下文用，不含人工前缀）
+      index_text  打分文本（"In <ts>: <text>"，ts 可为显式或继承）
+      start/end   句索引区间（闭区间）
+      ts          该单元的时间戳（单元内首个显式标记，否则继承同 Session 起点之前最近一次）
       ts_explicit / ts_inherited
-      year       ts 的年份 int（时序重排用；无则 None）
-      is_event   单元内是否含事件动词
+      year        ts 的年份 int（时序重排用；无则 None）
+      is_event    单元内是否含事件动词
+      session_id  所属 Session 序号（无 Session 头时恒为 0）
+      event_time  事件发生时间（本句显式时间戳或 Session 头日期；无则 None）
+      ingestion_order 单元在上下文中的写入顺序（== 首句句号）
     """
-    sents = split_sentences(context)
+    sents, sid_at, hts_at = [], [], []
+    for sid, hts, stext in split_sessions(context):
+        for s in split_sentences(stext):
+            sents.append(s)
+            sid_at.append(sid)
+            hts_at.append(hts)
     n = len(sents)
     b = max(1, int(BLOCK_SENTS if block_sents is None else block_sents))
 
     ts_at = [None] * n          # 每句显式时间戳
-    resolved_ts = [None] * n    # 逐句"最近一次显式时间戳"（含自身），只读
+    ev_time = [None] * n        # 每句事件时间（显式 or Session 头）
+    resolved_ts = [None] * n    # 逐句"同 Session 内最近一次显式时间戳"（含自身），只读
     is_event = [False] * n
     last_ts = None
+    last_sid = None
     for i, s in enumerate(sents):
+        if sid_at[i] != last_sid:              # Session 边界：不继承上一段的时间
+            last_ts, last_sid = hts_at[i], sid_at[i]
         m = TIMESTAMP_RE.search(s)
         if m:
             last_ts = m.group(0)
             ts_at[i] = last_ts
         resolved_ts[i] = last_ts
+        ev_time[i] = ts_at[i] or hts_at[i]
         is_event[i] = bool(EVENT_HINT_RE.search(s))
 
     units = []
     for u0 in range(0, n, b):                 # 非重叠：起点每次前进 b
         u1 = min(u0 + b - 1, n - 1)
         explicit = next((ts_at[j] for j in range(u0, u1 + 1) if ts_at[j]), None)
-        prev_ts = resolved_ts[u0 - 1] if u0 > 0 else None
+        prev_ts = resolved_ts[u0 - 1] if u0 > 0 and sid_at[u0 - 1] == sid_at[u0] else None
         ts = explicit if explicit is not None else prev_ts
         text = " ".join(sents[u0:u1 + 1])
         units.append({
@@ -169,6 +247,9 @@ def extract_units(context, block_sents=None):
             "ts_inherited": explicit is None and ts is not None,
             "year": extract_year(ts),
             "is_event": any(is_event[j] for j in range(u0, u1 + 1)),
+            "session_id": sid_at[u0],
+            "event_time": next((ev_time[j] for j in range(u0, u1 + 1) if ev_time[j]), None),
+            "ingestion_order": u0,
         })
     return units
 
@@ -218,19 +299,31 @@ def encode_words(words):
 
 # ----------------------------- 第 18 层隐状态接口 -----------------------------
 L18_PROVIDER = None   # fn(texts: list[str], kind: "units"|"query") -> [N, d] | None
+L18_STRICT = False    # True：provider 缺失/抛错/形状不符 -> 直接报错，禁止静默退化
 
 
-def set_layer18_provider(fn):
+def set_layer18_provider(fn, strict=None):
     """注入第 18 层隐状态提供者；fn=None 关闭稠密通道。
 
     fn 契约：
-      - fn(texts, kind) 返回 [len(texts), d] 张量（CPU/GPU 均可，内部转 CPU fp32 并 L2 归一化）；
+      - fn(texts, kind) 返回 [len(texts), d] 张量（CPU/GPU 均可，内部统一转 CPU fp32 并 L2 归一化）；
       - kind == "units" 用于建索引（一次批量），"query" 用于查询（一次一条）；
-      - 返回 None / 抛异常 / 形状不符 -> 静默退化为纯词面打分（保证 CPU 单测与无模型路径可用）；
+      - 返回 None / 抛异常 / 形状不符 -> 默认静默退化为纯词面打分（保证 CPU 单测与无模型路径可用）；
+      - strict=True 时改为【严格模式】：上述任何一种失败都抛异常，不允许"看起来跑通了但稠密通道没生效"。
+        真实稠密实验（AR_V9_L18=1）必须用 strict=True，否则故障会表现为指标骤降而非报错。
       - 单元与 query 必须来自同一层（V9_L18_LAYER，默认 18）、同一 pool 方式（mean-pool）。
     """
-    global L18_PROVIDER
+    global L18_PROVIDER, L18_STRICT
     L18_PROVIDER = fn
+    if strict is not None:
+        L18_STRICT = bool(strict)
+
+
+def _l18_fail(msg):
+    """稠密通道失败：严格模式抛错，否则返回 None 由调用方退化。"""
+    if L18_STRICT:
+        raise RuntimeError(f"[v9/l18] {msg}（L18_STRICT=1，禁止静默退化）")
+    return None
 
 
 def mean_pool_hidden(hidden, attention_mask=None):
@@ -263,20 +356,26 @@ def layer18_spec():
 
 
 def _call_l18(texts, kind):
+    """调用 provider 并规整为 [N, d] CPU fp32 L2 归一化向量；失败时按严格模式处理。
+
+    统一落 CPU：单元侧向量常驻内存（262K 单元 × d），查询期只搬 query；
+    设备一致性由 hybrid_scores 在最后一步对齐（dense 结果 .to(lexical.device)）。
+    """
     if L18_PROVIDER is None or not texts:
         return None
     try:
         h = L18_PROVIDER(list(texts), kind)
-    except Exception:
-        return None
+    except Exception as e:
+        return _l18_fail(f"provider 抛错 kind={kind}: {e!r}")
     if h is None:
-        return None
+        return _l18_fail(f"provider 返回 None kind={kind} n={len(texts)}")
     h = torch.as_tensor(h, dtype=torch.float32)
     if h.dim() == 1:
         h = h.unsqueeze(0)
     if h.dim() != 2 or h.shape[0] != len(texts):
-        return None
-    return F.normalize(h, dim=-1)
+        return _l18_fail(f"provider 形状不符 kind={kind} got={tuple(h.shape)} "
+                         f"want=({len(texts)}, d)")
+    return F.normalize(h, dim=-1).to("cpu")
 
 
 # ----------------------------- 打分底座 -----------------------------
@@ -355,15 +454,22 @@ class _ScoreStore:
                     self.l18 = h
                 elif self.l18 is not None and self.l18.shape[0] == n_before:
                     self.l18 = torch.cat([self.l18, h], dim=0)
+                elif L18_STRICT:
+                    raise RuntimeError(
+                        f"[v9/l18] 稠密通道与单元数不同步：l18={None if self.l18 is None else self.l18.shape[0]} "
+                        f"n_before={n_before} batch={h.shape[0]}（L18_STRICT=1）")
 
     def attach_layer18(self, hidden):
-        """直接注入单元侧第 18 层隐状态 [N, d]（N 必须等于当前单元数）。"""
+        """直接注入单元侧第 18 层隐状态 [N, d]（N 必须等于当前单元数）。
+
+        统一存 CPU fp32：与 _call_l18 的落盘一致，打分时再由 hybrid_scores 对齐设备。
+        """
         h = torch.as_tensor(hidden, dtype=torch.float32)
         if h.dim() == 1:
             h = h.unsqueeze(0)
         if h.dim() != 2 or h.shape[0] != len(self):
             raise ValueError(f"layer18 shape {tuple(h.shape)} != ({len(self)}, d)")
-        self.l18 = F.normalize(h, dim=-1)
+        self.l18 = F.normalize(h, dim=-1).to("cpu")
 
     # ---- 词面打分 ----
     def idf_table(self):
@@ -414,9 +520,15 @@ class _ScoreStore:
 
     # ---- 稠密打分（第 18 层） ----
     def dense_scores(self, query=None, q_hidden=None):
-        """单元-query 的第 18 层隐状态余弦；未接稠密通道时返回 None。"""
-        if self.l18 is None or self.l18.shape[0] != len(self):
+        """单元-query 的第 18 层隐状态余弦；未接稠密通道时返回 None。
+
+        返回 **CPU** fp32 [N]（l18 常驻 CPU，262K 单元也不会额外占显存）。
+        设备对齐由 hybrid_scores 统一完成：绝不让"词面分在 GPU、稠密分在 CPU"直接相加。
+        """
+        if self.l18 is None:
             return None
+        if self.l18.shape[0] != len(self):
+            return _l18_fail(f"稠密向量与单元数不同步：l18={self.l18.shape[0]} n={len(self)}")
         if q_hidden is None:
             if query is None:
                 return None
@@ -427,15 +539,24 @@ class _ScoreStore:
         qh = torch.as_tensor(q_hidden, dtype=torch.float32)
         if qh.dim() > 1:
             qh = qh.mean(dim=0)
-        qh = F.normalize(qh, dim=0)
-        return (self.l18 @ qh).clamp(-1.0, 1.0)
+        qh = F.normalize(qh.to(device=self.l18.device, dtype=torch.float32), dim=0)
+        return (self.l18 @ qh).clamp(-1.0, 1.0).to("cpu")
 
     def hybrid_scores(self, query, q_hidden=None, alpha=None):
-        """混合打分：(1-alpha)·词面 + alpha·((稠密cos+1)/2)；无稠密通道 -> 纯词面。"""
+        """混合打分：(1-alpha)·词面 + alpha·((稠密cos+1)/2)；无稠密通道 -> 纯词面。
+
+        词面分在 EMB.device（通常是 GPU），稠密分在 CPU -> 这里显式把稠密分搬到
+        词面分所在设备再相加。这是 v9 第 18 层混合检索设备不一致的修复点。
+        """
         s = self.lexical_scores(query)
         d = self.dense_scores(query, q_hidden)
         if d is None:
             return s
+        if d.shape[0] != s.shape[0]:
+            if L18_STRICT:
+                _l18_fail(f"稠密分长度 {d.shape[0]} != 词面分长度 {s.shape[0]}")
+            return s
+        d = d.to(device=s.device, dtype=s.dtype)
         a = L18_ALPHA if alpha is None else float(alpha)
         a = min(max(a, 0.0), 1.0)
         return (1.0 - a) * s + a * ((d + 1.0) * 0.5)
@@ -645,11 +766,19 @@ def _cr_key_vec(text):
 
 # ----------------------------- 状态池（可选补充 / CR 扩展点） -----------------------------
 class StatePool(_ScoreStore):
-    """稳定事实单元池：近重复语义合并（v9 CR：主语+关系双阈值；否则 mean-cos）。
+    """稳定事实单元池：同主语+同关系的**原位覆写**（CR 状态更新语义）。
 
-    CR v9 扩展点已落到 `_should_merge`：主语归一化字符串精确匹配，且关系谓词
-    向量余弦 > V9_CR_REL_THETA（默认 0.80）才覆写；v8 的单阈值 mean-cos(0.92)
-    对"同主语+同谓词、不同宾语"的冲突事实不够敏感。AR 状态补充路径仍可用。
+    覆写判据（修 P0「CR 覆写选不到正确的旧槽」）：
+      1. 用 `_subj_index`（主语归一化串 -> 槽下标）定位**所有同主语槽**；
+      2. 在其中挑关系谓词余弦最大者，过 `V9_CR_REL_THETA`（默认 0.80）才覆写；
+      3. 同主语但关系不同 -> 新增槽（不同属性，不是冲突）；
+      4. 没有同主语槽时才退回 v8 的 mean-cos 单阈值（`V9_STATE_THETA`）。
+    旧实现只检查全池 argmax 槽的主语：若另一条事实整体更像，同主语的旧值就覆写不了，
+    旧值与新值同时存活 —— 直接违背 CR 的"新值覆盖旧值"语义。
+
+    覆写是**原位更新**（`_replace`）：槽 id 稳定，不 drop+append，
+    因此 `metas`/`tokv`/`years`/CR 键/图键始终与槽下标一一对应。
+    建池复杂度：每条事实 O(同主语槽数)，不再是 O(N) 全池比较。
     """
 
     def __init__(self, theta=None):
@@ -657,40 +786,109 @@ class StatePool(_ScoreStore):
         self.theta = STATE_THETA if theta is None else float(theta)
         self.cr_subj = []      # 主语归一化字符串（与 mean 槽一一对应）
         self.cr_relk = []      # 关系谓词均值向量 [d]
+        self._subj_index = {}  # 主语归一化串 -> [槽下标]（升序）
+        self.n_merge_checked = 0
+        self.n_merge_rejected = 0
 
     def _store(self, texts, index_texts, metas):
         keep = [(t, it, m) for t, it, m in zip(texts, index_texts, metas)
                 if t and t.strip()]
+        n_before = len(self)
         super()._store(texts, index_texts, metas)
         for t, _it, _m in keep:
             subj, rel = _cr_parse_fact(t)
             self.cr_subj.append(_cr_norm(subj))
             self.cr_relk.append(_cr_key_vec(rel))
+        for j in range(n_before, len(self.cr_subj)):
+            self._subj_index.setdefault(self.cr_subj[j], []).append(j)
 
-    def _should_merge(self, text, meta, qm, base):
-        """双阈值：主语精确匹配 + 关系谓词余弦 > V9_CR_REL_THETA（默认 0.80）。
+    def _rebuild_subj_index(self):
+        idx = {}
+        for i, s in enumerate(self.cr_subj):
+            idx.setdefault(s, []).append(i)
+        self._subj_index = idx
 
-        以 add_batch 的 argmax 槽（实际覆写目标）为准：只有该槽与候选主语完全
-        相同、且谓词余弦过阈值时才合并；谓词键缺失（pending / 未注入 tok+EMB）
-        或主语为空时退回 mean-cos 单阈值。
-        """
+    def _reindex_subject(self, old, j, new):
+        """槽 j 的主语从 old 迁到 new（原位覆写时主语可能变）。"""
+        lst = [i for i in self._subj_index.get(old, []) if i != j]
+        if lst:
+            self._subj_index[old] = lst
+        else:
+            self._subj_index.pop(old, None)
+        if new:
+            self._subj_index.setdefault(new, []).append(j)
+
+    def _pending_item(self, text, meta, qm):
+        """待写入项：(text, meta, mean_vec, 主语归一化串, 关系键向量)。"""
+        subj, rel = _cr_parse_fact(text)
+        return (text, meta, qm, _cr_norm(subj), _cr_key_vec(rel))
+
+    def _mean_cos_target(self, qm, pending=None):
+        """v8 兼容路径：全池 mean-cos 单阈值（只在主语键不可用时使用）。"""
+        base = None
+        if self.mean:
+            base = torch.stack([m.cpu() for m in self.mean])
+        if pending:
+            pm = torch.stack([p[2] for p in pending])
+            base = pm if base is None else torch.cat([base, pm])
+        if base is None:
+            return None
         sims = base @ qm
         j = int(sims.argmax())
-        if j >= len(self.cr_subj):                 # pending 单元，无已存储键
-            return float(sims[j]) > self.theta
+        if float(sims[j]) <= self.theta:
+            return None
+        n = len(self.mean)
+        return ("stored", j) if j < n else ("pending", j - n)
+
+    def _merge_target(self, text, meta, qm, pending=None):
+        """定位应被原位覆写的槽；返回 ("stored"|"pending", idx) 或 None。
+
+        同主语槽里取关系谓词余弦最大者（谓词键缺失时退回该槽的 mean-cos），
+        过阈值才覆写。**不再**因为"别的槽整体更相似"而放弃覆写。
+        """
+        self.n_merge_checked += 1
         subj, rel = _cr_parse_fact(text)
         s_norm = _cr_norm(subj)
-        if not s_norm:
-            return float(sims[j]) > self.theta
-        if s_norm != self.cr_subj[j]:
-            return False
+        if not s_norm:                              # 主语不可用 -> v8 兼容路径
+            return self._mean_cos_target(qm, pending)
         k_r = _cr_key_vec(rel)
-        if k_r is None or self.cr_relk[j] is None:
-            return float(sims[j]) > self.theta
-        return float(self.cr_relk[j] @ k_r) > CR_REL_THETA
+        best = None                                 # (score, kind, idx, threshold)
+        for j in self._subj_index.get(s_norm, ()):
+            if k_r is not None and self.cr_relk[j] is not None:
+                sc, thr = float(self.cr_relk[j] @ k_r), CR_REL_THETA
+            else:
+                sc, thr = float(self.mean[j] @ qm), self.theta
+            if best is None or sc > best[0]:
+                best = (sc, "stored", j, thr)
+        for k, p in enumerate(pending or ()):
+            if p[3] != s_norm:
+                continue
+            if k_r is not None and p[4] is not None:
+                sc, thr = float(p[4] @ k_r), CR_REL_THETA
+            else:
+                sc, thr = float(p[2] @ qm), self.theta
+            if best is None or sc > best[0]:
+                best = (sc, "pending", k, thr)
+        if best is None:                            # 无同主语槽 -> 新状态
+            return None
+        sc, kind, idx, thr = best
+        if sc > thr:
+            return (kind, idx)
+        self.n_merge_rejected += 1
+        return None
+
+    def _should_merge(self, text, meta, qm, base):
+        """兼容旧签名（v9 早期调用/测试）：是否应合并。`base` 参数已不再使用。
+
+        真正的目标槽定位走 `_merge_target`；此处只做 bool 适配。
+        """
+        return self._merge_target(text, meta, qm) is not None
 
     def _drop(self, j):
-        """回收第 j 个槽（df/tokv/words/mean/years 同步），供覆写前使用。"""
+        """回收第 j 个槽（df/tokv/words/mean/years 同步），仅供容量淘汰使用。
+
+        注意：CR 覆写不再走这里（改用 `_replace` 原位更新），槽 id 因此保持稳定。
+        """
         if j < len(self.cr_subj):
             self.cr_subj.pop(j)
             self.cr_relk.pop(j)
@@ -704,8 +902,62 @@ class StatePool(_ScoreStore):
         if self.l18 is not None and self.l18.shape[0] == len(self):
             self.l18 = (torch.cat([self.l18[:j], self.l18[j + 1:]], dim=0)
                         if self.l18.shape[0] > 1 else None)
+        self._rebuild_subj_index()
         self._idf = None
         self._mean_mat = None
+
+    def _replace(self, j, text, meta):
+        """原位覆写第 j 个槽（P1：CR 覆写保持槽 id 稳定，不 drop+append）。
+
+        同步：原文/打分文本/元数据/token 向量/词表/均值/年份/df/CR 键/稠密向量。
+        `metas[j]` 会被新事实的 meta 覆盖（serial 因此变成新值，槽位置不变）。
+        """
+        it = build_index_text(meta.get("ts"), text)
+        ws = _content_words(it)[:UNIT_MAX_WORDS]
+        vecs, counts = encode_words(ws)
+        L = int(sum(counts))
+        if L <= 0:
+            dim = vecs.shape[1] if vecs.numel() else (EMB.shape[1] if EMB is not None else 1)
+            tokv = torch.zeros((1, dim), dtype=torch.float32)
+            ws = [ws[0] if ws else "<empty>"]
+        else:
+            tokv = vecs[:L].float()
+        if TOKV_BF16 and tokv.dtype != torch.bfloat16:
+            tokv = tokv.to(torch.bfloat16)
+
+        for w in set(self.words[j]):              # df：先减旧词，再加新词
+            self.word_df[w] -= 1
+            if self.word_df[w] <= 0:
+                self.word_df.pop(w, None)
+        for w in set(ws):
+            self.word_df[w] += 1
+
+        self.texts[j] = text
+        self.index_texts[j] = it
+        self.metas[j] = meta
+        self.tokv[j] = tokv
+        self.words[j] = ws
+        self.mean[j] = F.normalize(tokv.float().mean(dim=0), dim=0)
+        year = meta.get("year")
+        if year is None:
+            year = extract_year(meta.get("ts"))
+        self.years[j] = float(year) if year is not None else float("nan")
+
+        subj, rel = _cr_parse_fact(text)
+        s_new = _cr_norm(subj)
+        s_old = self.cr_subj[j] if j < len(self.cr_subj) else None
+        if j < len(self.cr_subj):
+            self.cr_subj[j] = s_new
+            self.cr_relk[j] = _cr_key_vec(rel)
+            if s_old != s_new:
+                self._reindex_subject(s_old, j, s_new)
+        self._idf = None
+        self._mean_mat = None
+
+        if self.l18 is not None and L18_PROVIDER is not None:
+            h = _call_l18([it], "units")
+            if h is not None and h.shape[0] == 1:
+                self.l18[j] = h[0]
 
     def _mean_only(self, index_text):
         dev = EMB.device if EMB is not None else torch.device("cpu")
@@ -718,32 +970,26 @@ class StatePool(_ScoreStore):
         return F.normalize(qe.mean(dim=0), dim=0)
 
     def add_batch(self, units):
-        """units: list[(text, meta)]。近重复（默认 mean cos > theta）覆写旧槽。"""
+        """units: list[(text, meta)]。命中同主语+同关系（或 mean-cos 单阈值）则原位覆写。
+
+        每条事实的候选定位是 O(同主语槽数)：不再为每条事实 stack 全池均值矩阵。
+        """
         pending = []
         for text, meta in units:
             if not text or not text.strip():
                 continue
             it = build_index_text(meta.get("ts"), text)
             qm = self._mean_only(it).cpu()
-            base = None
-            if self.mean:
-                base = torch.stack([m.cpu() for m in self.mean])
-            if pending:
-                pm = torch.stack([p[2] for p in pending])
-                base = pm if base is None else torch.cat([base, pm])
-            merged = False
-            if base is not None and self._should_merge(text, meta, qm, base):
-                sims = base @ qm
-                j = int(sims.argmax())
-                if j < len(self.mean):
-                    self._drop(j)
-                    pending.append((text, meta, qm))
-                else:
-                    pending[j - len(self.mean)] = (text, meta, qm)
-                self.n_dup += 1
-                merged = True
-            if not merged:
-                pending.append((text, meta, qm))
+            target = self._merge_target(text, meta, qm, pending)
+            if target is None:
+                pending.append(self._pending_item(text, meta, qm))
+                continue
+            kind, idx = target
+            if kind == "stored":
+                self._replace(idx, text, meta)      # 原位覆写：槽 id 不变
+            else:
+                pending[idx] = self._pending_item(text, meta, qm)
+            self.n_dup += 1
         if not pending:
             return
         texts = [p[0] for p in pending]

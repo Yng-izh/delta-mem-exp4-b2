@@ -2,6 +2,106 @@
 
 本仓库的实验记录按版本追加。指标一律注明"由哪一版代码产出"，避免把重构前数字误当重构后结果。
 
+## [v9-fix] — 2026-10-20 — 设备不一致 / 覆写丢槽 / 结果文件复用（P0）+ 诊断诚实化 + CR 性能与路径读出
+
+**性质：正确性与可复现性修复，不含任何新指标。** 未跑真实评测、未加载模型权重、未初始化 CUDA。
+所有结论来自 CPU 单测与 `--dry-run`；EventQA 窗口扫描脚本已就绪但**未执行**（见
+`experiments/eventqa_window_sweep.md`，表中数值留空）。
+
+### Fixed — P0（会让结果错误却看起来正常）
+
+- **第 18 层稠密通道设备不一致**（`v9_slotpool.py:545` `hybrid_scores`）：旧版把 `dense_scores` 的结果
+  （provider 在 GPU 上算）与 `lexical_scores`（CPU/另一设备）直接相加，触发
+  `RuntimeError: Expected all tensors to be on the same device`。该异常被 `run_ar_v7.py` 里
+  宽 `except` 吞掉，于是**整题退化成空证据块**，指标下降被误读为"方法变差"。
+  改为：`l18` 向量一律常驻 **CPU fp32**（262K 单元 × d 放显存会爆），`dense_scores` 返回 CPU 张量、
+  `hybrid_scores` 在相加前把两侧对齐到 `s.device/s.dtype`，并加形状断言。
+- **CR 覆写可能找不到正确的旧槽**（`v9_slotpool.py:843` `_merge_target`）：旧版在全池 `mean` 上取
+  `argmax` 选候选，再按主语过滤——当别的槽主语向量更接近时，同主语的旧槽**根本没进候选**，
+  于是"覆写"变成新增，池里留下过期事实。改为 `_subj_index` 主语倒排表（`_reindex_subject`），
+  先 O(1) 取同主语槽，再在其中按关系谓词余弦 + `V9_CR_REL_THETA` 双阈值判定。
+- **不同实验配置复用同一个结果文件**（`run_ar_v7.py:224` `init_manifest` + 新增 `run_manifest.py`）：
+  旧版输出固定 `ar_{MODE}_{SRC}.jsonl` 且 `AR_RESUME=1` 默认开，`AR_DELTA_WRITE=0/1`、
+  `AR_V9_L18=0/1`、不同 EventQA 窗口全部落到同一文件，第二次运行直接跳过已完成题并打印第一次的分数。
+  改为：配置指纹（8 位）→ 文件名 `ar_{MODE}_{SRC}_{id}.jsonl`；同目录 `<out>.manifest.json` 记录
+  完整参数 + git commit + 环境；续跑前校验，不一致**拒绝恢复**（`AR_RESUME_MANIFEST=0` 可关，不建议）。
+
+### Fixed — P1
+
+- **时间戳跨 Session 继承**（`v9_slotpool.py:135` `split_sessions` / `:182` `extract_units`）：
+  违反不变量 I3。现在按 `Session N` / `## Session` / `=== Session` / `Date:` / `YYYY/MM/DD` 切 Session，
+  每个 Session 重置 `last_ts`，单元新增 `session_id` / `event_time` / `ingestion_order` 字段。
+  无显式标记的上下文仍视为单 Session（行为不变）。
+- **CR 覆写是 drop+append**（`v9_slotpool.py:909` `_replace`）：旧版删除旧槽再追加新槽，槽 id 漂移、
+  图键与槽下标错位、`cr_E_*` 索引失效。改为原位替换（texts/index_texts/metas/tokv/words/mean/years/df/
+  CR 图键/l18 全部就地更新），槽 id 与池序稳定。`v9_cr.py:179` 覆写 `_replace` 同步 CR 图结构与
+  主语/宾语键表，并清空 `_subj_mat_cache`。
+- **StatePool 建池 O(N²)**：旧版每条事实都对全池 stack 一次再打分。改为主语倒排索引 +
+  批量内 pending 冲突合并（`_merge_target` 返回 `("stored"|"pending", idx)`），单条事实只碰同主语槽。
+- **第 18 层编码失败静默降级**（`v9_slotpool.py:305` `set_layer18_provider(fn, strict=True)`、
+  `:358` `_call_l18`）：runner 注入 provider 时传 `strict=True`，失败/形状不符直接抛错，不再退化成纯词面。
+  默认 `strict=None` 时仍按 `V9_L18_STRICT` 决定，保持单测与旧脚本可用。
+- **检索异常被宽 except 吞掉**（`run_ar_v7.py:244` `strict_retrieval_enabled`）：`AR_STRICT_RETRIEVAL=auto`
+  时，只要稠密通道 / delta 写入 / 潜层读出任一开启，检索异常直接 `raise`，不再产出空证据块。
+- **`inputs_embeds` 被当成潜层读出**（`run_ar_v7.py:395` `generate_readout`）：实际是 `EMB[ids]`——
+  **同一段明文 prompt** 的查表嵌入，没有注入任何槽位状态。新增 `AR_READOUT_MODE=prompt|text_embeds|latent`，
+  `latent` **显式报错退出**（未实现）；每条记录写入 `readout.mode` 与 `readout.latent_slots=false`，
+  避免论文里把明文嵌入说成 latent memory。
+
+### Fixed — P2
+
+- **诊断 `Recall@K` 名不副实**（`ar_diag.py`）：它是"gold answer 字符串是否出现在第 K 个槽位"的代理，
+  不是证据级召回。规范键改为 `answer_recall_at_k`（旧键 `recall_at_k` 保留为别名以兼容历史 JSONL），
+  新增 `evidence_recall_at_k`：没有金标证据 span 时恒为 `None`，**不伪造**。
+- **Delta 空快照允许实验继续**（`run_ar_v7.py:357` `prepare_delta_memory`）：写入开启但写后快照为空时，
+  逐题恢复退化为 no-op、题目互相污染。改为直接 `RuntimeError`；确需放行用 `AR_ALLOW_EMPTY_DELTA_SNAP=1`。
+
+### Added
+
+- **`run_manifest.py`**：配置指纹、原子写 sidecar、`check_resume`（config_id / 参数 / commit 三级校验）、
+  `default_out`（文件名带指纹）、`describe`。纯标准库，不依赖 torch。
+- **`run_group_b2_v7.py`** 接入 manifest：`CR_MODE`/`BEAM`/`EGO_K`/`REL_THETA`/`HOP1_M`/`PATH_VIEW`/
+  `CF_PROMPT`/`THETA`/`POOL_MAX` 全部进指纹；续跑按 `question_idx` 跳过已完成题；汇总改为**读文件**
+  而非只算本轮 `results`（续跑时旧算法会把总分算成本轮小样本）。
+- **`v9_cr.hop1_candidates`**（`v9_cr.py:241`）：Hop1 先用主语均值矩阵 `@ q_k` 初筛至多
+  `V9_CR_HOP1_M=96` 个候选（`n<=M` 时全量，等价旧行为），再逐 token MaxSim；1 万槽池的 Python
+  循环从 1 万次降到 96 次。gold 槽不丢（`test_hop1_matrix_prefilter`）。
+- **CR 路径式读出**（`v9_cr.py:337` / `:437` `_render_paths`）：每条完整路径渲染成
+  `PATH i: 种子 --关系--> 中间实体 --关系--> 目标`，附实体链与关系分，再列其余已选事实；
+  事实仍用**全局编号**，反事实 Prompt 的"编号越大越新"规则不变。`V9_CR_PATH_VIEW=1` 默认开
+  （v9 CR 从未跑分，无历史可比性问题），`=0` 回到平铺块。
+- **`experiments/eventqa_window_sweep.md` + `run_eventqa_window_sweep.sh`**：Back/Ahead = 0/20、4/16、
+  10/10、16/4 四组，记录 `anchor_accuracy`（`anchor_answer_hit`）与 `answer_in_context`。
+- **`tools/summarize_sweep.py`**：读若干 jsonl，输出 `window/n/SF/anchor/in_ctx/AR@1/3/10/run_id` 表。
+- **`test_run_manifest.py`**（27 断言）：指纹随消融开关变化、文件隔离、续跑三级校验、
+  `latent` 读出被拒、delta 空快照报错。
+
+### Changed
+
+- `run_ar_v7.py` 记录新增 `run_id` / `readout` / `window` / `anchor_answer_hit` / `anchor_window_hit`；
+  `AR_INPUTS_EMBEDS=1` 仍可用，等价于 `AR_READOUT_MODE=text_embeds`。
+- `ARCHITECTURE.md` 重写为**三层结构**（输入事件流 / State Memory / Episodic Memory / Evidence Router /
+  Latent Readout），新增不变量 I5（结果是配置的函数），并明确"读出层仍是明文"这一事实边界。
+
+### Tests
+
+| 套件 | 断言 | 状态 |
+|---|---|---|
+| `test_v9_slotpool.py` | 129 | 全绿（含同主语覆写 P0 回归、设备对齐、Session 边界、strict 模式） |
+| `test_v9_cr.py` | 80 | 全绿（含原位覆写图键一致、Hop1 初筛、路径读出/平铺回退） |
+| `test_ar_v9_wiring.py` | 36 | 全绿 |
+| `test_ar_delta_alignment.py` | 27 | 全绿 |
+| `test_run_manifest.py` | 27 | 全绿 |
+| `test_v8_slotpool.py` | 57 | 全绿 |
+| `ar_diag.py --selftest` | 57 | 全绿 |
+
+### 未做 / 未验证（不得在论文中声称）
+
+1. 真实 GPU 跑分：v9 AR、CR v9、EventQA 窗口扫描四组**均未执行**。
+2. 第 18 层稠密通道的**效果**（只有设备与失败路径被验证）。
+3. Delta 状态 + 快照恢复在真实模型上的行为（仅单测 stub）。
+4. 槽位潜向量表征（路径 B）——**无实现**，`AR_READOUT_MODE=latent` 直接报错。
+
 ## [docs] — 2026-10-20 — 新增 `ARCHITECTURE.md`（预期架构）+ 环境路径订正
 
 ### Added

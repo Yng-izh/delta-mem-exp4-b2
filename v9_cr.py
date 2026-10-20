@@ -1,16 +1,24 @@
 # v9_cr.py — CR（FactConsolidation）v9 强化：双阈值覆写 + Beam=6 ego-graph + 双跳链联合打分 + 反事实 Prompt
 #
 # 相对 v7（v7_slotpool.SlotPool，CR 基线）的改动：
-#   (1) 覆写：沿用 v9_slotpool.StatePool._should_merge 的【主语精确匹配 + 关系谓词
-#       余弦 > V9_CR_REL_THETA(0.80)】双阈值，替换 v8 的 mean-cos(0.92) 单阈值；
+#   (1) 覆写：沿用 v9_slotpool.StatePool 的【主语精确匹配 + 关系谓词余弦 >
+#       V9_CR_REL_THETA(0.80)】双阈值，替换 v8 的 mean-cos(0.92) 单阈值；
 #       本文件只补图检索所需的 (subj, rel, obj) 逐 token 键。
+#       v9 修复：目标槽由 StatePool._merge_target 按【同主语槽集合】定位（不再看全池
+#       argmax），且覆写走 `_replace` **原位更新**（槽 id 稳定，不 drop+append）。
 #   (2) Beam=6 ego-graph 第 1 跳：Hop1 取 6 个主语门控种子后，立刻并入每个种子的
 #       ego 邻域（同主语的其他属性 + 出边实体），不再只留 2 个孤立种子。
+#       v9 修复：Hop1 先用主语均值向量做一次矩阵初筛（V9_CR_HOP1_M）再逐 token MaxSim，
+#       避免对全池逐槽 Python 循环（262K/约一万槽时查询延迟不可接受）。
 #   (3) 双跳链谓词联合打分 Score_chain：seed→mid→target 链的分数 =
 #       W_SUBJ·subj_cov(target) + W_BRIDGE·(bridge(seed,mid)+bridge(mid,target))/2
 #       + W_PRED·(rel_cov(mid)+rel_cov(target))/2，两条边谓词都与 query 谓词比较。
 #   (4) 反事实强约束 Prompt：编号越大越新；冲突时只认最大编号；作答前先做
 #       "若候选答案为真则会与更晚事实矛盾" 的自检；禁止输出被覆盖值。
+#   (5) 路径式读出（V9_CR_PATH_VIEW=1，默认开）：不再把"种子 + 中间节点 + 目标"
+#       混成一个大集合平铺，而是选少量完整路径按 seed → intermediate → target 展示，
+#       每条路径保留实体连接与关系分数；未进入路径的已选事实放 OTHER SELECTED FACTS。
+#       V9_CR_PATH_VIEW=0 退回按 serial 升序的平铺块（与早期 v9 行为一致）。
 #
 # 注入约定（同 v7/v8）：v9_cr.set_encoder(tok, EMB)（内部同步 v9_slotpool.tok/EMB）。
 # CPU 可测：注入 stub tokenizer + 小嵌入矩阵即可跑全部逻辑（不加载模型/不占 GPU）。
@@ -41,6 +49,9 @@ CR_W_BRIDGE   = float(os.environ.get("V9_CR_W_BRIDGE", "0.30"))   # 链分：两
 CR_W_PRED     = float(os.environ.get("V9_CR_W_PRED", "0.30"))     # 链分：两跳谓词
 CR_POOL_MAX   = int(os.environ.get("V9_CR_POOL_MAX", "0"))        # 0=弹性无损（同 v7 默认）
 CR_CF_PROMPT  = os.environ.get("V9_CR_CF_PROMPT", "1") == "1"     # 反事实 Prompt 开关
+CR_HOP1_M     = int(os.environ.get("V9_CR_HOP1_M", "96"))         # Hop1 矩阵初筛候选数
+CR_PATH_VIEW  = os.environ.get("V9_CR_PATH_VIEW", "1") == "1"     # 路径式读出（否则平铺）
+CR_PATHS      = int(os.environ.get("V9_CR_PATHS", "3"))           # 最多展示几条完整路径
 
 # 反事实强约束 Prompt（CR 的"新值覆盖旧值"语义写进指令，而不是只靠事实顺序）
 CR_PROMPT_HEADER = (
@@ -165,6 +176,23 @@ class CRStatePool(v9.StatePool):
         self._subj_mat_cache = None
         super()._drop(j)
 
+    def _replace(self, j, text, meta):
+        """原位覆写（槽 id 稳定）：同步 CR 图检索键，保证图键与槽下标仍一一对应。"""
+        super()._replace(j, text, meta)
+        subj, rel, obj = parse_fact_triple(text)
+        E_s, k_s, nw_s = _enc(subj)
+        E_r, _k_r, _ = _enc(rel)
+        E_o, k_o, _ = _enc(obj)
+        self.cr_E_subj[j] = E_s
+        self.cr_E_rel[j] = E_r
+        self.cr_E_obj[j] = E_o
+        self.cr_k_subj[j] = k_s
+        self.cr_k_obj[j] = k_o
+        self.cr_subj_norm[j] = v9._cr_norm(subj)
+        self.cr_obj_norm[j] = v9._cr_norm(obj)
+        self.cr_n_subj[j] = nw_s
+        self._subj_mat_cache = None
+
     def upsert(self, fact, serial):
         """写入一条事实；同主语+同谓词（双阈值）命中则原位覆写语义（旧槽被替换）。
 
@@ -210,11 +238,35 @@ class CRStatePool(v9.StatePool):
             b.setdefault(s, []).append(i)
         return b
 
-    def hop1_scores(self, E_q):
-        """Hop1 主语门控 + 特异性长度奖励 + 谓词覆盖（同 v7 口径）。"""
+    def hop1_candidates(self, E_q):
+        """主语均值向量矩阵初筛：返回候选槽下标（至多 V9_CR_HOP1_M 个）。
+
+        O(N·d) 的一次矩阵乘；逐 token MaxSim 只在这批候选上做。
+        n <= M 时直接全量，保证小池行为与旧版完全一致。
+        """
         n = len(self)
+        if n == 0:
+            return []
+        m = min(max(int(CR_HOP1_M), self.beam * 4, 16), n)
+        if m >= n:
+            return list(range(n))
+        q_k = F.normalize(E_q.float().mean(dim=0), dim=0)
+        cos = self._subj_mean_mat() @ q_k
+        idx = torch.topk(cos, m).indices.tolist()
+        return sorted(int(i) for i in idx)
+
+    def hop1_scores(self, E_q):
+        """Hop1 主语门控 + 特异性长度奖励 + 谓词覆盖（同 v7 口径）。
+
+        性能：先做主语均值向量矩阵初筛（hop1_candidates），再只对候选做逐 token MaxSim。
+        v9 早期版本对全池逐槽 Python 循环 MaxSim，262K（约一万槽）时查询延迟不可接受。
+        保底：初筛后若无候选过门控，退回全池软打分（不因初筛丢召回）。
+        """
+        n = len(self)
+        if n == 0:
+            return []
         out = []
-        for i in range(n):
+        for i in self.hop1_candidates(E_q):
             cov = _maxsim(self.cr_E_subj[i], E_q)
             if cov < self.subj_gate:
                 continue
@@ -311,21 +363,22 @@ class CRStatePool(v9.StatePool):
                 selected.append(j)
                 seen.add(j)
 
-        chains_dbg, frontier = [], list(seeds)
+        chains_dbg, path_entries, frontier = [], [], list(seeds)
         for h in range(2, hops + 1):
             entries = []
             for s in frontier:
                 for _b1, mid in self._bridge_candidates(s, buckets):
                     entries.append((0.6 * _b1 + 0.4 * _maxsim(self.cr_E_rel[mid], E_qrel),
-                                    mid, None))
+                                    s, mid, None))
                     for _b2, tgt in self._bridge_candidates(mid, buckets):
                         if tgt == s:
                             continue
                         entries.append((self.chain_score(s, mid, tgt, E_q, E_qrel),
-                                        mid, tgt))
-            entries.sort(key=lambda x: (-x[0], x[1], -1 if x[2] is None else x[2]))
+                                        s, mid, tgt))
+            entries.sort(key=lambda x: (-x[0], x[1], x[2],
+                                        -1 if x[3] is None else x[3]))
             added = []
-            for sc, mid, tgt in entries:
+            for sc, s, mid, tgt in entries:
                 if len(added) >= beam:
                     break
                 if mid not in seen:
@@ -338,18 +391,41 @@ class CRStatePool(v9.StatePool):
                     added.append(tgt)
                 chains_dbg.append((round(sc, 4), int(mid),
                                    None if tgt is None else int(tgt)))
+                if tgt is not None:
+                    path_entries.append((float(sc), int(s), int(mid), int(tgt)))
             if not added:
                 break
             frontier = added[:beam]
 
+        # 路径候选：按链分降序，记录实体连接与每条边的谓词覆盖分（渲染/诊断用）
+        paths = []
+        for sc, s, mid, tgt in sorted(path_entries, key=lambda x: (-x[0], x[1], x[2], x[3])):
+            subj_s, rel_s, obj_s = parse_fact_triple(self.texts[s])
+            subj_m, rel_m, obj_m = parse_fact_triple(self.texts[mid])
+            paths.append({
+                "score": round(sc, 4),
+                "seed": s, "mid": mid, "target": tgt,
+                "facts": [s, mid, tgt],
+                "labels": [subj_s, obj_s or subj_m, obj_m],
+                "edges": [{"from": subj_s, "rel": rel_s, "to": obj_s},
+                          {"from": subj_m, "rel": rel_m, "to": obj_m}],
+                "edge_scores": [round(_maxsim(self.cr_E_rel[s], E_qrel), 4),
+                                round(_maxsim(self.cr_E_rel[mid], E_qrel), 4)],
+            })
+
         order = sorted(selected, key=lambda i: self.metas[i].get("serial", i))
-        block = "\n".join(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}"
-                          for i in order)
+        if CR_PATH_VIEW and paths:
+            block = self._render_paths(paths, order)
+        else:
+            block = "\n".join(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}"
+                              for i in order)
         self.last_dbg.update({
             "hop1": [[round(s, 4), i] for s, i in h1[:beam]],
             "seeds": seeds,
             "ego": [[round(s, 4), i] for s, i in ego],
             "chains": chains_dbg,
+            "paths": paths[:max(1, CR_PATHS)],
+            "path_view": bool(CR_PATH_VIEW and paths),
             "selected": order,
             "n_selected": len(order),
             "beam": beam,
@@ -357,3 +433,32 @@ class CRStatePool(v9.StatePool):
             "n_overwrites": self.n_overwrites,
         })
         return block
+
+    def _render_paths(self, paths, selected):
+        """路径式读出：先给少量完整路径（seed → intermediate → target），再列其余事实。
+
+        每条路径保留：整体链分、每条边的谓词覆盖分、实体连接；
+        事实行仍带全局 serial 编号，因此反事实 Prompt 的"编号越大越新"规则不受影响。
+        """
+        lines, used, k = [], set(), 0
+        for p in paths:
+            if k >= max(1, CR_PATHS):
+                break
+            ids = [i for i in p["facts"] if i is not None]
+            if any(i in used for i in ids):
+                continue
+            k += 1
+            used.update(ids)
+            e = p["edges"]
+            chain = (f"{p['labels'][0]} --[{e[0]['rel']}]--> {p['labels'][1]} "
+                     f"--[{e[1]['rel']}]--> {p['labels'][2]}")
+            lines.append(f"PATH {k} (score={p['score']:.3f}, "
+                         f"rel={p['edge_scores'][0]:.2f}/{p['edge_scores'][1]:.2f}): {chain}")
+            for i in ids:
+                lines.append(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}")
+        rest = [i for i in selected if i not in used]
+        if rest:
+            lines.append("OTHER SELECTED FACTS:")
+            for i in rest:
+                lines.append(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}")
+        return "\n".join(lines)

@@ -13,6 +13,7 @@ from deltamem.core.delta import reset_delta_mem_states, set_delta_mem_write_enab
 from deltamem.eval.official_memory_agent_bench_templates import get_template
 from utils.eval_other_utils import chunk_text_into_sentences, post_process
 import pyarrow.parquet as pq
+import run_manifest  # 同目录：配置指纹 / 结果文件隔离 / 续跑校验
 
 # =====================================================================
 # B-v3：clean 重编码读出（fact-text slot pool）
@@ -42,7 +43,58 @@ SRC = sys.argv[1]; GPU = sys.argv[2]
 BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554"
 ADAPTER = "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5"
 PQ = "/share/hf_home/hub/datasets--ai-hyz--MemoryAgentBench/snapshots/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet"
-OUT = f"/share/exp4group/results/{'v9' if CR_MODE == 'v9' else 'v7'}groupB2_{SRC}.jsonl"
+# 输出路径由 init_run() 依据配置指纹决定：不同 CR 消融（beam/ego_k/rel_theta/窗口/
+# path_view/cf_prompt）不再写进同一个文件；续跑前校验 manifest。
+OUT = None
+RUN_ID = ""
+
+
+def _cr_params():
+    """所有影响结果的 CR 配置（改这里必须同步 v9_cr / v9_slotpool 常量）。"""
+    p = {"mode": CR_MODE, "theta": THETA, "pool_max": POOL_MAX,
+         "keep_delta": KEEP_DELTA, "key_tail_cut": KEY_TAIL_CUT,
+         "chunk_tokens": CHUNK_TOKENS, "max_new_tokens": MAX_NEW_TOKENS,
+         "whiten_min": WHITEN_MIN}
+    if CR_MODE == "v9":
+        p["v9_cr"] = {
+            "beam": v9_cr.CR_BEAM, "ego_k": v9_cr.CR_EGO_K,
+            "subj_gate": v9_cr.CR_SUBJ_GATE, "bridge": v9_cr.CR_BRIDGE,
+            "hops": v9_cr.CR_HOPS, "w_subj": v9_cr.CR_W_SUBJ,
+            "w_bridge": v9_cr.CR_W_BRIDGE, "w_pred": v9_cr.CR_W_PRED,
+            "rel_theta": v9_slotpool.CR_REL_THETA,
+            "state_theta": v9_slotpool.STATE_THETA,
+            "pool_max": v9_cr.CR_POOL_MAX, "cf_prompt": v9_cr.CR_CF_PROMPT,
+            "path_view": v9_cr.CR_PATH_VIEW, "paths": v9_cr.CR_PATHS,
+            "hop1_m": v9_cr.CR_HOP1_M,
+        }
+    return p
+
+
+def init_run():
+    """建 manifest、确定输出文件、校验续跑；返回已完成题目集合。"""
+    global OUT, RUN_ID
+    m = run_manifest.build(kind="cr", src=SRC, params=_cr_params())
+    RUN_ID = m["config_id"]
+    prefix = "v9groupB2" if CR_MODE == "v9" else "v7groupB2"
+    OUT = os.environ.get("B2_OUT") or run_manifest.default_out(
+        "/share/exp4group/results", prefix, SRC, RUN_ID)
+    print(f"[manifest] {run_manifest.describe(m)} OUT={OUT}", flush=True)
+    done = set()
+    if os.path.exists(OUT) and os.environ.get("B2_RESUME", "1") == "1":
+        ok_mf, why = run_manifest.check_resume(OUT, m)
+        if not ok_mf:
+            raise SystemExit(f"[resume][ERR] 拒绝续跑：{why}\n  文件：{OUT}")
+        with open(OUT) as f:
+            for line in f:
+                try:
+                    done.add(int(json.loads(line)["question_idx"]))
+                except Exception:
+                    pass
+        print(f"[resume] 已完成 {len(done)} 题（{why}）", flush=True)
+    elif os.path.exists(OUT):
+        os.remove(OUT)
+    run_manifest.write(OUT, m)          # 先落 manifest，崩溃后也能校验
+    return done
 
 tok = AutoTokenizer.from_pretrained(BASE)
 model = AutoModelForCausalLM.from_pretrained(BASE, torch_dtype=torch.bfloat16,
@@ -310,9 +362,12 @@ print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flus
 
 # ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
 reset_delta_mem_states(model)
+done_q = init_run()
 results = []
 with torch.no_grad():
     for qi, (q, a) in enumerate(zip(qs, ans)):
+        if qi in done_q:
+            continue
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
         block = pool.retrieve_multihop_context(q)
@@ -337,7 +392,8 @@ with torch.no_grad():
              "output_len": out.shape[1] - ids.shape[1],
              "memory_construction_time": 0, "query_time_len": 0},
             ans_norm, {"sub_dataset": SRC, "debug": False})
-        rec = {"question_idx": qi, "query": q, "answer": a, "output": pred, **m}
+        rec = {"question_idx": qi, "query": q, "answer": a, "output": pred,
+               "run_id": RUN_ID, **m}
         if CR_MODE == "v9":
             rec["cr_dbg"] = pool.last_dbg
         results.append(rec)
@@ -346,6 +402,15 @@ with torch.no_grad():
         if (qi + 1) % 20 == 0:
             sf = sum(r["substring_exact_match"] for r in results) / len(results)
             print(f"{qi+1}/{len(qs)} running SF={sf:.3f}", flush=True)
-sf = sum(r["substring_exact_match"] for r in results) / len(results)
-print(f"FINAL groupB2 {SRC} [{CR_MODE}]: SF={sf:.4f} n={len(results)} "
+# 汇总一律以文件为准（续跑时 results 只含本轮新题，不能拿它算总分）
+all_recs = []
+with open(OUT) as f:
+    for line in f:
+        if line.strip():
+            try:
+                all_recs.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+sf = sum(r.get("substring_exact_match", 0) for r in all_recs) / max(len(all_recs), 1)
+print(f"FINAL groupB2 {SRC} [{CR_MODE}] run={RUN_ID}: SF={sf:.4f} n={len(all_recs)} "
       f"pool={len(pool)} overwrites={pool.n_overwrites}", flush=True)
