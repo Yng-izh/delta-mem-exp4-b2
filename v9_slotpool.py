@@ -779,6 +779,11 @@ def clear_layer18_precomputed():
 
 
 # ----------------------------- 池内 whitening -----------------------------
+# ⚠️ 状态（2026-10-21）：**未接线、未测试**。l18_whiten_fit / l18_whiten_apply 与
+#    L18_WHITEN 开关已写好，但 dense_scores 目前**不调用**它们，故本段是惰性代码，
+#    行为与旧实现完全一致（纯 L2 归一化）。接入 dense_scores + 补单测属 t10 剩余工作；
+#    在接线并测出对照之前，文档/论文不得声称"已实现池内 whitening"。
+#    另：AR_V9_L18 默认 0，稠密通道本身也默认关闭。
 def l18_whiten_fit(hidden, eps=None):
     """拟合池内 whitening 变换：返回 (mean [d] | None, W [d,d] | None, info dict)。
 
