@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-10-21T10:05:38+08:00",
+  "dataset": "MemoryAgentBench Accurate_Retrieval / eventqa_65536 (5 contexts x 100 questions)",
+  "model": "Qwen3-4B-Instruct-2507 + delta-mem (frozen, AR_MODE=v9, READOUT_MODE=prompt)",
+  "env_note": "transformers 4.57.1 via /share/exp4group/pylib_tf57 overlay (latent2 自带 4.51.3 缺 smollm3)",
+  "status": "INCOMPLETE - aborted 2026-10-21 (host load 180, 5s -> 200s per question); ctx0 complete for all four windows, ctx1 partial",
+  "raw_data_location": "/share/exp4group/results/sweep/ (not committed; 1.1 MB per window)",
+  "windows": {
+    "b0_a20": {
+      "config": {
+        "back": 0,
+        "ahead": 20
+      },
+      "run_id": "5ad215de",
+      "all_rows": {
+        "n": 144,
+        "sf": 0.8264,
+        "eventqa_recall": 0.8264,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 21.0
+      },
+      "ctx0_only": {
+        "n": 100,
+        "sf": 0.81,
+        "eventqa_recall": 0.81,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 21.0
+      }
+    },
+    "b10_a10": {
+      "config": {
+        "back": 10,
+        "ahead": 10
+      },
+      "run_id": "467bb6c8",
+      "all_rows": {
+        "n": 315,
+        "sf": 0.7365,
+        "eventqa_recall": 0.7365,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.92
+      },
+      "ctx0_only": {
+        "n": 100,
+        "sf": 0.8,
+        "eventqa_recall": 0.8,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.87
+      }
+    },
+    "b16_a4": {
+      "config": {
+        "back": 16,
+        "ahead": 4
+      },
+      "run_id": "f40561ac",
+      "all_rows": {
+        "n": 147,
+        "sf": 0.7483,
+        "eventqa_recall": 0.7483,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.79
+      },
+      "ctx0_only": {
+        "n": 100,
+        "sf": 0.73,
+        "eventqa_recall": 0.73,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.69
+      }
+    },
+    "b4_a16": {
+      "config": {
+        "back": 4,
+        "ahead": 16
+      },
+      "run_id": "4c3329c2",
+      "all_rows": {
+        "n": 144,
+        "sf": 0.8194,
+        "eventqa_recall": 0.8194,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.99
+      },
+      "ctx0_only": {
+        "n": 100,
+        "sf": 0.81,
+        "eventqa_recall": 0.81,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 20.98
+      }
+    }
+  },
+  "controls": {
+    "ctl_b0_a0": {
+      "config": {
+        "back": 0,
+        "ahead": 0
+      },
+      "run_id": "399d020e",
+      "partial": {
+        "n": 52,
+        "sf": 0.6346,
+        "eventqa_recall": 0.6346,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 1.0
+      }
+    },
+    "ctl_b200_a200": {
+      "config": {
+        "back": 200,
+        "ahead": 200
+      },
+      "run_id": "8d00a4f8",
+      "partial": {
+        "n": 23,
+        "sf": 0.7826,
+        "eventqa_recall": 0.7826,
+        "anchor_answer_hit": 0.0,
+        "answer_in_context": 0.0,
+        "mean_block_chunks": 349.65
+      }
+    }
+  },
+  "invalid_metrics": {
+    "answer_in_context": "structurally 0: EventQA gold answers are generated paraphrases, absent from the 285,324-char context (verified raw + normalized); 0/750 hits",
+    "anchor_answer_hit": "same cause, 0/750 hits",
+    "evidence_recall_at_k": "no gold evidence spans in this dataset; stays None by design"
+  }
+}

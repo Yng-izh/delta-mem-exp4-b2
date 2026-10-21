@@ -94,6 +94,9 @@ SF / `eventqa_recall`（6 选 1）。要做检索方向验证，必须先解决�
 
 ## 实测结果（2026-10-21，未跑完，仅 ctx0 全量 + ctx0/1 交集）
 
+聚合数字已入库：[`experiments/results/2026-10-21_eventqa_sweep.json`](results/2026-10-21_eventqa_sweep.json)
+（含每窗口 run_id / manifest 指纹 / 各指标，原始 JSONL 留在服务器 `/share/exp4group/results/sweep/`）。
+
 四组并行跑 9 小时后只推进到第 2 个 context（每题 5s → 200s，宿主机 load 180，
 别人的 CPU 作业把机器压满），已杀掉重排。现有可比数字：
 
