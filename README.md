@@ -28,7 +28,7 @@
 | L18 池内 whitening + 复用 epi 向量 | `V9_L18_WHITEN=1` / `V9_L18_REUSE_EPI=1` | 已实现；**效果未验证**（只有合成池几何证据） |
 | v8 Session 重置 + 相对时间戳 | `V8_SESSION_RESET=1` | 已实现 |
 | CR 中 Delta 参与查询 | `CR_DELTA_MODE=off\|context\|refresh`（`off`） | 已实现；**效果未验证**；死开关 `B2_KEEP_DELTA` 已删除 |
-| CR 属性类别覆写门控 | 无开关（`_attr_compatible`） | 已实现；**双向风险未量化**（漏链 / 误拒覆写） |
+| CR 属性类别覆写门控 | 无开关（`_attr_compatible`） | 已实现；**双向风险已量化**（t19）：槽级真 stale 0/260 = 0.00% → 不加归一；2 跳漏链 mh 0.00%(n=10) / sh 8.33%(n=36)，覆盖率仅 6%/17% → **未定论** |
 | 四格联合归因（Reader Acc \| Recall=1） | `ar_diag --joint-k` | 已实现；**仅合成验证** |
 | 本地 Qwen Judge | `--judge-backend local` | 已实现；**未真实跑分** |
 

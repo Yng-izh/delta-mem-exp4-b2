@@ -1,0 +1,303 @@
+{
+  "task": "t19",
+  "generated_at": "2026-10-21",
+  "data": {
+    "pool_source": "results/groupA_factconsolidation_mh_6k.jsonl",
+    "questions": {
+      "mh_6k": "results/groupA_factconsolidation_mh_6k.jsonl",
+      "sh_6k": "results/v6groupB2_factconsolidation_sh_6k.jsonl"
+    },
+    "n_facts": 307,
+    "n_questions": {
+      "mh_6k": 100,
+      "sh_6k": 100
+    },
+    "unavailable_slices": {
+      "sh_262k": "本机未落盘该 slice 的 context（18333 条事实，/share 未挂载），未测量",
+      "mh_262k": "同上"
+    },
+    "notes": "纯解析统计，不需要 GPU/模型；事实与金标均来自真实 CR 跑分产物。"
+  },
+  "A_chain_recall": {
+    "mh_6k": {
+      "slice": "mh_6k",
+      "n_questions": 100,
+      "n_questions_with_answer_fact": 72,
+      "n_questions_answer_not_in_pool": 28,
+      "n_answer_facts": 172,
+      "n_answer_facts_single_hop": 0,
+      "n_chains_required": 172,
+      "n_chains_strict_ok": 10,
+      "n_chains_no_bridge_candidate": 162,
+      "n_chains_norm_fail": 0,
+      "n_judged": 10,
+      "failure_rate": 0.0,
+      "samples": []
+    },
+    "sh_6k": {
+      "slice": "sh_6k",
+      "n_questions": 100,
+      "n_questions_with_answer_fact": 87,
+      "n_questions_answer_not_in_pool": 13,
+      "n_answer_facts": 254,
+      "n_answer_facts_single_hop": 47,
+      "n_chains_required": 207,
+      "n_chains_strict_ok": 33,
+      "n_chains_no_bridge_candidate": 171,
+      "n_chains_norm_fail": 3,
+      "n_judged": 36,
+      "failure_rate": 0.08333333333333333,
+      "samples": [
+        {
+          "question": "Which country was rugby union created in?",
+          "gold": [
+            "India"
+          ],
+          "f1": "rugby union was created in the country of India.",
+          "f1_serial": 186,
+          "f1_obj_surface": "the country of India",
+          "f1_obj_norm": "country india",
+          "f1_obj_loose": "india",
+          "f2": "The capital of India is New Delhi.",
+          "f2_serial": 158,
+          "f2_subj_surface": "India",
+          "f2_subj_norm": "india",
+          "f2_subj_loose": "india",
+          "why": "归一化后 obj(f1) != subj(f2)，硬约束不成链"
+        },
+        {
+          "question": "Which country was rugby union created in?",
+          "gold": [
+            "India"
+          ],
+          "f1": "rugby union was created in the country of India.",
+          "f1_serial": 186,
+          "f1_obj_surface": "the country of India",
+          "f1_obj_norm": "country india",
+          "f1_obj_loose": "india",
+          "f2": "India is located in the continent of Asia.",
+          "f2_serial": 228,
+          "f2_subj_surface": "India",
+          "f2_subj_norm": "india",
+          "f2_subj_loose": "india",
+          "why": "归一化后 obj(f1) != subj(f2)，硬约束不成链"
+        },
+        {
+          "question": "Which country was rugby union created in?",
+          "gold": [
+            "India"
+          ],
+          "f1": "rugby union was created in the country of India.",
+          "f1_serial": 186,
+          "f1_obj_surface": "the country of India",
+          "f1_obj_norm": "country india",
+          "f1_obj_loose": "india",
+          "f2": "India is located in the continent of Africa.",
+          "f2_serial": 280,
+          "f2_subj_surface": "India",
+          "f2_subj_norm": "india",
+          "f2_subj_loose": "india",
+          "why": "归一化后 obj(f1) != subj(f2)，硬约束不成链"
+        }
+      ]
+    }
+  },
+  "B_overwrite_miss": {
+    "n_facts_written": 307,
+    "pool_size_after_write": 260,
+    "n_should_overwrite_pairs": 47,
+    "n_groups": 47,
+    "n_attr_rejected_pairs": 0,
+    "overwrite_miss_rate": 0.0,
+    "n_over_merge_risk_pairs": 0,
+    "over_merge_risk_rate": 0.0,
+    "n_same_attr_key_pairs": 47,
+    "pool_stats": {
+      "n_merge_rejected": 27,
+      "n_attr_rejected": 27,
+      "n_dup": 47
+    },
+    "n_attr_rejected_gt0": 1,
+    "n_attr_rejected_gt0_rate": 1.0,
+    "n_stale_pairs": 29,
+    "stale_rate": 0.6170212765957447,
+    "stale_definition": "粗代理：old/new 两个值都作为子串出现在池文本里（会被别的事实污染）",
+    "n_slot_groups": 260,
+    "n_duplicate_attr_groups": 0,
+    "duplicate_attr_rate": 0.0,
+    "duplicate_attr_definition": "槽级：同主语 + 同 loose 属性类别下池中并存多个不同值的活槽 = 真 stale",
+    "samples_duplicate_attr": [],
+    "n_questions_with_conflict_group": 22,
+    "n_questions_at_risk": 0,
+    "question_at_risk_rate": 0.0,
+    "samples_attr_rejected": [],
+    "samples_over_merge_risk": [],
+    "samples_stale": [
+      {
+        "subject": "Thomas Kyd",
+        "attr_loose": "born|",
+        "old_serial": 0,
+        "new_serial": 306,
+        "old_value": "the city of London",
+        "new_value": "the city of Leeds",
+        "old_text": "Thomas Kyd was born in the city of London.",
+        "new_text": "Thomas Kyd was born in the city of Leeds.",
+        "old_attr_key": "born in",
+        "new_attr_key": "born in",
+        "old_tail": "the city of",
+        "new_tail": "the city of"
+      },
+      {
+        "subject": "Hines Ward plays the",
+        "attr_loose": "play|",
+        "old_serial": 3,
+        "new_serial": 36,
+        "old_value": "wide receiver",
+        "new_value": "cornerback",
+        "old_text": "Hines Ward plays the position of wide receiver.",
+        "new_text": "Hines Ward plays the position of cornerback.",
+        "old_attr_key": "plays",
+        "new_attr_key": "plays",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "Bengaluru",
+        "attr_loose": "located continent|",
+        "old_serial": 4,
+        "new_serial": 234,
+        "old_value": "Asia",
+        "new_value": "Oceania",
+        "old_text": "Bengaluru is located in the continent of Asia.",
+        "new_text": "Bengaluru is located in the continent of Oceania.",
+        "old_attr_key": "located in the continent of",
+        "new_attr_key": "located in the continent of",
+        "old_tail": "the continent of",
+        "new_tail": "the continent of"
+      },
+      {
+        "subject": "Lisa Leslie plays the",
+        "attr_loose": "play|",
+        "old_serial": 14,
+        "new_serial": 169,
+        "old_value": "center",
+        "new_value": "goaltender",
+        "old_text": "Lisa Leslie plays the position of center.",
+        "new_text": "Lisa Leslie plays the position of goaltender.",
+        "old_attr_key": "plays",
+        "new_attr_key": "plays",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "Slovakia national football team",
+        "attr_loose": "associated|",
+        "old_serial": 18,
+        "new_serial": 279,
+        "old_value": "association football",
+        "new_value": "cricket",
+        "old_text": "Slovakia national football team is associated with the sport of association football.",
+        "new_text": "Slovakia national football team is associated with the sport of cricket.",
+        "old_attr_key": "associated with",
+        "new_attr_key": "associated with",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "Shingon Buddhism",
+        "attr_loose": "founded|",
+        "old_serial": 20,
+        "new_serial": 304,
+        "old_value": "Kūkai",
+        "new_value": "William Waynflete",
+        "old_text": "Shingon Buddhism was founded by Kūkai.",
+        "new_text": "Shingon Buddhism was founded by William Waynflete.",
+        "old_attr_key": "founded by",
+        "new_attr_key": "founded by",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "Madame du Barry",
+        "attr_loose": "citizen|",
+        "old_serial": 29,
+        "new_serial": 123,
+        "old_value": "France",
+        "new_value": "Great Britain",
+        "old_text": "Madame du Barry is a citizen of France.",
+        "new_text": "Madame du Barry is a citizen of Great Britain.",
+        "old_attr_key": "citizen of",
+        "new_attr_key": "citizen of",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "quarterback",
+        "attr_loose": "associated|",
+        "old_serial": 31,
+        "new_serial": 50,
+        "old_value": "American football",
+        "new_value": "Muay Thai",
+        "old_text": "quarterback is associated with the sport of American football.",
+        "new_text": "quarterback is associated with the sport of Muay Thai.",
+        "old_attr_key": "associated with",
+        "new_attr_key": "associated with",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "Henri Grégoire",
+        "attr_loose": "citizen|",
+        "old_serial": 39,
+        "new_serial": 225,
+        "old_value": "France",
+        "new_value": "India",
+        "old_text": "Henri Grégoire is a citizen of France.",
+        "new_text": "Henri Grégoire is a citizen of India.",
+        "old_attr_key": "citizen of",
+        "new_attr_key": "citizen of",
+        "old_tail": "",
+        "new_tail": ""
+      },
+      {
+        "subject": "wide receiver",
+        "attr_loose": "associated|",
+        "old_serial": 46,
+        "new_serial": 252,
+        "old_value": "American football",
+        "new_value": "rugby",
+        "old_text": "wide receiver is associated with the sport of American football.",
+        "new_text": "wide receiver is associated with the sport of rugby.",
+        "old_attr_key": "associated with",
+        "new_attr_key": "associated with",
+        "old_tail": "",
+        "new_tail": ""
+      }
+    ]
+  },
+  "conclusion": {
+    "threshold": 0.05,
+    "A_failure_rate_mh_6k": 0.0,
+    "A_failure_rate_sh_6k": 0.08333333333333333,
+    "A_judged_n": {
+      "mh_6k": 10,
+      "sh_6k": 36
+    },
+    "A_coverage": {
+      "mh_6k": 0.05813953488372093,
+      "sh_6k": 0.17391304347826086
+    },
+    "A_decision_rule": "判定样本需 ≥30 条且覆盖率 ≥30% 才下结论；否则记未定论（本轮 mh/sh 判定样本分别只有 10/36 条，大量题目在解析层找不到桥接候选）",
+    "B_pair_level_attr_reject_rate": 0.0,
+    "B_slot_level_duplicate_attr_rate": 0.0,
+    "B_stale_substring_proxy_rate": 0.6170212765957447,
+    "B_decision_rule": "用槽级 duplicate_attr_rate（真 stale）；pair 级与子串代理仅作参考",
+    "A_exceeds_threshold": false,
+    "A_underpowered": true,
+    "B_exceeds_threshold": false,
+    "actions": [
+      "A 未定论：判定样本 10(mh) / 36(sh) 条、覆盖率 6%/17%，最差切片失败率 8.33% 不足以支撑改动 → 不实现别名归一；要提高覆盖率需换事实库更全的切片（sh/mh_262k 本机未落盘）",
+      "B 未超阈（槽级重复 0.00% < 5%）：按计划不动 _cr_verb_core"
+    ]
+  }
+}
