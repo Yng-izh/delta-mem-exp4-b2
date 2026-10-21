@@ -506,8 +506,11 @@ def train(args):
             args.base, torch_dtype=torch.bfloat16, device_map=f"cuda:{args.gpu}",
             attn_implementation="sdpa")
         if not args.no_adapter:
-            from deltamem.core import HFDeltaMemConfig, attach_delta_mem
-            from deltamem.core.delta_impl import load_delta_mem_adapter
+            # deltamem.core 顶层硬依赖 transformers.models.smollm3（4.51 无此子包），
+            # 这里经 deltamem_compat 注入最小占位后再 import，详见该模块的说明。
+            import deltamem_compat as DMC
+            HFDeltaMemConfig, attach_delta_mem, load_delta_mem_adapter = \
+                DMC.import_delta_mem()
             cfg = HFDeltaMemConfig.from_pretrained(args.adapter)
             attach_delta_mem(model, cfg)
             load_delta_mem_adapter(model, input_dir=args.adapter)
@@ -579,6 +582,16 @@ def train(args):
     max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
     comp.train()
     bridge.train()
+    def _cfg(steps_done):
+        return {"schema": LM.LATENT_SCHEMA, "n_slots": args.m, "layer": args.layer,
+                "inner_dim": args.inner_dim, "num_heads": args.heads,
+                "bottleneck": args.bottleneck, "max_unit_tokens": args.max_unit_tokens,
+                "read_budget": LM.LATENT_READ_BUDGET, "dtype": LM.LATENT_DTYPE,
+                "stage": args.stage, "kl_weight": args.kl_weight, "kl_tau": args.kl_tau,
+                "recon_weight": args.recon_weight, "lr": args.lr,
+                "steps": steps_done, "epochs": args.epochs, "seed": args.seed,
+                "smoke_model": bool(args.smoke_model)}
+
     step = 0
     micro = 0
     acc_items = []
@@ -645,6 +658,15 @@ def train(args):
                         "bridge_last_linear": bridge.net[3].weight.grad is not None,
                         "model_has_no_grad": all(p.grad is None for p in model.parameters()),
                     }
+                if args.save_every > 0 and step % args.save_every == 0 and not args.dry_run:
+                    # 长跑（数小时）必须周期落盘：只在最后保存的话，中途崩掉全丢。
+                    # 直接覆盖同一个文件，不做 step 编号副本，避免 ckpt 目录膨胀。
+                    LM.save_latent_checkpoint(
+                        args.out, comp, bridge, _cfg(step),
+                        {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                         "git": _git_commit(), "partial": True, "step": step,
+                         "n_train": len(train_data)})
+                    print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
                 if args.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(
                         list(comp.parameters()) + list(bridge.parameters()), args.grad_clip)
@@ -689,14 +711,7 @@ def train(args):
               flush=True)
         return 0
 
-    cfg = {"schema": LM.LATENT_SCHEMA, "n_slots": args.m, "layer": args.layer,
-           "inner_dim": args.inner_dim, "num_heads": args.heads,
-           "bottleneck": args.bottleneck, "max_unit_tokens": args.max_unit_tokens,
-           "read_budget": LM.LATENT_READ_BUDGET, "dtype": LM.LATENT_DTYPE,
-           "stage": args.stage, "kl_weight": args.kl_weight, "kl_tau": args.kl_tau,
-           "recon_weight": args.recon_weight, "lr": args.lr,
-           "steps": step, "epochs": args.epochs, "seed": args.seed,
-           "smoke_model": bool(args.smoke_model)}
+    cfg = _cfg(step)
     meta = {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "git": _git_commit(), "n_train": len(train_data), "n_val": len(val_data),
             "val_exact_match": em, "n_trainable_params": n_train,
@@ -742,6 +757,8 @@ def parse_args(argv=None):
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--grad-clip", type=float, default=1.0)
+    ap.add_argument("--save-every", type=int, default=500,
+                    help="每 N 个优化步落盘一次（0=只在结束时保存）")
     ap.add_argument("--kl-weight", type=float, default=0.0)
     ap.add_argument("--kl-tau", type=float, default=1.0)
     ap.add_argument("--recon-weight", type=float, default=0.0)

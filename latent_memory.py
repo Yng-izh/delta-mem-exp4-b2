@@ -248,8 +248,16 @@ class LatentCompressor(nn.Module):
             safe_mask[empty, 0] = True                 # 避免全 mask 行 -> NaN
 
         p = self.queries
-        x = (self.input_proj(h0.to(device=p.device, dtype=p.dtype))
-             + self.hidden_proj(h18.to(device=p.device, dtype=p.dtype)))
+        # 掩码必须跟到**参数设备**，不能跟 h0.device：
+        # encode_latent_units 为了省显存把 h0/h18 留在 CPU（返回 [N,T,d] 的 CPU 张量），
+        # 而 h0/h18 在这里才被搬到 p.device。若 mask 跟着 h0 留在 CPU，
+        # GPU 上 SDPA 会报 "attn_bias is on cpu, different from other tensors on cuda"。
+        # CPU 单测永远发现不了这个问题（两者都是 CPU）。
+        dev_p = p.device
+        safe_mask = safe_mask.to(dev_p)
+        empty = empty.to(dev_p)
+        x = (self.input_proj(h0.to(device=dev_p, dtype=p.dtype))
+             + self.hidden_proj(h18.to(device=dev_p, dtype=p.dtype)))
         q = self.queries.unsqueeze(0).expand(B, -1, -1)
         z, _w = self.attn(q, x, x, key_padding_mask=~safe_mask, need_weights=False)
         z = self.norm(self.output_proj(z))
