@@ -39,12 +39,47 @@ export PYTHONPATH=/share/exp4group/pylib_tf57:/share/delta-Mem:/share/MemoryAgen
 
 `run_eventqa_window_sweep.sh` 已内置这段 `PYTHONPATH`。
 
-## 指标口径（必读）
+## 指标口径（必读）—— 已实测：`answer_in_context` 在 EventQA 上不可用
 
-`anchor_answer_hit` / `answer_in_context` 都是**字符串包含**判定：gold answer 原文是否出现在
-锚点单元 / 最终窗口里。EventQA 的答案句在上下文中常用代词改写（"Debbie wore…" vs "She wore…"），
-所以**绝对值偏低是口径问题，不等于检索失败**。本实验只用它做四组窗口的**相对比较**；
-要绝对覆盖度必须引入事件 ID 或人工标注，当前管线没有。
+`anchor_answer_hit` / `answer_in_context` 是**字符串包含**判定：gold answer 原文是否出现在
+锚点单元 / 最终窗口里。
+
+**2026-10-21 实测结论：EventQA 的金标答案句在原文上下文里根本不存在**，所以这两个指标
+结构性恒为 0，测不到任何东西（不是检索失败，是口径失效）。
+
+验证方法（eventqa_65536 第 1 个 context，285,324 字符）：
+
+```
+gold = "Debbie wore a new green flowered-muslin dress that matched her slippers."
+gold in context (raw)        -> False
+gold in context (normalized) -> False      # 小写 + 去标点 + 折叠空白后仍找不到
+```
+
+原因：EventQA 的候选事件是**生成式改写**（LLM 按原文风格重写的选项），不是原文 span。
+`metadata` 里也没有答案句的字符偏移或事件 id。
+
+750 条实测记录里 `anchor_answer_hit` / `answer_in_context` 命中数 **0 / 750**，与上述判断一致。
+
+后果：**事件级召回（evidence recall）在这套数据上算不出来**，能用的只有端到端
+SF / `eventqa_recall`（6 选 1）。要做检索方向验证，必须先解决探针问题，见下节。
+
+## 探针有效性对照（2026-10-21 新增，必看）
+
+既然 `answer_in_context` 不可用，就必须先确认**端到端 SF 本身对检索内容敏感**，
+否则"四组窗口 SF 差不多"什么也证明不了（6 个选项风格差异大，模型可能不看上下文也能选对）。
+
+两个对照（同 ctx0、各 100 题）：
+
+| 对照 | Back | Ahead | 窗口大小 | 目的 |
+|---|---|---|---|---|
+| `ctl_b0_a0` | 0 | 0 | **1 句**（只给锚点） | 几乎没有上下文时 SF 还剩多少 |
+| `ctl_b200_a200` | 200 | 200 | ~400 句 | 宽窗天花板 |
+
+判读规则：
+
+- 若 1 句窗口 SF ≈ 0.81（与 16/4 默认相当）→ **EventQA SF 对检索不敏感**，
+  这个 benchmark 不能用来验证检索方向，需要换探针（合成 needle / 带 span 金标的数据集）。
+- 若 1 句窗口 SF 明显掉、宽窗明显涨 → SF 有区分度，四组窗口的差异才可信。
 
 ## 扫描配置
 
@@ -56,6 +91,23 @@ export PYTHONPATH=/share/exp4group/pylib_tf57:/share/delta-Mem:/share/MemoryAgen
 | 4 | 16 | 4 | **当前默认**（强后向） |
 
 四组窗口总宽都是 20 句，只改方向，保证可比。
+
+## 实测结果（2026-10-21，未跑完，仅 ctx0 全量 + ctx0/1 交集）
+
+四组并行跑 9 小时后只推进到第 2 个 context（每题 5s → 200s，宿主机 load 180，
+别人的 CPU 作业把机器压满），已杀掉重排。现有可比数字：
+
+| 窗口 | n=100（ctx0）SF | n=144（ctx0+1 交集）SF | 平均块句数 |
+|---|---|---|---|
+| b0_a20 | 0.810 | 0.826 | 21.0 |
+| b4_a16 | 0.810 | 0.819 | 21.0 |
+| b10_a10 | 0.800 | 0.806 | 20.9 |
+| b16_a4（默认） | 0.730 | 0.750 | 20.7 |
+
+`anchor_answer_hit` / `answer_in_context`：**全部为 0**（口径失效，见上节），不构成结论。
+
+初步方向：强后视（16/4）最差，其余三组在噪声内（差值 7.6pp，n=144 时约 1.7σ，
+**不显著**）。在探针有效性对照跑完前，这张表不能作为"方向结论"使用。
 
 ## 运行
 
