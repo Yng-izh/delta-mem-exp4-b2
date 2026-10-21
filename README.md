@@ -5,7 +5,51 @@
 > **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
-## 最新进展（v9 验证轮，2026-10-21）——正确性修复落地 + 首次真实评测 + 两个口径问题
+## 最新进展（v9 收口轮，2026-10-21）——20 项审计落地 + 能力矩阵更新
+
+> 逐条核验表（每项带 `文件:行` 与测试名）：[experiments/audit_2026-10-21.md](experiments/audit_2026-10-21.md)
+
+**结论先行**：
+
+1. 审计报告的 **20 项**现状：已修 12 / 部分修 2 / 仅合成验证 1 / 待接线 1 / 已知风险 1 / 方向未定 1 / 未修 1 / 未验证 1。
+2. **确定性 Bug 已清完**：本轮修的是"结果不对 / 不可复现 / 静默降级"三类，**不是性能提升**。
+3. **v9 仍然没有任何可用于论文的指标**：新增能力全部默认关闭或尚未接线，且没有任何一项在真实数据上跑过对照。
+4. 一条硬事实：仓库内 `results/*.jsonl` 共 **18 文件 1800 行，带 `diag` 字段 0 条、带 `delta` 字段 0 条**。
+   所有历史跑分都早于这些字段存在 —— 所以"四格联合归因"只能算合成验证、"Delta 效果"只能算未验证。
+
+### 1. 本轮新增能力（全部靠 env 开关，括号内是默认值）
+
+| 能力 | 开关（默认） | 状态 |
+|---|---|---|
+| Delta 有效写入策略 | `AR_DELTA_WRITE_STRATEGY=all\|filtered\|topk_refresh`（`all`） | `all` / `filtered` 已实现；`topk_refresh` 是**问题词面 IDF 近似**，不是检索器驱动刷新 → 部分实现 |
+| 时间进生成 prompt | `AR_V9_PROMPT_DATE=1` | 已实现（行格式 `<serial>. [<date>] <原文>`）；**收益未验证** |
+| 2500 token 证据预算 | `AR_V9_CTX_TOKEN_BUDGET=2500`、`AR_V9_CTX_MAX_UNITS=0` | 已实现；OOM 重试改按证据优先级整行丢，不再静默截尾 |
+| LongMemEval Session/Turn 扩展 + 跨 Session Max-2 + 时间约束 | `V9_LME_TURN_WINDOW=1` / `V9_MAX_PER_SESSION=2` / `V9_SESSION_QUOTA=1` | 代码已实现（`readout(mode="lme")`），**runner 尚未接线 → 线上不生效** |
+| L18 池内 whitening + 复用 epi 向量 | `V9_L18_WHITEN=1` / `V9_L18_REUSE_EPI=1` | 已实现；**效果未验证**（只有合成池几何证据） |
+| v8 Session 重置 + 相对时间戳 | `V8_SESSION_RESET=1` | 已实现 |
+| CR 中 Delta 参与查询 | `CR_DELTA_MODE=off\|context\|refresh`（`off`） | 已实现；**效果未验证**；死开关 `B2_KEEP_DELTA` 已删除 |
+| CR 属性类别覆写门控 | 无开关（`_attr_compatible`） | 已实现；**双向风险未量化**（漏链 / 误拒覆写） |
+| 四格联合归因（Reader Acc \| Recall=1） | `ar_diag --joint-k` | 已实现；**仅合成验证** |
+| 本地 Qwen Judge | `--judge-backend local` | 已实现；**未真实跑分** |
+
+### 2. 未验证清单（引用任何数字前必读）
+
+以下五项**开关已就位、效果未知**，都需要在有 GPU 的机器上跑对照：
+
+1. `AR_DELTA_WRITE=0/1` × 三种写入策略 —— Delta State 到底有没有用
+2. `AR_V9_PROMPT_DATE=1/0` 配对 —— 日期进 prompt 有没有用
+3. `AR_V9_L18=0/1`（含 `V9_L18_WHITEN`）—— 第 18 层稠密通道有没有用
+4. `CR_DELTA_MODE=off/context/refresh` —— CR 里 Delta 参不参与查询有没有差别
+5. 本地 Qwen Judge 真实跑分 + `--compare-backends` 与 http 后端的等价性验证
+
+### 3. 默认行为变化（对比旧跑分前必看）
+
+- `AR_V9_CTX_MAX_UNITS` 默认 **40 → 0**，拼块改由 `AR_V9_CTX_TOKEN_BUDGET=2500` 决定。
+  **复现旧 v9 拼块口径需显式设 `AR_V9_CTX_TOKEN_BUDGET=0`。**
+- `V9_L18_WHITEN` 默认 **1**（仅 `AR_V9_L18=1` 时生效）：与旧 L18 跑分**不可横比**，复现旧口径设 `=0`。
+- 预算模式下 **Top-K 不再决定拼块集合**，`hits` / `recall@K` 只用于诊断。
+
+## 历史进展（v9 验证轮，2026-10-21）——正确性修复落地 + 首次真实评测 + 两个口径问题
 
 **结论先行**：
 
@@ -28,7 +72,7 @@
 | P1 | 时间戳跨 Session 继承（违反 I3） | `split_sessions` + 每 Session 重置 `last_ts` | `test_session_boundary_ts` |
 | P1 | CR 覆写是 drop+append（槽 id 漂移） | `_replace` 原位更新，CR 图键与主语索引同步 | `test_inplace_replace_keeps_graph_keys` |
 | P1 | StatePool O(N²) 建池 | 主语倒排 + 批内 pending 合并，单条事实只碰同主语槽 | `test_cr_pending_merge_and_stable_ids`、`test_subject_index_survives_eviction` |
-| P2 | `Recall@K` 名不副实 | 更名 `answer_recall_at_k`（旧键留别名）+ 新增 `evidence_recall_at_k`（无金标恒 None，不伪造） | `ar_diag --selftest` 57 项 |
+| P2 | `Recall@K` 名不副实 | 更名 `answer_recall_at_k`（旧键留别名）+ 新增 `evidence_recall_at_k`（无金标恒 None，不伪造） | `ar_diag --selftest` 121 项 |
 | P2 | Delta 快照为空仍继续实验 | 直接 `RuntimeError`，`AR_ALLOW_EMPTY_DELTA_SNAP=1` 才放行 | `test_empty_delta_snapshot_raises` |
 
 附带（用户额外要求）：CR Hop1 全池 Python MaxSim 循环 → 主语均值向量矩阵初筛（1 万槽 → 96 候选，`test_hop1_matrix_prefilter`）；
@@ -38,16 +82,24 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 
 四组窗口总宽都是 20 句、只改方向，同 ctx 各 100 题：
 
-| 窗口 | n=100（ctx0）SF | n=144（ctx0+1 交集） | 平均块句数 |
+| 窗口 | n=100（ctx0）SF | n=145（ctx0+ctx1 交集）SF | 平均块句数 |
 |---|---|---|---|
-| b0_a20（纯前视） | 0.810 | 0.826 | 21.0 |
-| b4_a16（弱后视） | 0.810 | 0.819 | 21.0 |
-| b10_a10（对称） | 0.800 | 0.806 | 20.9 |
-| b16_a4（当前默认） | 0.730 | 0.750 | 20.7 |
+| b0_a20（纯前视） | 0.810 | 0.8276 | 21.0 |
+| b4_a16（弱后视） | 0.810 | 0.8207 | 21.0 |
+| b10_a10（对称） | 0.800 | 0.8069 | 20.9 |
+| b16_a4（当前默认） | 0.730 | 0.7517 | 20.7 |
 
-- 差异 7.6pp（n=144 约 1.7σ）**不显著**；四组块句数几乎相同，只是窗口成分不同。
-- 探针有效性对照（部分完成，已中止）：1 句窗口 SF=0.635（n=52）、350 句宽窗 0.783（n=23）、默认 21 句 0.810（n=100）。
-  说明端到端 SF **确实依赖检索内容**（有效探针），但两头都更差 → 默认窗口合理。
+- **配对检验**（同 `(context_id, question_idx)` 交集 + McNemar 精确 + Newcombe 配对 CI）：12 对比较经 Holm 校正后
+  **全部不显著**（最小 Holm p=0.0764）。b0_a20 / b4_a16 vs b16_a4 各 **+8.00pp**（raw p=0.0386、**Holm p=0.2314**）；
+  MDE@80% power = **9.7pp**，观测 8.0pp < MDE，即 power 不足 0.80。详见
+  [experiments/results/paired_window_test.json](experiments/results/paired_window_test.json)。
+- 因此**方向未定**：默认 `back=16 / ahead=4` 保留，但**不得**表述为"已验证更优"。
+- **探针有效性未证实（原结论已撤回）**：同 52 题 1 句窗口 0.6346 vs 默认 0.6731（−3.85pp，p=0.625）；
+  同 23 题 ~350 句宽窗 0.7826 vs 默认 0.6957（+8.70pp，p=0.500）。此前"端到端 SF 确实依赖检索内容（有效探针）"
+  的说法来自**未配对**样本，配对后不成立，已撤回。
+- 样本量规划（π_d=0.12）：10pp→n≈95、8pp→n≈148、5pp→n≈377。当前 ctx0 n=100 **只够检出 10pp 以上**。
+- 注：聚合快照（n=144/144/315/147）与原始 JSONL（145/145/316/147）差 1 行，是快照早于末行写入所致；
+  上表用配对交集口径，原始文件级 all_rows 为 0.8276 / 0.8207 / 0.7373 / 0.7483。
 
 ### 3. 两个口径 / 环境问题（必须先解决）
 
@@ -130,12 +182,13 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 
 ### 6. dry-run 结论（本轮唯一的验证形式）
 
-| 检查 | 结果 |
+| 检查 | 结果（v9 收口轮结束时，2026-10-21） |
 |---|---|
-| `py_compile` | 仓库内 **21/21** 个 `.py` 通过 |
-| CPU 单测 5 个文件 | `test_v9_slotpool` 95 / `test_v9_cr` 56 / `test_v8_slotpool` 56 / `test_ar_v9_wiring` 36 / `test_ar_delta_alignment` 27 断言，**全部 PASS** |
-| `ar_diag.py --selftest` | 43/43 |
-| `eval_longmemeval_judge.py --selftest` | 45/45（零网络） |
+| `py_compile` | 仓库内 **28/28** 个 `.py` 通过 |
+| CPU 单测 9 个文件 | `test_v9_slotpool` **284** / `test_v9_cr` 143 / `test_v8_slotpool` 86 / `test_ar_v9_wiring` 105 / `test_ar_delta_alignment` 37 / `test_run_manifest` 27 / `test_ar_delta_write_strategy` 47 / `test_cr_delta_log` 84 / `test_v6_parse` —— **全部 PASS** |
+| `ar_diag.py --selftest` | **121/121** |
+| `eval_longmemeval_judge.py --selftest` | **76/76**（零网络、零权重） |
+| 消融环境重跑 | `V9_L18_WHITEN=0`、`V9_L18_REUSE_EPI=0` 下 `test_v9_slotpool` 同样全绿 |
 | `run_ar_v7.py --dry-run` | `AR_MODE=v7 / v8 / v9 / plain` 四种均退出码 0，末行 `cuda_initialized=False model_loaded=False` |
 | `eval_longmemeval_judge.py --dry-run` | 合成 3 题渲染 3 条 prompt，未发起任何网络请求 |
 | 守卫断言 | 零网络、零 `transformers/pyarrow/deltamem` 导入、无文件写入、无残留进程 |

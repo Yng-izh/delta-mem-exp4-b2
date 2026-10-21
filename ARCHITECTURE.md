@@ -130,33 +130,51 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | 检索 | `AR_TOP_K` / `V9_TOPK_STATE` | 12 / 4 | 情景 Top-K / 状态补充数 |
 | 检索 | `V9_L18_ALPHA` / `V9_L18_LAYER` / `AR_V9_L18` | 0.3 / 18 / 0 | 稠密通道权重、层号、开关 |
 | 检索 | `V9_TEMPORAL_TAU` / `V9_TEMPORAL_BONUS` | 2.0 / 0.15 | 时序衰减与加成 |
-| 扩展 | `V9_EQA_BACK` / `V9_EQA_AHEAD`（runner 用 `AR_V9_EQA_BACK/AHEAD`） | 16 / 4 | EventQA 锚点非对称扩展 |
+| 检索 | `V9_L18_WHITEN` / `V9_L18_WHITEN_EPS` / `V9_L18_REUSE_EPI` | 1 / 1e-4 / 1 | 池内白化 / 白化正则（兼特征值下限） / 复用 epi 已算向量 |
+| 扩展 | `V9_EQA_BACK` / `V9_EQA_AHEAD`（runner 用 `AR_V9_EQA_BACK/AHEAD`） | 16 / 4 | 窗口扩展；**方向未定**（配对检验 Holm p=0.2314、MDE=9.7pp） |
+| 扩展 | `V9_LME_TURN_WINDOW` / `V9_MAX_PER_SESSION` / `V9_SESSION_QUOTA` | 1 / 2 / 1 | LME 同 Session turn 扩展 / 跨 Session 配额 / 配额开关（**runner 尚未接线**） |
+| 组装 | `AR_V9_CTX_TOKEN_BUDGET` / `AR_V9_CTX_MAX_UNITS` | 2500 / 0 | 证据 token 预算 / 单元数上限（0=关闭，由预算决定） |
+| 组装 | `AR_V9_PROMPT_DATE` / `AR_V9_PROMPT_SERIAL` | 1 / 跟随 DATE | 行前缀 `[date]` / 行前缀编号（消融用） |
+| 组装 | `AR_V9_DROPPED_ID_CAP` | 200 | 预算/裁剪记账里 `dropped_ids` 的落盘上限 |
 | 组装 | `AR_CTX_MAX_TOK` | 0 | 0 = 全上下文不截断（对外披露项） |
 | 读出 | `AR_READOUT_MODE` | `prompt` | `prompt / text_embeds / latent(未实现)` |
 | Delta | `AR_DELTA_WRITE` / `AR_DELTA_RESTORE` / `AR_ALLOW_EMPTY_DELTA_SNAP` | 0 / 1 / 0 | 写开关 / 快照恢复 / 空快照放行 |
+| Delta | `AR_DELTA_WRITE_STRATEGY` / `AR_DELTA_WRITE_TOPK` / `AR_DELTA_WRITE_CHUNK` | `all` / 12 / 512 | 写入策略（`topk_refresh` 为词面近似） / 刷新条数 / 分块大小 |
 | 严格性 | `AR_STRICT_RETRIEVAL` | `auto` | auto：稠密/潜层/写入开启时检索异常直接抛 |
 | 复现 | `AR_RESUME` / `AR_RESUME_MANIFEST` / `AR_OUT` | 1 / 1 / 空 | 续跑 / 校验 manifest / 显式输出路径 |
+| v8 | `V8_SESSION_RESET` | 1 | Session 边界重置 `last_ts`、滑窗不跨 Session |
 | CR | `V9_CR_BEAM` / `V9_CR_EGO_K` / `V9_CR_REL_THETA` / `V9_CR_HOPS` | 6 / 12 / 0.80 / 4 | 束宽、ego 上限、关系阈值、跳数 |
 | CR | `V9_CR_HOP1_M` / `V9_CR_PATH_VIEW` / `V9_CR_PATHS` | 96 / 1 / 3 | Hop1 矩阵初筛候选数 / 路径式读出 / 最多路径数 |
+| CR | `CR_DELTA_MODE` / `CR_DELTA_REFRESH_TOPK` | `off` / 6 | Delta 参与查询的方式（非法值 SystemExit） / 刷新条数 |
 
 ## 8. 实现状态矩阵
 
 | 能力 | 状态 | 证据 |
 |---|---|---|
-| v8 三个确定性 Bug 修复 | 已实现 | `test_v8_slotpool.py` 57 断言 |
-| 非重叠索引 / 分数优先 / 非对称扩展 / 时序重排 | 已实现 | `test_v9_slotpool.py` 129 断言 |
+| v8 三个确定性 Bug 修复 | 已实现 | `test_v8_slotpool.py` 86 断言 |
+| v8 Session 重置 + 相对时间戳（yesterday / last week / 星期几） | 已实现 | `test_v8_slotpool.py`（`V8_SESSION_RESET=1`） |
+| 非重叠索引 / 分数优先 / 非对称扩展 / 时序重排 | 已实现 | `test_v9_slotpool.py` 284 断言 |
 | Session 边界不继承时间戳（I3） | 已实现 | `test_v9_slotpool.py::test_session_boundary_ts` |
 | 第 18 层混合打分的设备对齐 | 已实现 | `test_hybrid_device_consistency`（cpu/cuda/mps 三选一） |
+| 第 18 层池内 whitening + 复用 epi 向量（免二次前向） | 已实现·**效果未验证** | `test_v9_slotpool.py`（`V9_L18_WHITEN=0` 与旧口径逐位一致；按文本查表不串行号） |
 | 第 18 层稠密通道**效果** | 未验证 | 单测用 stub provider；真实前向未跑 |
 | 状态池同主语原位覆写（槽 id 稳定） | 已实现 | `test_cr_overwrite_finds_same_subject_slot`（旧实现必失败） |
+| CR 属性类别门控（不同属性不得判为同一谓词） | 已实现·**双向风险未量化** | `test_v9_slotpool.py`（doctor/vegetarian、born in/born on） |
 | 状态池 O(N) 写入（主语索引，非全池扫描） | 已实现 | `test_cr_pending_merge_and_stable_ids` |
 | CR Hop1 矩阵初筛（P1 性能） | 已实现 | `test_hop1_matrix_prefilter`（120 槽 → 96 候选，gold 不丢） |
 | CR 路径式读出（seed→mid→target + 其余事实） | 已实现·未跑分 | `test_path_view_and_flat_fallback` |
-| 逐题诊断字段 | 已实现 | `ar_diag --selftest` 57 项 |
+| CR Delta 参与查询（`CR_DELTA_MODE=off\|context\|refresh`） | 已实现·**效果未验证** | `test_cr_delta_log.py` 84 断言；三档指纹互异 |
+| 逐题诊断字段（used_texts / 跨池统一 ID `epi:/state:/cr:`） | 已实现 | `ar_diag --selftest` 121 项 |
+| 四格联合归因（Reader Acc \| Recall=1 等） | 已实现·**仅合成验证** | `ar_diag --selftest` 121 项；仓库内无带 `diag` 字段的真实 jsonl |
 | 配置指纹 / 结果文件隔离 / 续跑校验 | 已实现 | `test_run_manifest.py` 27 断言 |
 | Delta 空快照必须报错 | 已实现 | `test_run_manifest.py::test_empty_delta_snapshot_raises` |
-| LongMemEval 官方 Judge | 已实现·未判题 | `--selftest` 45 项，`--dry-run` 零网络 |
-| Delta 写入顺序 / 快照恢复 | 已接线·未验证 | `test_ar_delta_alignment.py` 27 断言 |
+| Delta 有效写入策略（`all` / `filtered` / `topk_refresh`） | 部分实现 | `test_ar_delta_write_strategy.py` 47 断言；`topk_refresh` 是词面 IDF 近似 |
+| Delta 写入**效果** | 未验证 | 默认仍 `AR_DELTA_WRITE=0`，三档策略无对照 |
+| 时间进生成 prompt（`<serial>. [<date>] <原文>`） | 已实现·收益未验证 | `test_ar_v9_wiring.py`（`AR_V9_PROMPT_DATE=0` 逐字节等于旧输出） |
+| 2500 token 证据预算 + OOM 按证据优先级裁剪 | 已实现 | `test_ar_v9_wiring.py` 105 / `test_ar_delta_alignment.py` 37 断言 |
+| LongMemEval Session/Turn 扩展 + 跨 Session Max-2 + first/last/before/after | 已实现·**待接线** | `test_v9_slotpool.py` LME 用例；runner 仍走 `mode="topk"` → 线上不生效 |
+| LongMemEval 官方 Judge（http / local 双后端） | 已实现·未判题 | `--selftest` 76 项，`--dry-run` 零网络；`--compare-backends` 验等价性 |
+| Delta 写入顺序 / 快照恢复 | 已接线·未验证 | `test_ar_delta_alignment.py` 37 断言 |
 | `inputs_embeds` 读出通路 | 已接线·未验证 | 明文嵌入，**不是**潜槽位 |
 | **槽位存潜向量（替换明文）** | **规划中** | 无实现 |
 | **潜层读出（latent readout）** | **未实现** | `AR_READOUT_MODE=latent` 直接 exit 2；槽向量从未进入模型输入 |
@@ -178,8 +196,19 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 7. **EventQA 的 `answer_in_context` / `anchor_answer_hit` 口径失效**（2026-10-21 实测）：
    金标答案句在 285K 字符原文中**不存在**（选项是生成式改写），750 条记录命中 0/750。
    任何基于"答案是否落在证据窗口"的结论都不可用；事件级召回必须换数据或换探针。
-8. **端到端 SF 是 6 选 1 任务分**，混着生成能力与选项风格；对照测得 1 句窗口 SF=0.635、
-   350 句宽窗 0.783、21 句默认 0.810，说明它对检索内容敏感，但不能区分"检索好"与"生成蒙对"。
+8. **端到端 SF 是 6 选 1 任务分**，混着生成能力与选项风格。原"SF 对检索内容敏感、是有效探针"的说法
+   **已撤回**：那是**未配对**样本造成的假象。配对后同 52 题 1 句窗口 0.6346 vs 默认 0.6731（−3.85pp，p=0.625）、
+   同 23 题 ~350 句宽窗 0.7826 vs 默认 0.6957（+8.70pp，p=0.500），**均不显著**；n=100 时 MDE=9.7pp。
+   结论：**现有数据无法证明 SF 能区分检索好坏**，需换自带金标 span 的合成探针（`evidence_recall@K`）。
+   另："默认 21 句 = 0.810"是笔误，默认 b16_a4 为 **0.730**（0.810 属 b0_a20 / b4_a16）。
+9. **Delta 写入策略的 `topk_refresh` 名不副实**：AR 侧写入先于建池、拿不到真实检索结果，只能用问题词面
+   IDF 近似；CR 侧 `CR_DELTA_MODE=refresh` 才是真实检索 Top-K 刷新。两者**不可横向比较**。
+10. **块内 serial 可能回退**：拼块是"情景行在前、状态行在后"，而每行 serial 取绝对位置，故块尾状态行的
+    serial 可能小于前面的情景行，与反事实 prompt 的"编号越大越新"约定冲突。有 `[date]` 前缀时影响小，
+    无日期时会让旧状态看起来最新。修它需同时改 `ar_diag` 的对齐位置约定，**本轮未修**。
+11. **CR 两处硬门控是保守选择，代价未量化**：2 跳 `linked()` 要求 `obj(f1) == subj(f2)` 归一化精确相等
+    （跨表面变体不成链）；属性类别门控 `_attr_compatible` 拒绝跨类别覆写（可能留下 stale 旧值）。
+    两者都可能降召回，**未测量**。
 
 ## 10. 演进路线
 
@@ -199,6 +228,11 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 
 - **CR 默认路径仍是 v7**：`CR_MODE=v7` 时 `run_group_b2_v7.py` 行为与历史一致。
 - **v8 保留**为可对照实现，三个 Bug 已原地修复；历史四切片数字是修复前产出，未重跑。
-- **v9 是新主线**，不改变任何默认值：新能力全部靠 env 开关，未开启时行为等于 v7。
+- **v9 是新主线**，绝大多数新能力靠 env 开关、默认关闭。**但收口轮有两处默认值变化**，
+  对比旧 v9 跑分前必须显式回到旧口径：
+  - `AR_V9_CTX_MAX_UNITS` 默认 **40 → 0**，拼块改由 `AR_V9_CTX_TOKEN_BUDGET=2500` 决定；
+    复现旧拼块口径设 `AR_V9_CTX_TOKEN_BUDGET=0`。
+  - `V9_L18_WHITEN` 默认 **1**（仅 `AR_V9_L18=1` 时生效）；复现旧 L18 口径设 `=0`（逐位一致，有断言）。
+  - 两处都已进 `run_manifest` 配置指纹，不同口径不会写进同一个结果文件。
 - **v9 CR 的路径式读出默认开启**（`V9_CR_PATH_VIEW=1`）：因为 v9 CR 从未跑过分，
   不存在与历史数字的可比性问题；若要对照旧版平铺输出，设 `V9_CR_PATH_VIEW=0`。

@@ -45,6 +45,62 @@ P2：块内 serial 回退、v8/v9 时间语义双份实现）+ t6 预算口径 +
 不得把 `topk_refresh`（词面 IDF 近似）写成"检索器驱动刷新"、不得把 Delta 写成"已验证有效"、
 不得把窗口方向写成已定论、不得把合成探针结果表述成真实数据集的证据级召回。
 
+## [v9.2-closeout] — 2026-10-21 — 审计收口：Delta 写入策略 / 时间进 prompt / token 预算 / CR Delta / LME 读出 / 联合归因 / 本地 Judge
+
+**一句话**：把审计报告里"机制缺失"的项全部补上并接线，同时把**默认行为的两处变化**和
+**五项仍未验证的效果**写清楚 —— 本轮仍然**没有任何可用于论文的指标**。
+
+### 新增能力
+
+| 能力 | 开关（默认） | 状态 |
+|---|---|---|
+| Delta 有效写入策略 | `AR_DELTA_WRITE_STRATEGY=all\|filtered\|topk_refresh`（`all`） | `all`/`filtered` 已实现；`topk_refresh` 是**问题词面 IDF 近似**（写入先于建池，拿不到真实检索结果）→ 部分实现 |
+| 时间进生成 prompt | `AR_V9_PROMPT_DATE=1` | 行格式 `<serial>. [<date>] <原文>`；日期继承 Session 头；解析不出则不伪造（只到年份写 `[1997]`）。`=0` 与旧输出**逐字节一致** |
+| 2500 token 证据预算 | `AR_V9_CTX_TOKEN_BUDGET=2500`、`AR_V9_CTX_MAX_UNITS=0` | 按分数降序装填、超预算即停、装完按位置排序（I2 不变）；OOM 重试改按证据优先级整行丢，删除"保留最后 N token"的静默截尾 |
+| CR Delta 参与查询 | `CR_DELTA_MODE=off\|context\|refresh`（`off`） | 删除死开关 `B2_KEEP_DELTA`（只进指纹、从不控制 reset）；非法值 `SystemExit` 不静默退回 |
+| CR 逐题证据日志 | 默认开启 | `retrieved_*` / `used_*` / 统一 ID `cr:<idx>` / `rec["delta"]`；FINAL-CR 行给 `answer_hit@K` 与 `answer_hit_ctx` |
+| LongMemEval 读出 | `readout(mode="lme")`，开关 `V9_LME_TURN_WINDOW=1` / `V9_MAX_PER_SESSION=2` / `V9_SESSION_QUOTA=1` | Session/Turn 内扩展、跨 Session Max-2 配额、first/last/before/after 时间约束；`before/after` 是硬过滤、`first/last` 是重排、解析失败即 none。**runner 尚未接线 → 线上不生效** |
+| v8 时间语义 | `V8_SESSION_RESET=1` | Session 边界重置 `last_ts`；`TIMESTAMP_RE` 扩到 yesterday / last week / 星期几；滑窗不跨 Session |
+| 四格联合归因 | `ar_diag --joint-k`（默认 1） | `Reader Acc \| Recall=1`、检索失败率、读到但答错率；`evidence_recall_at_k` 全 None 时标 `evidence_based=False` |
+| 本地 Judge | `--judge-backend local` | 与 http 共用 `build_prompt` / `parse_verdict`；缺 GPU / 缺权重 / 缺 `--judge-model` 一律 exit≠0 且**不回退 http**；`--compare-backends` 做等价性验证 |
+
+### 修掉的确定性 Bug
+
+1. **CR 系表谓词解析把不同属性判成同一谓词**：`Alice is a doctor.` 与 `Alice is vegetarian.` 都解析成
+   `('Alice','is')`，写入后 `size=1 / n_dup=1`，医生事实被素食事实吃掉。现表语冠词+头词并入谓词键
+   （`is a doctor` / `is vegetarian`），并加属性类别门控 `_attr_compatible` + `n_attr_rejected` 诊断。
+2. **CR 双跳评分与路径渲染错位**：`chain_score` 改为显式 `(fact1, fact2)` 二元结构，
+   `linked()` 要求 `obj(f1) == subj(f2)` 归一化相等，不再用软门控糊过去。
+3. **L18 预计算矩阵按 offset 盲切 → 静默取错向量**：`StatePool._replace` 传的是状态池自己的槽 id，
+   多池共享同一矩阵时会拿到别人的向量且不报错。改为按**文本**查表（见 [v9.2-l18]）。
+4. **`extract_units` 的 `ts` 只到年**（`2023/05/20` → `2023`），使 LME 的 `before/after` 在同一年内
+   毫无判别力。新增 `anchor_ts`（Session 头日期，整日精度），`unit_date` 取最精确者。
+5. **块行缺日期**：时间此前只进检索打分、不进模型输入；现每行带 `[date]` 前缀。
+
+### 默认行为变化（对比旧跑分前必看）
+
+- `AR_V9_CTX_MAX_UNITS` **40 → 0**：拼块改由 token 预算决定，复现旧口径设 `AR_V9_CTX_TOKEN_BUDGET=0`。
+- `V9_L18_WHITEN` **默认 1**（仅 `AR_V9_L18=1` 时生效）：复现旧 L18 口径设 `=0`。
+- 两处均已进 `run_manifest` 配置指纹，不同口径不会共用结果文件。
+- 预算模式下 **Top-K 不再决定拼块集合**，`hits` / `recall@K` 仅用于诊断。
+
+### 未验证（硬约束）
+
+1. `AR_DELTA_WRITE=0/1` × 三种策略 —— **Delta 到底有没有用，无任何对照**。
+2. `AR_V9_PROMPT_DATE=1/0` 配对 —— 日期进 prompt 的收益未测。
+3. `AR_V9_L18=0/1`（含 whitening）—— 稠密通道收益未测（只有合成池几何证据）。
+4. `CR_DELTA_MODE=off/context/refresh` —— CR 里 Delta 参不参与查询的差别未测。
+5. 本地 Judge 真实跑分未做；`evidence_recall_at_k` 在真实数据上仍恒为 None
+   （`results/*.jsonl` 18 文件 1800 行中带 `diag` 字段 0 条）。
+
+### 文档修正
+
+- 撤回"端到端 SF 对检索内容敏感、是有效探针"：配对后 1 句 vs 默认 −3.85pp（p=0.625）、
+  宽窗 vs 默认 +8.70pp（p=0.500），**均不显著**；n=100 时 MDE=9.7pp。
+- 修正数字张冠李戴："默认 21 句 = 0.810" 应为 **0.730**（0.810 属 b0_a20 / b4_a16）；
+  b16_a4 的 all_rows 0.750 应为 **0.7483**；交集口径 n=144 → **145**。
+- 窗口方向明确写"**未定**"：12 对比较 Holm 后全不显著（最小 Holm p=0.0764），默认 16/4 仅暂留。
+
 ## [v9-validate] — 2026-10-21 — 首次真实评测：窗口扫描中止 + 两个口径问题 + 潜层读出立项
 
 **一句话**：10 项修复全部落地并双环境验证；首次跑真实评测（EventQA_65536）暴露出
@@ -63,21 +119,29 @@ P2：块内 serial 回退、v8/v9 时间语义双份实现）+ t6 预算口径 +
 
 ### 实测数字（EventQA_65536，单卡 V100，ctx0 各 100 题）
 
-| 窗口 | n=100 SF | n=144（ctx0+1） |
+| 窗口 | n=100 SF | n=145（ctx0+ctx1 交集） |
 |---|---|---|
-| b0_a20 | 0.810 | 0.826 |
-| b4_a16 | 0.810 | 0.819 |
-| b10_a10 | 0.800 | 0.806 |
-| b16_a4（默认） | 0.730 | 0.750 |
+| b0_a20 | 0.810 | 0.8276 |
+| b4_a16 | 0.810 | 0.8207 |
+| b10_a10 | 0.800 | 0.8069 |
+| b16_a4（默认） | 0.730 | 0.7517 |
 
-对照：1 句窗口 0.635（n=52）、~350 句宽窗 0.783（n=23）、默认 21 句 0.810（n=100）。
+> **数字修正（2026-10-21 收口轮）**：本节原写"n=144（ctx0+1）"与 b16_a4 `0.750`，实为
+> **n=145 交集**与 `0.7517`（文件级 all_rows 为 0.7483）；"默认 21 句 0.810"是笔误，默认是 **0.730**。
+> 配对检验见 `experiments/results/paired_window_test.json`。
+
+对照（配对口径）：同 52 题 1 句窗口 0.6346 vs 默认 0.6731；同 23 题 ~350 句宽窗 0.7826 vs 默认 0.6957。
 
 ### 关键发现（必须披露）
 
 1. **EventQA 金标不在原文中**：`gold in context`（原文 / 归一化）均 False → 选项是生成式改写。
    `answer_in_context` / `anchor_answer_hit` 750 条命中 0/750，**口径失效**，不是检索失败。
-2. **端到端 SF 是有效探针但粗**：1 句窗口掉 17.5pp，说明依赖检索；但 6 选 1 任务分混着生成能力。
-3. **窗口方向差异不显著**（7.6pp / 1.7σ）→ 不作为结论，默认值保留，实验中止。
+2. ~~**端到端 SF 是有效探针但粗**：1 句窗口掉 17.5pp，说明依赖检索~~
+   **→ 已撤回（2026-10-21 收口轮）**：17.5pp 来自**未配对**样本（1 句 0.635 vs 默认 0.810，而两者题号不同）。
+   配对后同 52 题 1 句 vs 默认仅 **−3.85pp（p=0.625）**，同 23 题宽窗 vs 默认 **+8.70pp（p=0.500）**，
+   均不显著。结论改为：**现有数据无法证明 SF 能区分检索好坏**，需换自带金标 span 的合成探针。
+3. **窗口方向差异不显著**（配对 McNemar：b0_a20 / b4_a16 vs b16_a4 各 +8.00pp，raw p=0.0386，
+   **Holm p=0.2314**；MDE@80% power = 9.7pp，观测 8.0pp < MDE）→ 方向**未定**，默认值暂留，实验中止。
 4. **服务器环境原本跑不起来**：transformers 4.51.3 缺 `smollm3`（`import deltamem` 失败）+ 缺
    `nltk/rouge_score/editdistance/tiktoken`；用 overlay `/share/exp4group/pylib_tf57` 解决，跨版本数字不可比。
 5. **宿主机负载**：四进程并行时 load 180，每题 5s → 200s，9 小时只推进到第 2 个 context。
@@ -309,6 +373,11 @@ P2：块内 serial 回退、v8/v9 时间语义双份实现）+ t6 预算口径 +
 | CPU 单测（5 文件） | 95 + 56 + 56 + 36 + 27 = 270 断言全部 PASS |
 | `ar_diag.py --selftest` | 43/43 |
 | `eval_longmemeval_judge.py --selftest` | 45/45（零网络） |
+
+> **当前数字（v9 收口轮）**：`py_compile` **28/28**；CPU 单测 **9 个文件** —— `test_v9_slotpool` 284 /
+> `test_v9_cr` 143 / `test_v8_slotpool` 86 / `test_ar_v9_wiring` 105 / `test_ar_delta_alignment` 37 /
+> `test_run_manifest` 27 / `test_ar_delta_write_strategy` 47 / `test_cr_delta_log` 84 / `test_v6_parse`；
+> `ar_diag --selftest` **121/121**；`eval_longmemeval_judge --selftest` **76/76**。上表是 v9 验证轮的历史快照。
 | `run_ar_v7.py --dry-run`（v7/v8/v9/plain） | 四种均退出码 0，末行 `cuda_initialized=False model_loaded=False` |
 | `eval_longmemeval_judge.py --dry-run` | 合成 3 题渲染 3 条 prompt，零网络请求 |
 | 守卫断言 | 零网络、零 `transformers/pyarrow/deltamem` 导入、无文件写入、无残留进程 |
