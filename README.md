@@ -184,7 +184,7 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 
 | 检查 | 结果（v9 收口轮结束时，2026-10-21） |
 |---|---|
-| `py_compile` | 仓库内 **28/28** 个 `.py` 通过 |
+| `py_compile` | 仓库内 **30/30** 个 git 跟踪的 `.py` 全部通过 |
 | CPU 单测 9 个文件 | `test_v9_slotpool` **284** / `test_v9_cr` 143 / `test_v8_slotpool` 86 / `test_ar_v9_wiring` 105 / `test_ar_delta_alignment` 37 / `test_run_manifest` 27 / `test_ar_delta_write_strategy` 47 / `test_cr_delta_log` 84 / `test_v6_parse` —— **全部 PASS** |
 | `ar_diag.py --selftest` | **121/121** |
 | `eval_longmemeval_judge.py --selftest` | **76/76**（零网络、零权重） |
