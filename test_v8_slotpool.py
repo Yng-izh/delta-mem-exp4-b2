@@ -49,6 +49,14 @@ def ok(name, cond):
     print(f"  ok - {name}")
 
 
+def unit_with_marker(units, marker):
+    """取 ts_marker 命中该时间标记的单元（滑窗会重叠，按标记本身定位最可靠）。"""
+    for u in units:
+        if (u.get("ts_marker") or "").lower() == marker.lower():
+            return u
+    raise AssertionError(f"FAIL: no unit with ts_marker={marker!r}")
+
+
 # ---------------- 1. 时间戳正则 ----------------
 def test_timestamp_re():
     assert v8.TIMESTAMP_RE.search("In March 3, 2001 he moved.")
@@ -299,6 +307,122 @@ def test_run_ar_import():
     ok("MODE env hook", 'os.environ.get("AR_MODE", "v7")' in src)
 
 
+# ---------------- 13. v8.2 回归：相对时间正则覆盖 ----------------
+def test_timestamp_re_relative():
+    """TIMESTAMP_RE 必须覆盖相对时间，且不把普通名词当时间（sun/Sat 大小写）。"""
+    for s in ("We met yesterday.", "It happens today.", "See you tomorrow.",
+              "That was last week.", "They met last summer.", "We talked last month.",
+              "It rained next year.", "He arrived on Monday.", "Back in 3 days ago.",
+              "Booked 2 weeks ago.", "Moved 6 months ago.", "Born 30 years ago."):
+        assert v8.TIMESTAMP_RE.search(s), f"FAIL: relative ts not matched: {s}"
+        assert v8.is_relative_ts(v8.TIMESTAMP_RE.search(s).group(0)), f"FAIL: not relative: {s}"
+    # 星期缩写只在首字母大写时算时间；全称星期名不歧义
+    ok("abbrev weekday needs capital", v8.TIMESTAMP_RE.search("Sun is up") is not None
+       and v8.TIMESTAMP_RE.search("the sun is hot") is None)
+    # 绝对标记不得被误判成相对
+    ok("absolute not relative", v8.is_relative_ts("In March 3, 2001 he moved.")
+       is False and v8.is_relative_ts("1997") is False)
+    # ISO 不再被年份分支吃掉（旧版 group(0) == "2001"）
+    ok("iso keeps full date", v8.TIMESTAMP_RE.search("dated 2001-03-03.").group(0) == "2001-03-03")
+    ok("plain prose has no ts", v8.TIMESTAMP_RE.search("He likes apples.") is None)
+
+
+# ---------------- 14. v8.2 回归：Session 边界不继承时间（I3） ----------------
+def test_v82_session_reset_ts():
+    """跨 Session 的单元不得继承上一 Session 的日期。"""
+    ctx = ("Session 1\nIn 2020, Alice moved to Paris. She founded a lab.\n"
+           "Session 2\nAlice prefers quiet restaurants. She likes tea.")
+    epi, st = v8.extract_adaptive_units(ctx)
+    s1 = [u for u in epi if u["session_id"] == 0]
+    s2 = [u for u in epi if u["session_id"] == 1]
+    ok("v82 both sessions present", bool(s1) and bool(s2))
+    ok("v82 session 1 keeps 2020", any("2020" in (u["ts"] or "") for u in s1))
+    # 旧版：全篇单一 last_ts -> Session 2 的单元都带 2020
+    ok("v82 session 2 no inherited ts",
+       all(u["ts"] is None and u["ts_inherited"] is False for u in s2))
+    ok("v82 state also reset",
+       all(u["ts"] is None for u in st if u["session_id"] == 1))
+    # 窗口不跨 Session：Session 1 的单元里不得出现 Session 2 的内容，反之亦然
+    ok("v82 window not crossing sessions",
+       all("quiet" not in u["text"] and "Session 2" not in u["text"] for u in s1)
+       and all("Paris" not in u["text"] and "2020" not in u["text"] for u in s2))
+    # 关掉 Session 重置时退回旧行为（同段 -> 继承 2020），证明差异确实来自 Session 边界
+    old = v8.SESSION_RESET
+    v8.SESSION_RESET = False
+    try:
+        epi_legacy, _ = v8.extract_adaptive_units(ctx)
+        ok("v82 legacy single-block inherits", all(u["session_id"] == 0 for u in epi_legacy))
+    finally:
+        v8.SESSION_RESET = old
+
+
+# ---------------- 15. v8.2 回归：相对时间落到确定日期（以 Session 头为锚） ----------------
+def test_v82_relative_ts_with_anchor():
+    """'yesterday' 在已知 Session 日期下必须解析成确定日期。"""
+    epi, _ = v8.extract_adaptive_units("2023-05-20\nYesterday Alice visited the museum.")
+    u = unit_with_marker(epi, "Yesterday")
+    ok("v82 yesterday resolved", u["ts"] == "2023-05-19")
+    ok("v82 yesterday not the anchor", u["ts"] != "2023-05-20")
+    ok("v82 yesterday marked relative", u["ts_relative"] is True and u["ts_unresolved"] is False)
+    ok("v82 yesterday not inherited", u["ts_inherited"] is False)
+
+    # 星期名 / last summer / N days ago / last week 同样可解析
+    epi2, _ = v8.extract_adaptive_units("2023-05-20\nOn Monday she flew to Rome.")
+    u2 = unit_with_marker(epi2, "Monday")
+    ok("v82 weekday resolved", u2["ts"] == "2023-05-15")
+    epi3, _ = v8.extract_adaptive_units("2023-05-20\nThey travelled last summer.")
+    u3 = unit_with_marker(epi3, "last summer")
+    ok("v82 last summer resolved", u3["ts"] == "2022-06-21")
+    epi4, _ = v8.extract_adaptive_units("2023-05-20\nShe left 3 days ago.")
+    u4 = unit_with_marker(epi4, "3 days ago")
+    ok("v82 N days ago resolved", u4["ts"] == "2023-05-17")
+    # 月名日期头（LongMemEval 常见格式）
+    epi5, _ = v8.extract_adaptive_units("March 3, 2001\nYesterday he arrived.")
+    u5 = unit_with_marker(epi5, "Yesterday")
+    ok("v82 month-name anchor resolved", u5["ts"] == "2001-03-02")
+    # 解析出的日期可在同一 Session 内被后续单元继承
+    epi6, _ = v8.extract_adaptive_units(
+        "2023-05-20\nYesterday Alice visited the museum. She bought a ticket.")
+    # 句 2 的窗口（start=2）没有自己的标记，只能继承句 1 解析出的日期
+    later = [x for x in epi6 if x["start"] == 2][0]
+    ok("v82 resolved date inherited in session", later["ts"] == "2023-05-19"
+       and later["ts_inherited"] is True)
+
+
+# ---------------- 16. v8.2 回归：无锚点时只标记不解析（不编造日期） ----------------
+def test_v82_relative_ts_unknown_anchor():
+    """没有 Session 头日期时 resolved ts 保持 None，但必须标记为相对时间。"""
+    ctx = "Session 1\nYesterday Alice visited the museum."
+    epi, st = v8.extract_adaptive_units(ctx)
+    u = unit_with_marker(epi, "Yesterday")
+    ok("v82 unknown anchor ts None", u["ts"] is None)
+    ok("v82 unknown anchor marked", u["ts_marker"] == "Yesterday" and u["ts_relative"] is True)
+    ok("v82 unknown anchor unresolved", u["ts_unresolved"] is True)
+    ok("v82 no fabricated date", all(x["ts"] is None for x in epi + st))
+    # 锚点精度不足（只有年份）时也不得编造月日
+    epi2, _ = v8.extract_adaptive_units("Session 1 — 1997\nYesterday he arrived.")
+    u2 = unit_with_marker(epi2, "Yesterday")
+    # 锚点只有年份：不得编造月/日（只继承到年精度），同时标记为未解析
+    ok("v82 year-only anchor no fabricated day",
+       u2["ts"] == "1997" and "-" not in (u2["ts"] or "") and u2["ts_unresolved"] is True)
+    # 但年份级相对时间可以解析
+    ok("v82 year-level relative ok", v8.resolve_relative_ts("last year", "1997") == "1996")
+
+
+# ---------------- 17. v8.2 回归：Session 标记纳入 ev 触发 ----------------
+def test_v82_session_marker_triggers_episodic():
+    """Session 标记本身是时间/结构边界，必须触发 episodic（不得落进状态池）。"""
+    body = "The river flows through the town. The bridge is old."
+    epi_plain, st_plain = v8.extract_adaptive_units(body)
+    ok("v82 plain prose goes to state", len(epi_plain) == 0 and len(st_plain) == 2)
+    epi, st = v8.extract_adaptive_units("Session 1\n" + body)
+    ok("v82 session marker triggers episodic", len(epi) >= 1)
+    ok("v82 session marker unit covers header", epi[0]["start"] == 0 and epi[0]["session_id"] == 0)
+    ok("v82 session marker not in state",
+       all("Session" not in x["text"] for x in st))
+    ok("v82 session marker keeps ts None", epi[0]["ts"] is None)
+
+
 if __name__ == "__main__":
     test_timestamp_re()
     test_extract()
@@ -317,4 +441,10 @@ if __name__ == "__main__":
     test_bug2_long_unit_span_offset()
     test_bug2_zero_token_unit_no_offset_drift()
     test_run_ar_import()
+    # v8.2 时间语义回归（Session 边界 + 相对时间 + Session 标记 ev）
+    test_timestamp_re_relative()
+    test_v82_session_reset_ts()
+    test_v82_relative_ts_with_anchor()
+    test_v82_relative_ts_unknown_anchor()
+    test_v82_session_marker_triggers_episodic()
     print("ALL V8 CPU TESTS PASSED")

@@ -6,7 +6,7 @@
 #   2. 查询期不 reset；逐题 delta_restore(snapshot)
 #   3. 快照 clone（官方 API 缺失时的手工 fallback）
 #   4. AR_INPUTS_EMBEDS 读出路径开关（inputs_embeds vs input_ids）
-#   5. OOM 渐进截短仍走同一条读出路径
+#   5. OOM 重试按证据优先级裁剪（记录 keep_ids/dropped_ids），不再保留最后 N token
 import os
 import sys
 
@@ -194,24 +194,75 @@ def test_generate_readout_inputs_embeds():
     ok("embeds path passes attention_mask", "attention_mask" in kw)
 
 
+class _WordTok(FakeTok):
+    """按词数给 token 的 tokenizer：让 OOM 重试后的 prompt 长度真的变化。"""
+
+    def __call__(self, text, return_tensors=None):
+        n = max(1, len(str(text).split()))
+        return _Batch(input_ids=torch.arange(n, dtype=torch.long).unsqueeze(0))
+
+
 class _OomModel(FakeModel):
-    def __init__(self):
+    """前 n_oom 次 generate 抛 OOM，之后成功；记录每次 prompt 长度。"""
+
+    def __init__(self, n_oom=1):
         super().__init__()
         self.lengths = []
+        self.n_oom = n_oom
 
     def generate(self, **kw):
         self.lengths.append(kw["input_ids"].shape[1])
-        if len(self.lengths) == 1:
+        if len(self.lengths) <= self.n_oom:
             raise torch.OutOfMemoryError("simulated oom")
         return torch.cat([kw["input_ids"], torch.tensor([[7, 8, 9]])], dim=1)
 
 
 def test_generate_readout_oom_retry():
+    """OOM 重试必须按证据优先级裁剪，并把 keep_ids/dropped_ids 记录下来。"""
     setup()
-    R.model = _OomModel()
-    pred, in_len, out_len = R.generate_readout("block", "q")
+    R.tok = _WordTok()
+    R.model = _OomModel(n_oom=1)
+    lines = ["1. [2023-05-20] Alice likes tea.", "2. She moved to Paris.",
+             "3. Bob likes coffee.", "4. Carol runs daily.",
+             "5. Dave paints walls.", "6. Erin sings.", "7. Finn reads.",
+             "8. Gina jogs."]
+    # 分数从高到低，最低分在最后两行 -> 重试必须先丢这两行
+    trim = {"lines": list(lines), "prio": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.1],
+            "ids": [f"epi:{i}" for i in range(8)]}
+    pred, in_len, out_len = R.generate_readout("\n".join(lines), "q", trim=trim)
+
     ok("oom retry succeeds", pred == "answer" and out_len == 3)
-    ok("oom retry re-runs generate", R.model.lengths == [3, 3])
+    ok("oom retry 重跑一次 generate", len(R.model.lengths) == 2)
+    ok("oom retry 记录到 trim['retries']", len(trim.get("retries") or []) == 1)
+    r0 = trim["retries"][0]
+    ok("oom retry 先丢最低分的两行（epi:6/epi:7，分数 0.3/0.1）",
+       r0["dropped_ids"] == ["epi:6", "epi:7"])
+    ok("oom retry keep_ids 是剩余高分行",
+       r0["keep_ids"] == [f"epi:{i}" for i in range(6)])
+    ok("oom retry 记录重试前的 prompt token 数", r0["prompt_tokens"] == R.model.lengths[0])
+    ok("oom retry 后 prompt 变短（整行丢，不是截尾 token）",
+       R.model.lengths[1] < R.model.lengths[0])
+    ok("oom retry final keep/dropped 可追溯",
+       trim["final_keep_ids"] == [f"epi:{i}" for i in range(6)]
+       and trim["final_dropped_ids"] == ["epi:6", "epi:7"])
+    ok("oom retry 丢的不是靠后的 token 而是最低分证据（keep 仍是分数序前缀）",
+       trim["final_keep_ids"] == trim["ids"][:6])
+
+
+def test_generate_readout_oom_raises_without_evidence():
+    """只剩一条证据还 OOM 就如实抛出：不静默丢证据、不截尾。"""
+    setup()
+    R.tok = _WordTok()
+    R.model = _OomModel(n_oom=99)
+    lines = ["1. Alice likes tea.", "2. She moved to Paris."]
+    trim = {"lines": list(lines), "prio": [0.9, 0.1], "ids": ["epi:0", "epi:1"]}
+    raised = False
+    try:
+        R.generate_readout("\n".join(lines), "q", trim=trim)
+    except torch.OutOfMemoryError:
+        raised = True
+    ok("oom 无证据可丢时抛错", raised)
+    ok("抛错前已记录一次裁剪", len(trim.get("retries") or []) == 1)
 
 
 # ---------------- 4. 结构约束：查询期禁止 reset ----------------
@@ -221,8 +272,10 @@ def test_main_reset_only_before_queries():
     ok("main resets delta once per context",
        main_body.count("reset_delta_mem_states(model)") == 1)
     ok("main prepares delta before question loop",
-       main_body.index("prepare_delta_memory(ctx)") <
+       main_body.index("prepare_delta_memory(ctx") <
        main_body.index("for qi, q in enumerate(qs):"))
+    ok("main passes questions to prepare (topk_refresh 写入前粗排)",
+       "prepare_delta_memory(ctx, questions=qs)" in main_body)
     ok("main restores snapshot inside question loop",
        main_body.count("delta_restore(snap)") == 1)
     ok("no post-loop delta write block",
@@ -241,6 +294,7 @@ def main():
     test_generate_readout_input_ids()
     test_generate_readout_inputs_embeds()
     test_generate_readout_oom_retry()
+    test_generate_readout_oom_raises_without_evidence()
     print("[4] query-period no reset")
     test_main_reset_only_before_queries()
     print("ALL PASS")

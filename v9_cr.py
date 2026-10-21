@@ -10,14 +10,22 @@
 #       ego 邻域（同主语的其他属性 + 出边实体），不再只留 2 个孤立种子。
 #       v9 修复：Hop1 先用主语均值向量做一次矩阵初筛（V9_CR_HOP1_M）再逐 token MaxSim，
 #       避免对全池逐槽 Python 循环（262K/约一万槽时查询延迟不可接受）。
-#   (3) 双跳链谓词联合打分 Score_chain：seed→mid→target 链的分数 =
-#       W_SUBJ·subj_cov(target) + W_BRIDGE·(bridge(seed,mid)+bridge(mid,target))/2
-#       + W_PRED·(rel_cov(mid)+rel_cov(target))/2，两条边谓词都与 query 谓词比较。
+#   (3) 双跳链谓词联合打分 Score_chain：评分主体是**2 事实 2 关系**结构
+#       (fact1, fact2)——fact1: subj1 --rel1--> mid，fact2: mid --rel2--> answer，
+#       答案就是 obj(fact2)（例：Alice --attended--> UnivB --located in--> CityC）。
+#       硬约束：obj(fact1) 与 subj(fact2) 归一化后必须相等，不相等直接不构成链
+#       （chain_score 返回 None）。分数 =
+#       W_SUBJ·subj_cov(fact1) + W_BRIDGE·bridge(fact1,fact2)
+#       + W_PRED·两段关系分别与 query 两段关系的匹配（query 只有一段关系时两段都比它）。
+#       3 事实链是**独立分支** path_len=3（chain_score3）：单独打分、单独渲染，
+#       不与 2 跳混在一起排序。v9 早期版本把 3 事实链当"双跳"打分（seed→mid→target），
+#       第三跳会污染前两跳评分、真正的 2 跳路径可能进不了路径展示（v9 修复）。
 #   (4) 反事实强约束 Prompt：编号越大越新；冲突时只认最大编号；作答前先做
 #       "若候选答案为真则会与更晚事实矛盾" 的自检；禁止输出被覆盖值。
 #   (5) 路径式读出（V9_CR_PATH_VIEW=1，默认开）：不再把"种子 + 中间节点 + 目标"
-#       混成一个大集合平铺，而是选少量完整路径按 seed → intermediate → target 展示，
-#       每条路径保留实体连接与关系分数；未进入路径的已选事实放 OTHER SELECTED FACTS。
+#       混成一个大集合平铺，而是选少量完整路径按 seed → intermediate → answer 展示；
+#       每条路径**只渲染真正参与评分的事实与边**，事实行数 == 边数（2 跳 2 行 2 边、
+#       3 跳 3 行 3 边）。未进入路径的已选事实放 OTHER SELECTED FACTS。
 #       V9_CR_PATH_VIEW=0 退回按 serial 升序的平铺块（与早期 v9 行为一致）。
 #
 # 注入约定（同 v7/v8）：v9_cr.set_encoder(tok, EMB)（内部同步 v9_slotpool.tok/EMB）。
@@ -31,6 +39,7 @@
 #   prompt = v9_cr.build_cr_prompt(question, block)
 
 import os
+import re
 
 import torch
 import torch.nn.functional as F
@@ -146,6 +155,7 @@ class CRStatePool(v9.StatePool):
         self.n_overwrites = 0
         self.n_evicts = 0
         self.last_dbg = {}
+        self._rendered_paths = []        # 上一次 _render_paths 真正渲染的路径（dbg 用）
 
     # ---------------- 写入 ----------------
     def _store(self, texts, index_texts, metas):
@@ -278,23 +288,73 @@ class CRStatePool(v9.StatePool):
         out.sort(key=lambda x: (-x[0], x[1]))
         return out
 
-    def chain_score(self, seed, mid, tgt, E_q, E_qrel):
-        """双跳链联合打分 Score_chain。
+    # ---- 链的硬约束 / 关系匹配 ----
+    def linked(self, f1, f2):
+        """链的硬约束：fact1 的宾语与 fact2 的主语归一化后必须相等。
 
-        tgt is None 时退化为单跳扩展分（0.6*bridge + 0.4*rel_cov(mid)）。
-        链分三项：目标主语覆盖、两跳桥接、两条边谓词与 query 谓词的平均覆盖。
+        这是"链"的定义本身（同一实体把两条事实接起来），不相等就根本不是链，
+        不能用语义相似度糊过去（v9 早期版本用 bridge 软门控，导致伪链入榜）。
         """
-        b1 = 1.0 if self.cr_subj_norm[mid] == self.cr_obj_norm[seed] else \
-            _bridge(self.cr_E_subj[mid], self.cr_E_obj[seed])
-        if tgt is None:
-            return 0.6 * b1 + 0.4 * _maxsim(self.cr_E_rel[mid], E_qrel)
-        b2 = 1.0 if self.cr_subj_norm[tgt] == self.cr_obj_norm[mid] else \
-            _bridge(self.cr_E_subj[tgt], self.cr_E_obj[mid])
-        subj_cov = _maxsim(self.cr_E_subj[tgt], E_q)
-        pred = 0.5 * (_maxsim(self.cr_E_rel[mid], E_qrel) +
-                      _maxsim(self.cr_E_rel[tgt], E_qrel))
-        return self.w_subj * subj_cov + self.w_bridge * 0.5 * (b1 + b2) + \
-            self.w_pred * pred
+        return self.cr_obj_norm[f1] == self.cr_subj_norm[f2]
+
+    @staticmethod
+    def _as_qrels(E_qrels):
+        """兼容单条 query 关系（tensor）与多条（list）。"""
+        if E_qrels is None:
+            return []
+        if torch.is_tensor(E_qrels):
+            return [E_qrels]
+        return list(E_qrels)
+
+    def _edge_rel_scores(self, facts, E_qrels):
+        """每条边（= 每条事实的关系）与 query 对应关系的覆盖分。
+
+        第 i 条边对 query 的第 i 段关系；query 关系少于边数时，多出的边沿用最后一段
+        （2 跳 query 只有一段关系时两段都比它，与旧口径一致）。
+        """
+        qs = self._as_qrels(E_qrels)
+        if not qs:
+            return [0.0] * len(facts)
+        return [_maxsim(self.cr_E_rel[f], qs[min(i, len(qs) - 1)])
+                for i, f in enumerate(facts)]
+
+    def _rel_pair(self, f1, f2, E_qrels):
+        """两段链关系分别与 query 两段关系匹配（单段 query 时两段都比它）。"""
+        return 0.5 * sum(self._edge_rel_scores([f1, f2], E_qrels))
+
+    def chain_score(self, f1, f2, E_q, E_qrels):
+        """双跳链联合打分 Score_chain：(fact1, fact2) 二元结构。
+
+        fact1: subj1 --rel1--> mid，fact2: mid --rel2--> answer。
+        硬约束 obj(fact1) == subj(fact2)；不满足或 f1 == f2 时返回 None（不构成链）。
+        链分三项：起点主语覆盖、两跳桥接（硬约束成立即 1.0）、两段关系与 query 匹配。
+        """
+        if f1 == f2 or not self.linked(f1, f2):
+            return None
+        subj_cov = _maxsim(self.cr_E_subj[f1], E_q)
+        bridge = 1.0                       # 硬约束成立，桥接必然闭合
+        pred = self._rel_pair(f1, f2, E_qrels)
+        return self.w_subj * subj_cov + self.w_bridge * bridge + self.w_pred * pred
+
+    def chain_score3(self, f1, f2, f3, E_q, E_qrels):
+        """3 事实链（path_len=3）独立打分：不与 2 跳分支混排。
+
+        硬约束逐边成立：obj(f1) == subj(f2) 且 obj(f2) == subj(f3)。
+        多出来的第三跳只影响本分支分数，绝不会回流污染 2 跳分支的分数。
+        """
+        if len({f1, f2, f3}) != 3:
+            return None
+        if not (self.linked(f1, f2) and self.linked(f2, f3)):
+            return None
+        subj_cov = _maxsim(self.cr_E_subj[f1], E_q)
+        pred = sum(self._edge_rel_scores([f1, f2, f3], E_qrels)) / 3.0
+        return self.w_subj * subj_cov + self.w_bridge * 1.0 + self.w_pred * pred
+
+    def single_hop_score(self, f1, f2, E_qrels):
+        """单事实扩展分（path_len=1 兜底分支，不参与 2/3 跳排序）。"""
+        b1 = 1.0 if self.linked(f1, f2) else \
+            _bridge(self.cr_E_subj[f2], self.cr_E_obj[f1])
+        return 0.6 * b1 + 0.4 * self._edge_rel_scores([f2], E_qrels)[0]
 
     def _bridge_candidates(self, node, buckets):
         """node 的出边候选：宾语精确命中的主语桶 + 主语向量余弦初筛。"""
@@ -334,11 +394,40 @@ class CRStatePool(v9.StatePool):
         return sorted(((v, k) for k, v in cand.items()), key=lambda kv: (-kv[0], kv[1]))
 
     # ---------------- 检索 ----------------
+    def _query_rels(self, query_text):
+        """query 的两段关系（长谓词优先，保持出现顺序）；不足两段时只有一段。"""
+        rels = []
+        for m in VP_RE.finditer(query_text):
+            r = m.group(0).strip()
+            if r and r not in rels:
+                rels.append(r)
+            if len(rels) == 2:
+                break
+        return rels
+
+    def _path_entry(self, facts, score, E_qrels):
+        """路径记录：facts 与 edges 严格一一对应（事实行数 == 边数），供渲染与诊断。"""
+        triples = [parse_fact_triple(self.texts[i]) for i in facts]
+        return {
+            "score": round(float(score), 4),
+            "path_len": len(facts),
+            "facts": [int(i) for i in facts],
+            "labels": [triples[0][0]] + [obj for _s, _r, obj in triples],
+            "edges": [{"from": subj, "rel": rel, "to": obj}
+                      for subj, rel, obj in triples],
+            "edge_scores": [round(x, 4) for x in self._edge_rel_scores(facts, E_qrels)],
+        }
+
     def retrieve_multihop_context(self, query_text, hops=None, beam=None):
         """多跳读出，返回可直接拼进 prompt 的证据块；dbg 写入 self.last_dbg。
 
+        链检索分三条**互不混排**的分支：
+          - path_len=2（主分支）：(fact1, fact2) 二元双跳链，chain_score 打分；
+          - path_len=3（独立分支）：(fact1, fact2, fact3) 三事实链，chain_score3 打分，
+            单独排序、单独渲染，不与 2 跳混在一起排序；
+          - path_len=1（兜底）：无链可扩展时用单事实扩展分补位。
         两种渲染（V9_CR_PATH_VIEW）：
-          - 1（默认）：先给至多 CR_PATHS 条完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标`，
+          - 1（默认）：先给至多 CR_PATHS 条完整路径（2 跳在前、3 跳在后），
                        再列其余已选事实（OTHER SELECTED FACTS）；
           - 0：平铺，按 serial 升序。
         两种渲染的事实行都保留**全局 serial 编号**，反事实 Prompt 的"编号越大越新"仍成立。
@@ -348,11 +437,8 @@ class CRStatePool(v9.StatePool):
         if n == 0:
             return ""
         E_q, _kq, _ = _enc(query_text)
-        q_rel_txt = query_text
-        qm = list(VP_RE.finditer(query_text))
-        if qm:
-            q_rel_txt = qm[-1].group(0)
-        E_qrel, _kr, _ = _enc(q_rel_txt)
+        q_rels = self._query_rels(query_text)
+        E_qrels = [_enc(r)[0] for r in q_rels] or [_enc(query_text)[0]]
         hops = self.hops if hops is None else int(hops)
         beam = self.beam if beam is None else int(beam)
         buckets = self._buckets()
@@ -364,65 +450,67 @@ class CRStatePool(v9.StatePool):
             if i not in seen:
                 selected.append(i)
                 seen.add(i)
-        ego = self._ego_candidates(seeds, E_q, E_qrel, buckets)[:self.ego_k]
+        ego = self._ego_candidates(seeds, E_q, E_qrels[0], buckets)[:self.ego_k]
         for _s, j in ego:
             if j not in seen:
                 selected.append(j)
                 seen.add(j)
 
-        chains_dbg, path_entries, frontier = [], [], list(seeds)
-        for h in range(2, hops + 1):
-            entries = []
+        chains2, chains3, paths2, paths3 = [], [], [], []
+        frontier = list(seeds)
+        for _h in range(2, hops + 1):
+            ent1, ent2, ent3 = [], [], []
             for s in frontier:
                 for _b1, mid in self._bridge_candidates(s, buckets):
-                    entries.append((0.6 * _b1 + 0.4 * _maxsim(self.cr_E_rel[mid], E_qrel),
-                                    s, mid, None))
+                    ent1.append((self.single_hop_score(s, mid, E_qrels), s, mid))
+                    sc2 = self.chain_score(s, mid, E_q, E_qrels)
+                    if sc2 is not None:
+                        ent2.append((sc2, s, mid))
                     for _b2, tgt in self._bridge_candidates(mid, buckets):
-                        if tgt == s:
+                        if tgt in (s, mid):
                             continue
-                        entries.append((self.chain_score(s, mid, tgt, E_q, E_qrel),
-                                        s, mid, tgt))
-            entries.sort(key=lambda x: (-x[0], x[1], x[2],
-                                        -1 if x[3] is None else x[3]))
+                        sc3 = self.chain_score3(s, mid, tgt, E_q, E_qrels)
+                        if sc3 is not None:
+                            ent3.append((sc3, s, mid, tgt))
+            ent1.sort(key=lambda x: (-x[0], x[1], x[2]))
+            ent2.sort(key=lambda x: (-x[0], x[1], x[2]))
+            ent3.sort(key=lambda x: (-x[0], x[1], x[2], x[3]))
+
             added = []
-            for sc, s, mid, tgt in entries:
-                if len(added) >= beam:
-                    break
-                if mid not in seen:
-                    selected.append(mid)
-                    seen.add(mid)
-                    added.append(mid)
-                if tgt is not None and tgt not in seen:
-                    selected.append(tgt)
-                    seen.add(tgt)
-                    added.append(tgt)
-                chains_dbg.append((round(sc, 4), int(mid),
-                                   None if tgt is None else int(tgt)))
-                if tgt is not None:
-                    path_entries.append((float(sc), int(s), int(mid), int(tgt)))
+
+            def _take(node):
+                if node in seen:
+                    return False
+                selected.append(node)
+                seen.add(node)
+                added.append(node)
+                return True
+
+            # 分支 A：2 跳（各分支独立取槽，分支之间不按分数混排）
+            for sc, s, mid in ent2[:beam]:
+                _take(mid)
+                chains2.append((round(sc, 4), int(s), int(mid)))
+                paths2.append(self._path_entry((s, mid), sc, E_qrels))
+            # 分支 B：3 跳（独立打分 / 独立渲染，第三跳不回流污染 2 跳分支）
+            for sc, s, mid, tgt in ent3[:beam]:
+                _take(mid)
+                _take(tgt)
+                chains3.append((round(sc, 4), int(s), int(mid), int(tgt)))
+                paths3.append(self._path_entry((s, mid, tgt), sc, E_qrels))
+            if not added:                       # 兜底：无链可扩，退回单事实扩展
+                for _sc, s, mid in ent1[:beam]:
+                    _take(mid)
             if not added:
                 break
             frontier = added[:beam]
 
-        # 路径候选：按链分降序，记录实体连接与每条边的谓词覆盖分（渲染/诊断用）
-        paths = []
-        for sc, s, mid, tgt in sorted(path_entries, key=lambda x: (-x[0], x[1], x[2], x[3])):
-            subj_s, rel_s, obj_s = parse_fact_triple(self.texts[s])
-            subj_m, rel_m, obj_m = parse_fact_triple(self.texts[mid])
-            paths.append({
-                "score": round(sc, 4),
-                "seed": s, "mid": mid, "target": tgt,
-                "facts": [s, mid, tgt],
-                "labels": [subj_s, obj_s or subj_m, obj_m],
-                "edges": [{"from": subj_s, "rel": rel_s, "to": obj_s},
-                          {"from": subj_m, "rel": rel_m, "to": obj_m}],
-                "edge_scores": [round(_maxsim(self.cr_E_rel[s], E_qrel), 4),
-                                round(_maxsim(self.cr_E_rel[mid], E_qrel), 4)],
-            })
-
+        cap = max(int(beam), 4)
+        paths = paths2[:cap] + paths3[:cap]
         order = sorted(selected, key=lambda i: self.metas[i].get("serial", i))
+        rendered, self._rendered_paths = [], []
         if CR_PATH_VIEW and paths:
             block = self._render_paths(paths, order)
+            rendered = self._rendered_paths
         else:
             block = "\n".join(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}"
                               for i in order)
@@ -430,42 +518,218 @@ class CRStatePool(v9.StatePool):
             "hop1": [[round(s, 4), i] for s, i in h1[:beam]],
             "seeds": seeds,
             "ego": [[round(s, 4), i] for s, i in ego],
-            "chains": chains_dbg,
-            "paths": paths[:max(1, CR_PATHS)],
+            "query_rel": q_rels[0] if q_rels else query_text,
+            "query_rels": q_rels,
+            "chains2": chains2,             # [(score, fact1, fact2)]        path_len=2
+            "chains3": chains3,             # [(score, fact1, fact2, fact3)] path_len=3
+            "chains": [{"path_len": 2, "score": sc, "facts": [a, b]}
+                       for sc, a, b in chains2] +
+                      [{"path_len": 3, "score": sc, "facts": [a, b, c]}
+                       for sc, a, b, c in chains3],
+            "paths": paths,                 # 候选路径（2 跳在前、3 跳在后），带 path_len
+            "paths_rendered": rendered,
+            "n_paths_by_len": {2: len(paths2), 3: len(paths3)},
             "path_view": bool(CR_PATH_VIEW and paths),
             "selected": order,
             "n_selected": len(order),
             "beam": beam,
-            "query_rel": q_rel_txt,
             "n_overwrites": self.n_overwrites,
         })
         return block
 
-    def _render_paths(self, paths, selected):
-        """路径式读出：先给少量完整路径（seed → intermediate → target），再列其余事实。
+    def diag_ctx(self, block=None):
+        """逐题检索证据（可直接 `ar_diag.record(block=...)` 展开）。
 
-        每条路径保留：整体链分、每条边的谓词覆盖分、实体连接；
-        事实行仍带全局 serial 编号，因此反事实 Prompt 的"编号越大越新"规则不受影响。
+        retrieved_*：检索器给出的候选，**严格分数降序**（ar_diag 的 Recall@K 依赖
+        这个顺序）。CR 的排序单位是链而不是单槽，因此先把链展开成槽位序列：同一
+        槽位只在首次出现处记一次，分数 = 该链分；未进任何链但被选中的槽位用 hop1
+        分补上。展开后统一按分数降序排序（同分保持首次出现顺序），**不按分支分组**
+        ——2 跳/3 跳分支分组只用于路径渲染，不能拿来当检索排名。
+        used_*：真正拼进 prompt 的**事实行**（block 里 '<serial>. <原文>' 的行，
+        PATH 头等结构行不是证据），与槽位一一对应（used_alignment 应为 ok）。
+        同一槽位可能重复出现（多条路径共享实体），这是 Prompt 的真实形态，不合并。
         """
-        lines, used, k = [], set(), 0
-        for p in paths:
-            if k >= max(1, CR_PATHS):
-                break
-            ids = [i for i in p["facts"] if i is not None]
-            if any(i in used for i in ids):
+        dbg = self.last_dbg or {}
+        lines = block_fact_lines(self, block)
+        used_ids = [i for i, _ in lines]
+        used_texts = [t for _, t in lines]
+        score_of, order = {}, []
+        for ch in dbg.get("chains") or []:
+            try:
+                sc = float(ch.get("score") or 0.0)
+            except (TypeError, ValueError):
+                sc = 0.0
+            for i in ch.get("facts") or []:
+                if i is None:
+                    continue
+                i = int(i)
+                if i in score_of:
+                    continue
+                score_of[i] = sc
+                order.append(i)
+        hop1 = {}
+        for pair in dbg.get("hop1") or []:
+            try:
+                hop1.setdefault(int(pair[1]), float(pair[0]))
+            except (TypeError, ValueError, IndexError):
                 continue
-            k += 1
-            used.update(ids)
-            e = p["edges"]
-            chain = (f"{p['labels'][0]} --[{e[0]['rel']}]--> {p['labels'][1]} "
-                     f"--[{e[1]['rel']}]--> {p['labels'][2]}")
-            lines.append(f"PATH {k} (score={p['score']:.3f}, "
-                         f"rel={p['edge_scores'][0]:.2f}/{p['edge_scores'][1]:.2f}): {chain}")
-            for i in ids:
-                lines.append(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}")
-        rest = [i for i in selected if i not in used]
+        for i in dbg.get("selected") or []:
+            i = int(i)
+            if i in score_of:
+                continue
+            score_of[i] = hop1.get(i, 0.0)
+            order.append(i)
+        ranked = sorted(range(len(order)), key=lambda k: (-score_of[order[k]], k))
+        order = [order[k] for k in ranked]
+        return {"pool": self, "hits": [(i, score_of[i]) for i in order],
+                "used_ids": used_ids, "used_texts": used_texts, "pool_kind": "cr"}
+
+    def _render_paths(self, paths, selected):
+        """路径式读出：每条路径只渲染**真正参与评分**的事实与边（事实行数 == 边数）。
+
+        2 跳路径 = 2 行事实 + 2 条边，3 跳路径 = 3 行事实 + 3 条边；不再出现
+        "渲染 3 行事实却只有 2 条边"（v9 早期把 tgt 当路径组成部分的错位）。
+        路径顺序由调用方给定（2 跳分支在前、3 跳分支在后，分支内按链分降序），
+        因此两类路径不会被混在一起排序。事实行仍带全局 serial 编号，
+        反事实 Prompt 的"编号越大越新"规则不受影响。
+
+        名额分配：CR_PATHS 是总名额；3 跳分支存在时**至少保留 1 个名额**给它
+        （2 跳最多占 CR_PATHS-1 个），保证 3 跳路径不会被 2 跳分支整块吞掉。
+        去重只跳过事实完全相同的路径（同一路径不重复渲染），允许不同路径共享实体
+        ——共享实体正是多跳链的正常形态。
+        """
+        budget = max(1, CR_PATHS)
+        two = [p for p in paths if p["path_len"] == 2]
+        three = [p for p in paths if p["path_len"] == 3]
+        reserve3 = 1 if (three and two and budget >= 2) else 0
+        lines, used, k, rendered = [], set(), 0, []
+
+        def _emit(group, limit):
+            nonlocal k
+            for p in group:
+                if limit is not None and k >= limit:
+                    return
+                if k >= budget:
+                    return
+                facts = [i for i in p["facts"] if i is not None]
+                if tuple(facts) in used:        # 同一条路径不重复渲染
+                    continue
+                k += 1
+                used.add(tuple(facts))
+                chain = p["labels"][0]
+                for e in p["edges"]:
+                    chain += f" --[{e['rel']}]--> {e['to']}"
+                rel_s = "/".join(f"{x:.2f}" for x in p["edge_scores"])
+                lines.append(f"PATH {k} (len={p['path_len']}, score={p['score']:.3f}, "
+                             f"rel={rel_s}): {chain}")
+                for i in facts:                 # 事实行数 == 边数
+                    lines.append(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}")
+                rendered.append(p)
+
+        _emit(two, budget - reserve3)           # 2 跳分支：不越界到 3 跳的名额
+        _emit(three, None)                      # 3 跳分支：独立渲染，用剩余名额
+        covered = {i for p in rendered for i in p["facts"]}
+        rest = [i for i in selected if i not in covered]
         if rest:
             lines.append("OTHER SELECTED FACTS:")
             for i in rest:
                 lines.append(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}")
+        self._rendered_paths = rendered
         return "\n".join(lines)
+
+
+# ----------------------------- Delta 快照接入（CR_DELTA_MODE） -----------------------------
+# 旧 runner 在查询前无条件 reset_delta_mem_states(model)：写进 Delta 的记忆在读出时
+# 已经清零，B2_KEEP_DELTA 只进配置指纹、从不控制这次 reset，所以 CR 里 Delta State
+# 永远不参与查询（用户审计已实测）。三档模式把"Delta 参不参与查询"变成显式消融项：
+#   off     —— 查询前清零（历史行为，逐字节不变）；
+#   context —— 写入后快照、每题恢复（复用 AR 的 delta_snapshot/delta_restore 语义），
+#              所有题目看到同一份"写后"记忆状态；
+#   refresh —— 在 context 之上，每题用本题 Top-K 检索结果重写这些槽位文本，
+#              与 AR 侧 DELTA_WRITE_STRATEGY=topk_refresh 同口径（只刷新 Top-K 槽位）。
+CR_DELTA_MODES = ("off", "context", "refresh")
+CR_DELTA_REFRESH_TOPK = int(os.environ.get("V9_CR_DELTA_REFRESH_TOPK", "6"))
+
+
+def parse_delta_mode(value):
+    """CR_DELTA_MODE -> 规范值；非法值直接报错（不静默退回 off）。"""
+    v = str("off" if value is None else value).strip().lower() or "off"
+    if v not in CR_DELTA_MODES:
+        raise ValueError(f"CR_DELTA_MODE must be one of {CR_DELTA_MODES}, got {value!r}")
+    return v
+
+
+def delta_plan(mode, n_pool=0):
+    """每题读出前的 Delta 动作计划（纯函数，runner 照着执行）。
+
+    n_pool 只把池规模记进计划（诊断用），不影响动作本身。
+    """
+    m = parse_delta_mode(mode)
+    if m == "off":
+        return {"mode": m, "reset_before_query": True, "restore_snapshot": False,
+                "refresh_topk": 0, "n_pool": int(n_pool)}
+    return {"mode": m, "reset_before_query": False, "restore_snapshot": True,
+            "refresh_topk": (CR_DELTA_REFRESH_TOPK if m == "refresh" else 0),
+            "n_pool": int(n_pool)}
+
+
+def refresh_slots(hits, top_k):
+    """检索结果 -> 需要刷新的槽位（分数序去重后取前 top_k）。纯函数。
+
+    hits 形态与 pool.retrieve / ar_diag 一致：[(idx, score), ...]（分数降序）。
+    top_k<=0 表示不刷新，返回空列表（off/context 不应走到刷新逻辑）。
+    """
+    if not top_k or int(top_k) <= 0:
+        return []
+    out, seen = [], set()
+    for h in hits or []:
+        if isinstance(h, (list, tuple)) and h:
+            i = h[0]
+        elif isinstance(h, dict):
+            i = h.get("idx", h.get("index", h.get("slot_id")))
+        else:
+            i = h
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if i in seen:
+            continue
+        seen.add(i)
+        out.append(i)
+        if len(out) >= int(top_k):
+            break
+    return out
+
+
+CR_BLOCK_LINE_RE = re.compile(r"^(\d+)\.\s+(.*)$")
+
+
+def block_fact_lines(pool, block):
+    """证据块 -> [(槽位下标, 事实行原文)]；跳过 'PATH ...' / 'OTHER SELECTED FACTS:'。
+
+    只认 '<serial>. <原文>' 事实行（全局 serial -> 池内下标）。反查不到下标的行直接
+    丢弃：宁可在日志里少一行，也不编造槽位 ID。
+    """
+    texts = list(getattr(pool, "texts", None) or [])
+    metas = list(getattr(pool, "metas", None) or [])
+    by_serial = {}
+    for i, m in enumerate(metas):
+        if isinstance(m, dict) and m.get("serial") is not None:
+            try:
+                by_serial.setdefault(int(m["serial"]), i)
+            except (TypeError, ValueError):
+                continue
+    out = []
+    for line in str(block or "").split("\n"):
+        m = CR_BLOCK_LINE_RE.match(line)
+        if not m:
+            continue
+        body = m.group(2)
+        idx = by_serial.get(int(m.group(1)))
+        if idx is None:                      # 没有 serial 元数据 -> 按原文反查
+            idx = next((i for i, t in enumerate(texts) if str(t) == body), None)
+        if idx is None:
+            continue
+        out.append((int(idx), line))
+    return out

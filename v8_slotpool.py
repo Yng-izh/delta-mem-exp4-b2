@@ -20,7 +20,26 @@
 #   Bug2 512 词 span 偏移 —— 先按 UNIT_MAX_WORDS 截断再记 span；零 token 兜底不再推进 off。
 #   Bug3 ev 时间触发 —— ev = 事件动词 or 显式时间标记（与 README/设计一致）；
 #        state 只收无时间标记、无事件动词的稳定陈述句。
+#
+# v8.2（时间语义补齐，接口不变；与 v9 同一套 Session 语义）：
+#   (a) Session 边界重置 last_ts：旧版整篇只维护一个 last_ts，跨 Session 直接继承
+#       上一段的年份（违反不变量 I3）。现在按 split_sessions 切段，新 Session 起点把
+#       last_ts 重置为该 Session 的【头日期】（无头日期则 None），窗口也不再跨 Session；
+#       单元新增 session_id 标记，ts_inherited 语义不变（跨 Session 不可能再继承）。
+#   (b) TIMESTAMP_RE 覆盖相对时间：yesterday/today/tomorrow、last|this|next
+#       <week|month|year|season>、星期名、N days/weeks/months/years ago。相对时间以
+#       【Session 头日期】为锚解析成确定日期（resolve_time_marker）；无锚或精度不足时
+#       【只标记不解析】（ts 保持 None，绝不编造日期），并用 ts_unresolved 标出。
+#   (c) Session 标记纳入 ev 触发条件：Session/日期头本身是时间与结构边界，
+#       含它的窗口一律进 episodic，不落进状态池。
+#
+# 单元字段（v8.2 新增，纯增量，旧键含义不变）：
+#   session_id    所属 Session 序号（无 Session 头时恒为 0）
+#   ts_marker     单元内首个时间标记原文（绝对或相对；无则 None）
+#   ts_relative   该标记是否为相对时间表达
+#   ts_unresolved 相对标记存在但无锚点/精度不足 -> ts 保持 None（只标记不解析）
 
+import datetime
 import os
 import re
 import math
@@ -36,6 +55,7 @@ STATE_THETA = float(os.environ.get("V8_STATE_THETA", "0.92"))  # 状态池语义
 BATCH      = int(os.environ.get("V8_BATCH", "64"))        # 全池 MaxSim 分批大小
 MAX_TOK    = int(os.environ.get("V8_MAX_TOK", "512"))     # 单元 token 硬截断
 IDF_UNSEEN = float(os.environ.get("V8_IDF_UNSEEN", "0"))  # 0 -> 用池内最大 IDF
+SESSION_RESET = os.environ.get("V8_SESSION_RESET", "1") == "1"  # Session 边界不继承时间戳
 
 STOPWORDS = {
     "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "by", "from",
@@ -54,19 +74,253 @@ EVENT_HINT_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
-# 时间标记：March 3, 2001 / 1997 / the 1990s / 12 January 2005 / 2001-03-03
-TIMESTAMP_RE = re.compile(
-    r"(?:\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b"
-    r"|\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b"
+# ----------------------------- 时间标记（绝对 + 相对） -----------------------------
+# ⚠️ 本段（正则 + 锚点解析 + 相对时间求解）与 v9_slotpool.py 中的同名实现保持一致，
+#    两边需同步修改，否则 v8/v9 的时间语义会漂移（AR_MODE=v8/v9 结果不可比）。
+_MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+
+# 绝对时间标记：March 3, 2001 / 12 January 2005 / 2001-03-03 / 1997 / the 1990s
+# ISO(YYYY-MM-DD) 提到纯年份之前：旧版把 ISO 放在年份之后，年份分支会在同一位置先命中，
+# 导致 "2001-03-03" 只留下 "2001"（ISO 分支是死代码）。
+ABS_TIMESTAMP_RE = re.compile(
+    rf"(?:\b{_MON}[a-z]*\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}\b"
+    rf"|\b\d{{1,2}}\s+{_MON}[a-z]*\.?,?\s+\d{{4}}\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b"
     r"|\b(?:19|20)\d{2}\b"
-    r"|\bthe\s+\d{4}s\b"
-    r"|\b\d{4}-\d{2}-\d{2}\b)",
+    r"|\bthe\s+\d{4}s\b)",
     flags=re.IGNORECASE,
 )
+
+# 相对时间标记：yesterday / last week / last summer / Monday / 3 days ago ...
+# 星期缩写（Mon/Tue/...）只在【首字母大写】时匹配，避免 "the sun is hot" 里的 sun
+# 被当成星期天；星期全称小写不歧义，仍大小写不敏感。
+REL_TIMESTAMP_RE = re.compile(
+    r"\b(?:yesterday|today|tomorrow)\b"
+    r"|\b(?:last|this|next)\s+(?:week|month|year|summer|spring|autumn|fall|winter)\b"
+    r"|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"
+    r"|(?-i:\b(?:Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)\b)"
+    r"|\b\d+\s+(?:day|week|month|year)s?\s+ago\b",
+    flags=re.IGNORECASE,
+)
+
+# 统一时间标记 = 绝对（优先，保持历史 group(0) 口径）+ 相对
+TIMESTAMP_RE = re.compile(ABS_TIMESTAMP_RE.pattern + "|" + REL_TIMESTAMP_RE.pattern,
+                          flags=re.IGNORECASE)
 
 WORD_RE = re.compile(r"[A-Za-z0-9_\u00C0-\u024F'-]+")
 
 _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+# Session / 日期头：每个 session 前可能有一行日期；也覆盖 Session 1 / ## Session 等写法。
+# 只在【行首】匹配，避免把句中的 "2023-05-20" 误判成新会话（与 v9 同一套语义）。
+SESSION_RE = re.compile(
+    r"^\s*(?:"
+    r"\[?\s*(?:session|conversation|dialogue|chat)\s*#?\s*\d+"
+    r"|#{1,6}\s*(?:session|conversation)"
+    r"|={3,}\s*(?:session|conversation)"
+    r"|\[?\s*(?:date|time)\s*[:：]"
+    r"|\[?\s*(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}"
+    # 行首月名日期头（"March 3, 2001" / "3 March 2001"），LongMemEval 之外的日期头写法
+    rf"|\[?\s*{_MON}[a-z]*\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}\b"
+    rf"|\[?\s*\d{{1,2}}\s+{_MON}[a-z]*\.?,?\s+\d{{4}}\b"
+    r")",
+    flags=re.IGNORECASE,
+)
+
+# ----------------------------- 相对时间解析（以 Session 头日期为锚） -----------------------------
+_MONTH_IDX = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+
+_DATE_YMD_RE = re.compile(r"\b((?:19|20)\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+_DATE_MDY_RE = re.compile(
+    rf"\b({_MON})[a-z]*\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{{2}})\b",
+    flags=re.IGNORECASE)
+_DATE_DMY_RE = re.compile(
+    rf"\b(\d{{1,2}})\s+({_MON})[a-z]*\.?,?\s+((?:19|20)\d{{2}})\b",
+    flags=re.IGNORECASE)
+_DATE_YM_RE = re.compile(r"\b((?:19|20)\d{2})[-/.](\d{1,2})\b")
+
+_DAY_OFFSET = {"yesterday": -1, "today": 0, "tomorrow": 1}
+# 季节没有确切日期，这里给【可复现的代表日】（北半球节气起点）
+_SEASON_MD = {"spring": (3, 20), "summer": (6, 21), "autumn": (9, 22),
+              "fall": (9, 22), "winter": (12, 21)}
+_WEEKDAY_IDX = {"monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
+                "wednesday": 2, "wed": 2, "thursday": 3, "thu": 3, "thur": 3,
+                "thurs": 3, "friday": 4, "fri": 4, "saturday": 5, "sat": 5,
+                "sunday": 6, "sun": 6}
+
+
+def _days_in_month(y, m):
+    if m == 2:
+        leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+        return 29 if leap else 28
+    return 30 if m in (4, 6, 9, 11) else 31
+
+
+def _shift_month(y, m, delta):
+    t = (y * 12 + (m - 1)) + int(delta)
+    return t // 12, t % 12 + 1
+
+
+def _fmt_ymd(y, m, d):
+    return f"{y:04d}-{m:02d}-{min(max(1, int(d)), _days_in_month(y, m)):02d}"
+
+
+def _fmt_ym(y, m):
+    return f"{y:04d}-{m:02d}"
+
+
+def _shift_year(anchor, delta, prec):
+    y = anchor.year + int(delta)
+    if prec == "day":
+        return _fmt_ymd(y, anchor.month, anchor.day)
+    if prec == "month":
+        return _fmt_ym(y, anchor.month)
+    return f"{y:04d}"
+
+
+def extract_date_text(text):
+    """取文本里【最精确】的日期文本（YYYY-MM-DD > Month D, YYYY > D Month YYYY > YYYY-MM > YYYY）。
+
+    只用于给相对时间找锚点；TIMESTAMP_RE.group(0) 的历史口径不受影响
+    （所以 "2021/07/15" 作为时间戳仍是 "2021"，但作为锚点能拿到整日精度）。
+    """
+    s = str(text or "")
+    for rx in (_DATE_YMD_RE, _DATE_MDY_RE, _DATE_DMY_RE):
+        m = rx.search(s)
+        if m:
+            return m.group(0)
+    m = _DATE_YM_RE.search(s)
+    if m:
+        return m.group(0)
+    m = YEAR_RE.search(s)
+    return m.group(0) if m else None
+
+
+def parse_anchor_date(anchor_ts):
+    """锚点时间戳 -> (datetime.date | None, precision | None)，precision ∈ {"day","month","year"}。
+
+    非法日期（如 2021-02-31）返回 (None, None)：宁可解析不出来，也不编造日期。
+    """
+    ts = extract_date_text(anchor_ts) if anchor_ts else None
+    if not ts:
+        return None, None
+    m = _DATE_YMD_RE.search(ts)
+    if m:
+        try:
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))), "day"
+        except ValueError:
+            return None, None
+    for rx, (mo_g, d_g, y_g) in ((_DATE_MDY_RE, (1, 2, 3)), (_DATE_DMY_RE, (2, 1, 3))):
+        m = rx.search(ts)
+        if not m:
+            continue
+        mo = _MONTH_IDX.get(m.group(mo_g).lower()[:3])
+        if mo is None:
+            return None, None
+        try:
+            return datetime.date(int(m.group(y_g)), mo, int(m.group(d_g))), "day"
+        except ValueError:
+            return None, None
+    m = _DATE_YM_RE.search(ts)
+    if m:
+        y, mo = int(m.group(1)), int(m.group(2))
+        return (datetime.date(y, mo, 1), "month") if 1 <= mo <= 12 else (None, None)
+    m = YEAR_RE.search(ts)
+    if m:
+        return datetime.date(int(m.group(0)), 1, 1), "year"
+    return None, None
+
+
+def is_relative_ts(marker):
+    """该标记是否为相对时间表达（yesterday / last week / Monday / 3 days ago ...）。"""
+    if not marker:
+        return False
+    return bool(REL_TIMESTAMP_RE.fullmatch(" ".join(str(marker).split())))
+
+
+def resolve_relative_ts(marker, anchor_ts):
+    """相对时间 -> 确定日期字符串；无锚点或精度不足 -> None（只标记，不编造）。
+
+    约定（确定性、可复现）：
+      - yesterday/today/tomorrow、N days/weeks ago、裸星期名、last/this/next week
+        需要【日】精度锚点；
+      - N months ago、last/this/next month 需要日/月精度锚点，日精度时按"同日"取（月末夹取）；
+      - N years ago、last/this/next year 允许年精度锚点；
+      - last/this/next <season> 用季节代表日（春 3/20、夏 6/21、秋 9/22、冬 12/21），
+        年份按 offset 平移——季节本身没有确切日期，这里给可复现代表日；
+      - 裸星期名 -> 锚点当天或之前最近的那个星期几。
+    输出格式跟随结果精度：day -> "YYYY-MM-DD"，month -> "YYYY-MM"，year -> "YYYY"。
+    """
+    if not marker:
+        return None
+    txt = " ".join(str(marker).lower().split())
+    anchor, prec = parse_anchor_date(anchor_ts)
+    if anchor is None or prec is None:
+        return None
+
+    if txt in _DAY_OFFSET:
+        if prec != "day":
+            return None
+        return (anchor + datetime.timedelta(days=_DAY_OFFSET[txt])).isoformat()
+
+    m = re.fullmatch(r"(\d+)\s+(day|week|month|year)s?\s+ago", txt)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        if unit in ("day", "week"):
+            if prec != "day":
+                return None
+            return (anchor - datetime.timedelta(days=n * (7 if unit == "week" else 1))).isoformat()
+        if unit == "month":
+            if prec == "year":
+                return None
+            y, mo = _shift_month(anchor.year, anchor.month, -n)
+            return _fmt_ymd(y, mo, anchor.day) if prec == "day" else _fmt_ym(y, mo)
+        return _shift_year(anchor, -n, prec)
+
+    m = re.fullmatch(r"(last|this|next)\s+(week|month|year|summer|spring|autumn|fall|winter)", txt)
+    if m:
+        off = {"last": -1, "this": 0, "next": 1}[m.group(1)]
+        unit = m.group(2)
+        if unit == "week":
+            if prec != "day":
+                return None
+            return (anchor + datetime.timedelta(days=7 * off)).isoformat()
+        if unit == "month":
+            if prec == "year":
+                return None
+            y, mo = _shift_month(anchor.year, anchor.month, off)
+            return _fmt_ymd(y, mo, anchor.day) if prec == "day" else _fmt_ym(y, mo)
+        if unit == "year":
+            return _shift_year(anchor, off, prec)
+        sm, sd = _SEASON_MD[unit]
+        y = anchor.year + off
+        return _fmt_ymd(y, sm, sd) if prec != "year" else f"{y:04d}"
+
+    wd = _WEEKDAY_IDX.get(txt)
+    if wd is not None:
+        if prec != "day":
+            return None
+        return (anchor - datetime.timedelta(days=(anchor.weekday() - wd) % 7)).isoformat()
+    return None
+
+
+def resolve_time_marker(marker, anchor_ts):
+    """时间标记 -> (ts, status)。
+
+    status ∈ {"absolute", "relative", "unresolved"}：
+      - "absolute"  ：绝对标记，ts 原样保留（历史口径不变）；
+      - "relative"  ：相对标记 + 可用锚点（Session 头日期），ts 为确定日期；
+      - "unresolved"：相对标记但无锚点/精度不足，ts=None —— 【只标记不解析，不编造日期】。
+    """
+    if not marker:
+        return None, None
+    if not is_relative_ts(marker):
+        return marker, "absolute"
+    ts = resolve_relative_ts(marker, anchor_ts)
+    return (ts, "relative") if ts else (None, "unresolved")
 
 
 def split_sentences(text):
@@ -75,17 +329,75 @@ def split_sentences(text):
     return [p.strip() for p in parts if p.strip()]
 
 
+def split_sessions(context):
+    """按显式 Session / 日期头把上下文切成段：[(session_id, header_ts, text)]。
+
+    没有任何 Session 头时返回单段（session_id=0, header_ts=None）。
+    V8_SESSION_RESET=0 时始终返回单段（等价旧行为）。
+    与 v9_slotpool.split_sessions 同一套语义（设计不变量 I3：时间戳不得跨 Session 继承）。
+    header_ts 只取绝对日期（ABS_TIMESTAMP_RE），Session 头里若只有相对表达则仍为 None。
+    """
+    text = (context or "").strip()
+    if not text:
+        return []
+    if not SESSION_RESET:
+        return [(0, None, text)]
+    blocks, cur, cur_ts = [], [], None
+    for line in text.splitlines():
+        if SESSION_RE.match(line):
+            if any(s.strip() for s in cur):
+                blocks.append((len(blocks), cur_ts, "\n".join(cur)))
+            cur = [line]
+            tm = ABS_TIMESTAMP_RE.search(line)
+            cur_ts = tm.group(0) if tm else None
+        else:
+            cur.append(line)
+    if any(s.strip() for s in cur):
+        blocks.append((len(blocks), cur_ts, "\n".join(cur)))
+    return blocks or [(0, None, text)]
+
+
+def session_anchor_ts(block_text):
+    """Session 块首行若是 Session/日期头，返回其中最精确的日期文本（相对时间的锚点）。
+
+    头里没有日期时返回 None —— 此时该 Session 内的相对时间【只标记不解析】。
+    """
+    lines = (block_text or "").splitlines()
+    if not lines or not SESSION_RE.match(lines[0]):
+        return None
+    return extract_date_text(lines[0])
+
+
+def _session_sentences(stext):
+    """把 Session 块切成句子：头行（Session/日期头）单独成句，其余按 split_sentences 切。
+
+    v8 的 split_sentences 不按换行切（保持历史口径），所以这里显式把头行剥出来，
+    否则 "2021/07/15\\nAlice prefers quiet." 会并成一句，Session 头日期无法单独参与时间语义。
+    """
+    lines = (stext or "").splitlines()
+    if lines and SESSION_RE.match(lines[0]):
+        head = lines[0].strip()
+        body = "\n".join(lines[1:])
+        out = [head] if head else []
+        out.extend(split_sentences(body))
+        return out
+    return split_sentences(stext)
+
+
 # ----------------------------- 分流：extract_adaptive_units -----------------------------
 def extract_adaptive_units(context, win=WIN):
     """情景/状态自适应分流。
     返回 (episodic_units, state_units)：
-      episodic unit: {"text", "sents", "start", "end", "ts", "ts_inherited"}
-      state unit:    {"text", "start", "end", "ts", "ts_inherited"}
+      episodic unit: {"text", "sents", "start", "end", "ts", "ts_inherited",
+                      "session_id", "ts_marker", "ts_relative", "ts_unresolved"}
+      state unit:    {"text", "start", "end", "ts", "ts_inherited",
+                      "session_id", "ts_marker", "ts_relative", "ts_unresolved"}
     规则：
-      - 3 句滑窗（stride=1）为情景微块；窗口任一句含【显式时间标记】或【事件动词】→ episodic；
-      - 不落入任何情景窗口的稳定陈述句（无显式时间标记、无事件动词）→ state；
+      - 3 句滑窗（stride=1）为情景微块；窗口任一句含【显式时间标记】/【相对时间标记】/
+        【事件动词】/【Session 标记】→ episodic；
+      - 不落入任何情景窗口的稳定陈述句（无时间标记、无事件动词、非 Session 标记）→ state；
       - 时间戳继承：窗口内无显式标记时，继承窗口起点之前最近的一次显式时间戳
-        （不是全篇末尾时间戳）。
+        （不是全篇末尾时间戳），且**不跨 Session**。
     v8.1 修复三个确定性 Bug：
       Bug1 cur_ts 第二轮污染：旧版首轮扫描结束后 cur_ts 停留在全篇最后一个时间戳，
            第二轮窗口/状态判定直接复用它（且状态轮还继续改写它），导致【位于任何时间标记之前】
@@ -93,49 +405,85 @@ def extract_adaptive_units(context, win=WIN):
            （= 该位置之前最近显式时间戳），两轮只读、不再跨轮改写。
       Bug3 ev 时间触发：旧版 ev 只看事件动词，纯时间句（含 "In 2001" 但无过去时动词）落进
            state，与"时间标记或事件动词 → episodic"的设计矛盾。现 ev 同时接受显式时间标记。
+    v8.2 修复两个时间语义缺口（接口不变）：
+      (a) 跨 Session 继承（违反 I3）：旧版整篇单一 last_ts，Session 2 的事实会继承
+          Session 1 的年份。现按 split_sessions 切段，Session 边界把 last_ts 重置为
+          【该 Session 的头日期】（无头日期则 None）；窗口也不再跨越 Session 边界。
+      (b) 相对时间：yesterday / last week / Monday / 3 days ago ... 以本 Session 头日期
+          为锚解析成确定日期；无锚或精度不足时只标记（ts_marker/ts_unresolved），
+          ts 保持 None —— 不编造日期。
     """
-    sents = split_sentences(context)
+    sents, sid_at, hts_at, anchor_at, hdr_at = [], [], [], [], []
+    for sid, hts, stext in split_sessions(context):
+        anchor = session_anchor_ts(stext)
+        for s in _session_sentences(stext):
+            sents.append(s)
+            sid_at.append(sid)
+            hts_at.append(hts)
+            anchor_at.append(anchor)
+            hdr_at.append(bool(SESSION_RE.match(s)))
     n = len(sents)
-    ts_at = [None] * n          # 每句自己的显式时间戳（仅显式，用于触发与 ts_inherited）
-    resolved_ts = [None] * n    # 逐句"最近一次显式时间戳"（含自身），继承用，只读
+    ts_at = [None] * n          # 每句自己的显式时间戳（相对时间已解析；仅显式，用于触发与 ts_inherited）
+    marker_at = [None] * n      # 每句时间标记原文（含无法解析的相对标记）
+    rel_at = [False] * n        # 标记是否为相对时间
+    unres_at = [False] * n      # 相对标记但无锚点 -> 只标记不解析
+    resolved_ts = [None] * n    # 逐句"同 Session 内最近一次显式时间戳"（含自身），继承用，只读
     is_event = [False] * n      # 每句是否事件句（仅事件动词）
     last_ts = None
+    last_sid = None
     for i, s in enumerate(sents):
+        if sid_at[i] != last_sid:              # Session 边界：不继承上一段的时间
+            last_ts, last_sid = hts_at[i], sid_at[i]
         m = TIMESTAMP_RE.search(s)
         if m:
-            last_ts = m.group(0)
-            ts_at[i] = last_ts
+            marker_at[i] = m.group(0)
+            rel_at[i] = is_relative_ts(marker_at[i])
+            ts, status = resolve_time_marker(marker_at[i], anchor_at[i] or hts_at[i])
+            unres_at[i] = status == "unresolved"
+            if ts is not None:
+                last_ts = ts
+                ts_at[i] = ts
         resolved_ts[i] = last_ts
         is_event[i] = bool(EVENT_HINT_RE.search(s))
 
     episodic, state = [], []
     state_covered = [False] * n
     for i in range(n):
-        w = sents[i:i + win]
+        end = min(i + win - 1, n - 1)
+        while end > i and sid_at[end] != sid_at[i]:   # 窗口不跨 Session 边界
+            end -= 1
+        w = sents[i:end + 1]
         if not w:
             break
-        end = min(i + win - 1, n - 1)
         explicit = next((ts_at[j] for j in range(i, end + 1) if ts_at[j]), None)
-        # 继承源：窗口起点之前最近一次显式时间戳（i==0 时无前文可继承）
-        prev_ts = resolved_ts[i - 1] if i > 0 else None
+        # 继承源：窗口起点之前最近一次显式时间戳（i==0 或跨 Session 时无前文可继承）
+        prev_ts = resolved_ts[i - 1] if i > 0 and sid_at[i - 1] == sid_at[i] else None
         inherited = explicit if explicit is not None else prev_ts
-        # Bug3：显式时间标记同样触发 episodic（纯时间句不再落入 state）
-        ev = any(is_event[j] or ts_at[j] is not None for j in range(i, end + 1))
+        # Bug3：显式/相对时间标记同样触发 episodic；v8.2：Session 标记也参与触发
+        ev = any(is_event[j] or ts_at[j] is not None or marker_at[j] is not None
+                 or hdr_at[j] for j in range(i, end + 1))
         if ev:
             episodic.append({
                 "text": " ".join(w), "sents": list(w), "start": i, "end": end,
                 "ts": inherited, "ts_inherited": explicit is None and inherited is not None,
+                "session_id": sid_at[i],
+                "ts_marker": next((marker_at[j] for j in range(i, end + 1) if marker_at[j]), None),
+                "ts_relative": any(rel_at[j] for j in range(i, end + 1)),
+                "ts_unresolved": any(unres_at[j] for j in range(i, end + 1)),
             })
             for j in range(i, end + 1):
                 state_covered[j] = True
 
-    # 状态单元：未被情景窗口覆盖的稳定陈述句（无显式时间标记、无事件动词）
+    # 状态单元：未被情景窗口覆盖的稳定陈述句（无时间标记、无事件动词、非 Session 标记）
     for i, s in enumerate(sents):
-        if state_covered[i] or is_event[i] or ts_at[i] is not None:
+        if (state_covered[i] or is_event[i] or ts_at[i] is not None
+                or marker_at[i] is not None or hdr_at[i]):
             continue
         # Bug1：只读 resolved_ts[i]（该句之前最近的时间戳），不再复用/改写跨轮 cur_ts
         state.append({"text": s, "start": i, "end": i, "ts": resolved_ts[i],
-                      "ts_inherited": resolved_ts[i] is not None})
+                      "ts_inherited": resolved_ts[i] is not None,
+                      "session_id": sid_at[i], "ts_marker": None,
+                      "ts_relative": False, "ts_unresolved": False})
     return episodic, state
 
 

@@ -28,6 +28,13 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
 #               Top-K、再按原文位置排序；EventQA 后向非对称扩展 (back=16/ahead=4)；
 #               时间戳前缀参与打分 + 时序重排；可选第 18 层隐状态混合稠密打分
 #               (AR_V9_L18=1)。逐题诊断字段 (ar_diag.record) 三种模式都会写。
+#               拼块格式 '<serial>. [<date>] <原文>'（AR_V9_PROMPT_DATE=1 默认）：
+#               日期取单元 event_time（显式或 Session 头继承），无时间则省略方括号；
+#               serial 全局递增（"编号越大越新"不变）；=0 时逐字节等于旧输出。
+#               拼块大小由 token 预算 AR_V9_CTX_TOKEN_BUDGET=2500 决定（按分数降序装填、
+#               超预算即停、装完按位置输出）；被裁掉的槽位/token 记进
+#               dropped_ids / dropped_tokens / dropped_reasons，不静默丢证据；
+#               OOM 重试同样按证据优先级整行裁剪，逐次记录 keep_ids / dropped_ids。
 #
 # 诊断字段（--dry-run 之外的真实运行，每题写入 JSONL）：
 #     retrieved_slot_ids / retrieved_scores / retrieved_texts / used_slot_ids /
@@ -43,6 +50,17 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
 #   每题生成前 load_delta_mem_online_state 恢复同一快照（查询期不再 reset）。
 #   写入开启但快照为空 -> 直接报错（除非 AR_ALLOW_EMPTY_DELTA_SNAP=1）：
 #   空快照会让逐题恢复退化为 no-op，题目之间互相污染，指标不可解释。
+#
+# Delta 写入策略（AR_DELTA_WRITE_STRATEGY，只在 AR_DELTA_WRITE=1 时生效）：
+#   all          现状：chunk_text_into_sentences(ctx, chunk_size=512) 全部分块盲写 —— 对照基线
+#   filtered     只写状态/事实类单元：显式时间戳或事件动词的叙述句跳过、重复事实去重、
+#                同主语+同属性的新旧值只写最终值（复用 v9 extract_units 的单元分类）
+#   topk_refresh filtered + 按本 context 问题集的词面 IDF 粗排只刷新 Top-K 槽位
+#                （写入先于建池，用不了建池后的检索器；retriever-driven refresh 是后续工作）
+#   默认值决策：AR_DELTA_WRITE 仍默认 0（不写），三档策略写进配置指纹、互相可消融；
+#   在拿到配对/显著证据之前，不把 filtered 设为默认 —— 先证明"过滤后的 Delta 更好"。
+#   每题记录 delta.write_chunks / delta.skipped_chunks / delta.snapshot_layers /
+#   delta.write_seconds / delta.skip_reasons，用于核对写入量是否与信息量脱钩。
 #
 # 读出模式（诚实命名，避免把明文嵌入说成 latent memory）：
 #   AR_READOUT_MODE=prompt       默认：input_ids 走明文 prompt
@@ -69,7 +87,7 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
     - 全切片：substring_exact_match（SF）
     - eventqa：额外 eventqa_recall（6 选 1 全中）
 """
-import sys, os, re, json, time
+import sys, os, re, json, time, math, string
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("DELTA_MEM_SCAN_IMPL", "torch")
@@ -153,6 +171,18 @@ RERANK_M    = int(os.environ.get("AR_RERANK_M", "64"))     # stage-2 候选数
 EQA_WIN     = int(os.environ.get("AR_EQA_WIN", "4"))       # EventQA 锚点后取几块
 CTX_MAX_TOK = int(os.environ.get("AR_CTX_MAX_TOK", "0"))   # 0=不截断，>0=保留尾部
 DELTA_WRITE = os.environ.get("AR_DELTA_WRITE", "0") == "1"  # 查询前流式写 delta（写后快照）
+
+# Delta 写入策略（只在 AR_DELTA_WRITE=1 时生效；默认仍是 0=不写，见文件头"Delta 写入策略"）
+DELTA_WRITE_STRATEGIES = ("all", "filtered", "topk_refresh")
+DELTA_WRITE_STRATEGY = os.environ.get("AR_DELTA_WRITE_STRATEGY", "all").strip().lower()
+DELTA_WRITE_TOPK = int(os.environ.get("AR_DELTA_WRITE_TOPK", "8"))   # topk_refresh 的 K
+DELTA_WRITE_CHUNK = int(os.environ.get("AR_DELTA_WRITE_CHUNK", "512"))  # all 的分块 token 数
+if DELTA_WRITE_STRATEGY not in DELTA_WRITE_STRATEGIES:
+    raise SystemExit(f"[ERR] AR_DELTA_WRITE_STRATEGY={DELTA_WRITE_STRATEGY!r} 非法；"
+                     f"可选 {' | '.join(DELTA_WRITE_STRATEGIES)}")
+# 最近一次 prepare_delta_memory 的写入统计（write_chunks/skipped_chunks/... 进每题 record）
+DELTA_STATS = {}
+
 INPUTS_EMBEDS = os.environ.get("AR_INPUTS_EMBEDS", "0") == "1"  # 兼容旧命令：读出走 inputs_embeds
 DELTA_RESTORE = os.environ.get("AR_DELTA_RESTORE", "1") == "1"  # 逐题恢复 delta 状态快照
 LIMIT_ROWS  = int(os.environ.get("AR_LIMIT_ROWS", "0"))    # smoke：限制上下文数
@@ -197,6 +227,10 @@ def _manifest_params():
         "eqa_win": EQA_WIN,
         "ctx_max_tok": CTX_MAX_TOK,
         "delta_write": DELTA_WRITE,
+        # 三档写入策略必须进指纹：all/filtered/topk_refresh 是互相对照的实验组，
+        # 共用结果文件会让 AR_RESUME 把另一组的题目当成"已完成"直接跳过。
+        "delta_write_strategy": DELTA_WRITE_STRATEGY,
+        "delta_write_topk": DELTA_WRITE_TOPK,
         "delta_restore": DELTA_RESTORE,
         "readout_mode": READOUT_MODE,
         "strict_retrieval": STRICT_RETRIEVAL,
@@ -215,8 +249,12 @@ def _manifest_params():
             "temporal_tau": sp.TEMPORAL_TAU, "temporal_bonus": sp.TEMPORAL_BONUS,
             "l18": V9_L18, "l18_layer": V9_L18_LAYER, "l18_alpha": sp.L18_ALPHA,
             "topk_state": V9_TOPK_STATE, "ctx_units": V9_CTX_UNITS,
+            # token 级证据预算（t6）：2500 是拼块大小的实际决定因素，必须进指纹
+            "ctx_token_budget": V9_TOKEN_BUDGET,
             "session_reset": sp.SESSION_RESET, "split_newline": sp.SPLIT_ON_NEWLINE,
             "state_theta": sp.STATE_THETA, "cr_rel_theta": sp.CR_REL_THETA,
+            # 时间进 Prompt 的开关也必须进指纹：DATE=0/1 是互相对照的读出实验组
+            "prompt_date": V9_PROMPT_DATE, "prompt_serial": V9_PROMPT_SERIAL,
         }
     return p
 
@@ -354,19 +392,240 @@ def delta_restore(snapshot):
         m.delta_state = t.to(device=p.device, dtype=p.dtype)
 
 
-def prepare_delta_memory(ctx):
+# ---------------------- Delta 有效写入：写入前过滤 / 去重 / 覆写合并 ----------------------
+# 问题：旧实现把 chunk_text_into_sentences(ctx, chunk_size=512) 的**全部分块**前向写进
+# Delta State —— 纯背景叙述、重复事实、后来被覆写掉的旧值全部进状态，写入量与信息量无关。
+# 这里把"写什么"从"写多少 token"里拆出来，三档可消融（all 是对照基线）：
+#   all          —— 现状（512 token 分块盲写），保留为对照，任何过滤收益都与它比；
+#   filtered     —— 只写状态/事实类单元：显式时间戳或事件动词的叙述句（情景）跳过，
+#                   完全重复的事实去重，同主语+同属性的新旧值只写**最终值**；
+#   topk_refresh —— 在 filtered 之上，按本 context 问题集的词面 IDF 粗排只刷新 Top-K 槽位。
+#                   ⚠️ 写入发生在建池之前（L18 单元/query 编码必须看到同一记忆状态），
+#                   因此这里用不了建池后的检索器，"检索驱动刷新"当前是词面近似；
+#                   真正的 retriever-driven refresh 需要重排写入/建池顺序，属后续工作。
+#
+# 过滤判据复用 v9_slotpool.extract_units 的单元切分与 is_event / ts_explicit 分类
+# （v9 的单元级等价物：显式时间或事件动词 -> 情景，否则 -> 稳定陈述/状态）。
+# 全部为纯标准库 + 纯正则，不需要模型前向，因此 CPU 单测与 --dry-run 都能跑。
+
+_DELTA_STOP = {
+    "a", "an", "the", "of", "in", "on", "at", "to", "for", "with", "by", "from",
+    "and", "or", "but", "as", "is", "was", "are", "were", "be", "been", "being",
+    "it", "its", "his", "her", "their", "he", "she", "they", "this", "that",
+    "these", "those", "also", "very", "s", "t", "there", "here", "then",
+}
+
+# 谓词线索（只用于"同主语+同属性"的槽位键，不追求完整句法解析）
+_FACT_VP_RE = re.compile(
+    r"\b(?:is|was|are|were|has|had|have|works?|worked|lives?|lived|likes?|liked|"
+    r"loves?|loved|owns?|owned|plays?|played|studies|studied|studying|moved|"
+    r"joined|left|holds?|held|wants?|wanted|needs?|needed|prefers?|preferred|"
+    r"uses?|used|drives?|drove|reads?|read|teaches|taught|manages|managed)\b",
+    flags=re.IGNORECASE,
+)
+_COPULA = {"is", "was", "are", "were", "has", "had", "have"}
+_PREPS = {"in", "at", "on", "to", "for", "with", "of", "from", "by", "about", "near", "into"}
+
+
+def _delta_norm_text(text):
+    """去重键：小写 + 去标点 + 压缩空白（同一事实的不同标点/大小写视为重复）。"""
+    s = (text or "").lower().translate(str.maketrans("", "", string.punctuation))
+    return " ".join(s.split())
+
+
+def _delta_tokens(text):
+    """词面 token（小写、去停用词），用于 topk_refresh 的粗排。"""
+    ws = [w for w in re.findall(r"[a-z0-9']+", (text or "").lower()) if w not in _DELTA_STOP]
+    return ws
+
+
+def _delta_slot_key(text):
+    """(主语归一化, 属性归一化) 槽位键：同主语 + 同属性 -> 同一槽，只保留最终值。
+
+    系表结构必须把表语并进谓词键：裸系词会让 'Alice is a doctor.' 与
+    'Alice is vegetarian.' 落进同一个槽，职业事实被后一句覆写掉（用户审计已实测）。
+    动词谓词带紧跟的介词：'works at' 与 'works on' 是不同属性，不得互相覆写。
+    无谓词线索时退化为整句归一化键（只能按完全重复去重）。
+    """
+    raw = (text or "").strip().rstrip(".!?;:")
+    if not raw:
+        return None
+    m = _FACT_VP_RE.search(raw)
+    if not m:
+        k = _delta_norm_text(raw)
+        return ("", k) if k else None
+    subj = " ".join(w for w in _delta_norm_text(raw[:m.start()]).split()
+                    if w not in _DELTA_STOP)
+    verb = m.group(0).lower()
+    rest = raw[m.end():]
+    rest_words = [w for w in re.findall(r"[a-z0-9'\-]+", rest.lower())
+                  if w not in _DELTA_STOP]
+    if verb in _COPULA:
+        # 表语头最多 2 词（'is doctor' / 'is vegetarian' 分开；多说一句也不误合并）
+        pred = " ".join([verb] + rest_words[:2])
+    else:
+        first = re.findall(r"[a-z']+", rest.lower())
+        prep = first[0] if first and first[0] in _PREPS else ""
+        pred = f"{verb} {prep}".strip()
+    return (subj, pred) if (subj or pred) else None
+
+
+def _delta_units(ctx):
+    """句级非重叠单元（含 is_event / ts_explicit 分类）。
+
+    优先用 v9_slotpool.extract_units（与 v9 检索同一套切句/会话/时间语义，
+    避免两处规则漂移）；v9_slotpool 不可导入时**报错**而不是猜一套替代规则，
+    否则过滤语义会静默变成另一套东西。
+    """
+    sp = v9_import()
+    units = sp.extract_units(ctx, block_sents=1)
+    return units
+
+
+def _filter_state_units(units):
+    """状态/事实类过滤 + 去重 + 覆写合并。返回 (texts, reasons)。"""
+    kept = []            # [(start, text, norm_key, slot_key)]
+    reasons = {"episodic": 0, "duplicate": 0, "overwritten": 0}
+    seen = {}            # 归一化全文 -> kept 下标
+    slot_at = {}         # (主语, 属性) -> kept 下标
+    for i, u in enumerate(units):
+        text = (u.get("text") or "").strip()
+        if not text:
+            continue
+        if u.get("is_event") or u.get("ts_explicit"):
+            # 情景/叙述单元：显式时间戳或事件动词 -> 不是"当前状态"，不写
+            reasons["episodic"] += 1
+            continue
+        nk = _delta_norm_text(text)
+        if not nk:
+            continue
+        if nk in seen:
+            reasons["duplicate"] += 1
+            continue
+        sk = _delta_slot_key(text)
+        if sk is not None and sk in slot_at:
+            # 同主语+同属性的新值：原位替换旧值 -> 状态里只有最终值
+            j = slot_at[sk]
+            seen.pop(kept[j][2], None)
+            kept[j] = (kept[j][0], text, nk, sk)
+            seen[nk] = j
+            reasons["overwritten"] += 1
+            continue
+        seen[nk] = len(kept)
+        if sk is not None:
+            slot_at[sk] = len(kept)
+        kept.append((u.get("start", i), text, nk, sk))
+    kept.sort(key=lambda x: x[0])
+    return [k[1] for k in kept], reasons
+
+
+def _delta_lex_scores(texts, questions):
+    """问题集 vs 单元的 IDF 词面重叠分（写入前粗排，不跑模型）。"""
+    q_tokens = []
+    for q in questions or []:
+        q_tokens.extend(_delta_tokens(q))
+    if not q_tokens or not texts:
+        return None
+    q_cnt = {}
+    for w in q_tokens:
+        q_cnt[w] = q_cnt.get(w, 0) + 1
+    docs = [set(_delta_tokens(t)) for t in texts]
+    df = {}
+    for d in docs:
+        for w in d:
+            df[w] = df.get(w, 0) + 1
+    n = max(len(docs), 1)
+    scores = []
+    for d in docs:
+        s = 0.0
+        for w, c in q_cnt.items():
+            if w in d:
+                s += c * math.log((n + 1.0) / (df[w] + 1.0) + 1.0)
+        scores.append(s)
+    return scores
+
+
+def plan_delta_writes(ctx, strategy=None, questions=None, chunk_size=None, all_chunks=None,
+                      topk=None):
+    """决定本 context 要写进 Delta 的文本单元（纯标准库 + 纯正则，不碰模型）。
+
+    返回 (texts, stats)。stats 字段：
+      strategy / candidate_units / write_chunks / skipped_chunks /
+      skip_reasons{episodic,duplicate,overwritten,topk} / unit_source / topk / chunk_size
+    """
+    strategy = (strategy or DELTA_WRITE_STRATEGY or "all").strip().lower()
+    if strategy not in DELTA_WRITE_STRATEGIES:
+        raise ValueError(f"AR_DELTA_WRITE_STRATEGY={strategy!r} 非法；"
+                         f"可选 {' | '.join(DELTA_WRITE_STRATEGIES)}")
+    csize = int(chunk_size or DELTA_WRITE_CHUNK)
+    stats = {"strategy": strategy, "candidate_units": 0, "write_chunks": 0,
+             "skipped_chunks": 0,
+             "skip_reasons": {"episodic": 0, "duplicate": 0, "overwritten": 0, "topk": 0},
+             "unit_source": "chunk512" if strategy == "all" else "v9",
+             "topk": None, "chunk_size": csize}
+
+    if strategy == "all":
+        # 对照基线：与旧实现逐字一致（同样的分块、同样的顺序、全部写入）
+        chunks = all_chunks
+        if chunks is None:
+            if chunk_text_into_sentences is None:
+                raise RuntimeError("chunk_text_into_sentences 不可用（缺 MemoryAgentBench 依赖），"
+                                   "无法执行 AR_DELTA_WRITE_STRATEGY=all")
+            chunks = chunk_text_into_sentences(ctx, chunk_size=csize)
+        texts = [t for t in (chunks or []) if t and t.strip()]
+        stats.update(candidate_units=len(texts), write_chunks=len(texts), skipped_chunks=0)
+        return texts, stats
+
+    units = _delta_units(ctx)
+    stats["candidate_units"] = len(units)
+    texts, reasons = _filter_state_units(units)
+    stats["skip_reasons"].update(reasons)
+
+    if strategy == "topk_refresh":
+        k = int(topk if topk is not None else DELTA_WRITE_TOPK)
+        stats["topk"] = k
+        scores = _delta_lex_scores(texts, questions)
+        if scores is not None and 0 < k < len(texts):
+            order = sorted(range(len(texts)), key=lambda i: (-scores[i], i))[:k]
+            keep = set(order)
+            stats["skip_reasons"]["topk"] = len(texts) - len(keep)
+            texts = [t for i, t in enumerate(texts) if i in keep]
+
+    stats["write_chunks"] = len(texts)
+    stats["skipped_chunks"] = sum(stats["skip_reasons"].values())
+    return texts, stats
+
+
+def prepare_delta_memory(ctx, questions=None):
     """查询前完成 delta 写入，返回写后快照（写开关已关闭）。
 
     调用约定：main 在本 context 起点先 reset_delta_mem_states(model)；
-    本函数只负责 write -> disable -> snapshot，查询期不再 reset。
+    本函数只负责 plan -> write -> disable -> snapshot，查询期不再 reset。
+    写什么由 AR_DELTA_WRITE_STRATEGY 决定（all | filtered | topk_refresh），
+    questions 只给 topk_refresh 做写入前的 Top-K 槽位粗排。
     """
     if not DELTA_WRITE:
+        DELTA_STATS.clear()
+        DELTA_STATS.update({"strategy": DELTA_WRITE_STRATEGY, "write_chunks": 0,
+                            "skipped_chunks": 0, "candidate_units": 0,
+                            "write_seconds": 0.0, "snapshot_layers": 0,
+                            "skip_reasons": {}})
         return {}
     if reset_delta_mem_states is None or set_delta_mem_write_enabled is None:
         raise RuntimeError("delta-mem 写入 API 不可用，无法执行 AR_DELTA_WRITE=1")
+    texts, stats = plan_delta_writes(ctx, strategy=DELTA_WRITE_STRATEGY,
+                                     questions=questions)
+    if not texts:
+        msg = (f"AR_DELTA_WRITE_STRATEGY={stats['strategy']} 过滤后没有任何可写单元"
+               f"（候选 {stats['candidate_units']}，跳过 {stats['skipped_chunks']}）："
+               f"空写入 -> 空快照 -> 逐题恢复退化为 no-op，Delta 实际未参与问答。")
+        if os.environ.get("AR_ALLOW_EMPTY_DELTA_SNAP", "0") != "1":
+            raise RuntimeError(msg + " 请放宽过滤/换策略，或显式设 AR_ALLOW_EMPTY_DELTA_SNAP=1")
+        print(f"[warn] {msg}（AR_ALLOW_EMPTY_DELTA_SNAP=1，继续）", flush=True)
+    t0 = time.time()
     set_delta_mem_write_enabled(model, True)
     try:
-        for ch in chunk_text_into_sentences(ctx, chunk_size=512):
+        for ch in texts:
             txt = tok.apply_chat_template(
                 [{"role": "system", "content": sys_msg},
                  {"role": "user", "content": fmt(mem_tpl, context=ch)}],
@@ -375,7 +634,14 @@ def prepare_delta_memory(ctx):
             model(input_ids=ii, use_cache=True)
     finally:
         set_delta_mem_write_enabled(model, False)
+    stats["write_seconds"] = round(time.time() - t0, 3)
+    print(f"[delta] strategy={stats['strategy']} write={stats['write_chunks']} "
+          f"skipped={stats['skipped_chunks']} reasons={stats['skip_reasons']} "
+          f"candidates={stats['candidate_units']} {stats['write_seconds']}s", flush=True)
     snap = delta_snapshot(model)
+    stats["snapshot_layers"] = len(snap or {})
+    DELTA_STATS.clear()
+    DELTA_STATS.update(stats)
     if not snap:
         msg = ("delta 写入已开启，但写后快照为空：逐题恢复会退化为 no-op，"
                "题目之间会互相污染（指标不可解释）。请检查 deltamem 版本/快照 API。")
@@ -392,25 +658,43 @@ def prepare_delta_memory(ctx):
     return snap
 
 
-def generate_readout(block, qtxt):
+def generate_readout(block, qtxt, trim=None):
     """生成答案。READOUT_MODE=text_embeds 时用 EMB[ids] 走 inputs_embeds。
 
     ⚠️ text_embeds 只是把**同一段明文 prompt** 换成嵌入矩阵查表结果（EMB[ids]），
     没有注入槽位内部状态或压缩 latent tokens，因此**不是** latent memory 读出，
     不能作为"已实现潜槽位记忆"参与论文比较（真正的路径 B 仍是规划中）。
 
+    OOM 重试（t6）：**按证据优先级裁剪**，从最低分单元开始丢，每次重试把
+    keep_ids / dropped_ids / prompt_tokens 记进 trim["retries"]，绝不"保留最后 N token"
+    地静默丢掉已选中的高分证据。trim 缺省（老调用方）时按行位置定优先级（越靠前越重要），
+    仍然只按证据行整行丢、且照样记录，不做 token 尾部截断。
+
+    trim 结构：{"lines": [行文本...], "prio": [优先级（大=重要）...], "ids": [槽位ID...]}
     返回 (pred, input_len, output_len)：
       - 正常路径：out 含 prompt，output_len = out.shape[1] - input_len；
       - inputs_embeds 路径：generate 只返回新 token，output_len = out.shape[1]。
     """
-    text = tok.apply_chat_template(
-        [{"role": "system", "content": sys_msg},
-         {"role": "user", "content": f"{block}\n\n{qtxt}" if block else qtxt}],
-        add_generation_prompt=True, tokenize=False)
-    ids = tok(text, return_tensors="pt").input_ids.to(DEV)
+    if trim is not None and trim.get("lines"):
+        lines = [str(x) for x in trim["lines"]]
+        prio = [float(p) for p in (trim.get("prio") or [0.0] * len(lines))]
+        lids = list(trim.get("ids") or [None] * len(lines))
+        if not (len(prio) == len(lines) == len(lids)):
+            raise ValueError("trim.lines/prio/ids 必须等长")
+    else:
+        lines = [l for l in str(block or "").split("\n") if l.strip()]
+        # 兜底：没有槽位元数据时按行序定优先级（前面的行更重要），丢也是整行丢
+        prio = [float(len(lines) - j) for j in range(len(lines))]
+        lids = [None] * len(lines)
     use_emb = bool(READOUT_MODE == "text_embeds" and EMB is not None)
-    emb = EMB[ids] if use_emb else None
-    torch.cuda.empty_cache()                 # 建池/检索后的 GPU 碎片回收
+
+    def _render(ls):
+        b = "\n".join(ls)
+        t = tok.apply_chat_template(
+            [{"role": "system", "content": sys_msg},
+             {"role": "user", "content": f"{b}\n\n{qtxt}" if b else qtxt}],
+            add_generation_prompt=True, tokenize=False)
+        return b, t
 
     def _gen(n_ids, n_emb):
         with torch.no_grad():
@@ -424,21 +708,50 @@ def generate_readout(block, qtxt):
                                   do_sample=False, use_cache=True,
                                   pad_token_id=tok.eos_token_id or 0)
 
-    try:
-        out = _gen(ids, emb)
-    except torch.OutOfMemoryError:
-        for keep in (16000, 8000, 4000):
+    retries = []
+
+    def _flush_trim(raised=False):
+        if trim is None:
+            return
+        trim["retries"] = list(retries)
+        trim["final_keep_ids"] = list(lids)
+        trim["final_dropped_ids"] = [d for r in retries for d in r["dropped_ids"]]
+        trim["raised"] = bool(raised)
+
+    torch.cuda.empty_cache()                 # 建池/检索后的 GPU 碎片回收
+    while True:
+        _block, text = _render(lines)
+        ids = tok(text, return_tensors="pt").input_ids.to(DEV)
+        emb = EMB[ids] if use_emb else None
+        try:
+            out = _gen(ids, emb)
+            break
+        except torch.OutOfMemoryError:
+            if len(lines) <= 1:
+                # 只剩最高分那一行还 OOM：如实抛出，不静默丢证据（但先落盘已做的裁剪）
+                _flush_trim(raised=True)
+                raise
+            # 从最低优先级开始丢（同优先级按位置靠后的先丢），每次丢 1/4（至少 1 行）
+            order = sorted(range(len(lines)), key=lambda j: (prio[j], -j))
+            n_drop = max(1, len(lines) // 4)
+            drop = set(order[:n_drop])
+            keep_ids = [lids[j] for j in range(len(lines)) if j not in drop]
+            retries.append({
+                "attempt": len(retries) + 1,
+                "prompt_tokens": int(ids.shape[1]),
+                "kept_lines": len(keep_ids),
+                "dropped_lines": len(drop),
+                "dropped_ids": [lids[j] for j in sorted(drop)],
+                "keep_ids": keep_ids,
+            })
+            print(f"[gen] OOM retry {len(retries)}: 按证据优先级丢 {len(drop)} 行"
+                  f"（最低分起），保留 {len(keep_ids)} 行", flush=True)
+            lines = [l for j, l in enumerate(lines) if j not in drop]
+            prio = [p for j, p in enumerate(prio) if j not in drop]
+            lids = [i for j, i in enumerate(lids) if j not in drop]
             torch.cuda.empty_cache()
-            keep_n = min(keep, ids.shape[1])
-            ids = ids[:, ids.shape[1] - keep_n:]
-            emb = EMB[ids] if use_emb else None
-            print(f"[gen] OOM retry keep={keep_n}", flush=True)
-            try:
-                out = _gen(ids, emb)
-                break
-            except torch.OutOfMemoryError:
-                if keep == 4000:
-                    raise
+
+    _flush_trim()
 
     if use_emb:
         pred = tok.decode(out[0], skip_special_tokens=True)
@@ -615,10 +928,178 @@ def _cap_before_sort(idxs, cap, anchor=None):
     return idxs[:cap]
 
 
+# ----------------------------- 时间信息进 Prompt（t5） -----------------------------
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+_DATE_ISO_RE = re.compile(r"\b((?:19|20)\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+_DATE_MDY_RE = re.compile(
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2}),?\s+((?:19|20)\d{2})\b",
+    flags=re.IGNORECASE)
+_DATE_DMY_RE = re.compile(
+    r"\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,?\s+((?:19|20)\d{2})\b",
+    flags=re.IGNORECASE)
+_DATE_DECADE_RE = re.compile(r"\bthe\s+((?:19|20)\d{2})s\b", flags=re.IGNORECASE)
+_DATE_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+
+
+def format_event_date(ts):
+    """单元时间 -> Prompt 里的日期串；**不伪造**。
+
+    - 'YYYY-MM-DD' / 'YYYY/MM/DD' / 'YYYY.MM.DD' -> 'YYYY-MM-DD'
+    - '12 January 2005' / 'January 12, 2005'      -> 'YYYY-MM-DD'
+    - 只有年份 '1997'                             -> '1997'（不补月份/日）
+    - 'the 1990s'                                 -> '1990s'
+    - None / 解析不出                               -> None（调用方省略方括号）
+    """
+    if not ts:
+        return None
+    s = str(ts).strip()
+    if not s:
+        return None
+    m = _DATE_ISO_RE.search(s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= mo <= 12 and 1 <= d <= 31:
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+    m = _DATE_MDY_RE.search(s)
+    if m:
+        mo = _MONTHS[m.group(1)[:3].lower()]
+        return f"{int(m.group(3)):04d}-{mo:02d}-{int(m.group(2)):02d}"
+    m = _DATE_DMY_RE.search(s)
+    if m:
+        mo = _MONTHS[m.group(2)[:3].lower()]
+        return f"{int(m.group(3)):04d}-{mo:02d}-{int(m.group(1)):02d}"
+    m = _DATE_DECADE_RE.search(s)
+    if m:
+        return f"{m.group(1)}s"
+    m = _DATE_YEAR_RE.search(s)
+    if m:
+        return m.group(1)                       # 只有年份：不编造月日
+    return None
+
+
+def v9_unit_serial(meta, idx=0):
+    """全局递增编号（1-based）：= 单元在上下文中的写入顺序（ingestion order）。
+
+    非重叠单元按位置单调递增，因此"编号越大越新"成立；编号**与日期无关**，
+    加日期前缀不会改变编号顺序（反事实 Prompt 的规则不变）。
+    """
+    try:
+        return int((meta or {}).get("start", idx)) + 1
+    except Exception:
+        return int(idx) + 1
+
+
+def render_v9_prompt_lines(rows, with_date=None, with_serial=None):
+    """[(serial, text, event_time)] -> Prompt 行（纯函数，单测/--dry-run 可直接调用）。
+
+    格式 '<serial>. [<date>] <原文>'；无日期省略方括号，不伪造。
+    with_date / with_serial 为 None 时取当前开关（AR_V9_PROMPT_DATE / _SERIAL）。
+    with_date=False 且 with_serial=False 时逐字节等于旧输出（原文逐行）。
+    """
+    wd = V9_PROMPT_DATE if with_date is None else bool(with_date)
+    ws = V9_PROMPT_SERIAL if with_serial is None else bool(with_serial)
+    lines = []
+    for serial, text, event_time in rows:
+        parts = []
+        if ws:
+            parts.append(f"{int(serial)}.")
+        if wd:
+            d = format_event_date(event_time)
+            if d:
+                parts.append(f"[{d}]")
+        parts.append(text)
+        lines.append(" ".join(parts))
+    return lines
+
+
+# ---- token 级证据预算（t6）----
+# 问题：AR_V9_CTX_MAX_UNITS=40 是按"单元个数"限流，与方案要求的 2500 token 预算不等价
+# （单元长短差异大：40 个长句可能 2000+ token，40 个短句可能只有 300 token）。
+# 现在拼块集合由 AR_V9_CTX_TOKEN_BUDGET（默认 2500）决定：候选按**分数降序**装填，
+# 装到超预算就停（"停"而不是"跳过后继续"，保证块是分数序的前缀），装完再按原文位置
+# 排序输出（I2 不变：编号越大越新、位置序）。AR_V9_CTX_MAX_UNITS 保留为**二级硬上限**
+# （默认 0 = 关闭，即完全由 token 预算限流），用于消融"单元数上限"这一老口径。
+# 预算只统计**证据行**（不含 system prompt / question / 生成），ctx_tokens 记录实际装入量。
+V9_TOKEN_BUDGET = int(os.environ.get("AR_V9_CTX_TOKEN_BUDGET", "2500"))
+# 被预算裁掉的槽位列表落盘上限（全池 Tail 可能上千条，全写会让 JSONL 爆炸；
+# 计数另记 dropped_ids_total，是否截断另记 dropped_ids_truncated，不隐瞒）
+V9_DROPPED_ID_CAP = int(os.environ.get("AR_V9_DROPPED_ID_CAP", "200"))
+
+_PROMPT_TOK_CACHE = {}
+
+
+def prompt_tokens(text):
+    """一行证据在 prompt 里占的 token 数（带缓存，纯函数语义）。
+
+    tok 缺失时按空白切词近似 —— 只发生在没有 tokenizer 的离线场景，且会同时体现在
+    ctx_tokens 上，不用于任何"看起来更小"的对外数字。
+    """
+    s = "" if text is None else str(text)
+    hit = _PROMPT_TOK_CACHE.get(s)
+    if hit is not None:
+        return hit
+    n = None
+    if tok is not None:
+        try:
+            ids = tok(s, add_special_tokens=False).input_ids
+            n = int(ids.shape[-1]) if hasattr(ids, "shape") else len(ids)
+        except Exception:
+            n = None
+    if n is None:
+        n = len(s.split())
+    if len(_PROMPT_TOK_CACHE) > 200000:
+        _PROMPT_TOK_CACHE.clear()
+    _PROMPT_TOK_CACHE[s] = n
+    return n
+
+
+def fill_token_budget(ranked, budget, text_of, already=0):
+    """按优先级降序装填证据行，超预算即停。
+
+    ranked  : 已按优先级（分数）降序的 id 列表；同分时调用方负责稳定次序。
+    budget  : token 预算；<=0 表示不限制（回退旧行为）。
+    text_of : id -> 该行最终拼进 prompt 的文本（含 serial/日期前缀），token 数即按它计。
+    already : 已经占用的 token（状态池装填时传入情景行已用量）。
+
+    返回 (kept_ids, dropped_ids, kept_tokens, dropped_tokens)。
+    规则：第一条**永远保留**（最高分证据必在块内，避免预算过小时拼出空块）。
+    """
+    if budget <= 0:
+        kept = list(ranked)
+        return kept, [], sum(prompt_tokens(text_of(i)) for i in kept), 0
+    kept, used = [], 0
+    for i in ranked:
+        n = prompt_tokens(text_of(i))
+        if kept and already + used + n > budget:
+            break
+        kept.append(i)
+        used += n
+    dropped = list(ranked[len(kept):])
+    dropped_tokens = sum(prompt_tokens(text_of(i)) for i in dropped)
+    return kept, dropped, used, dropped_tokens
+
+
+def _uid(kind, idx):
+    """统一槽位 ID（与 ar_diag.slot_uid 同格式），供 OOM 重试记录用。"""
+    try:
+        return f"{kind}:{int(idx)}"
+    except (TypeError, ValueError):
+        return f"{kind}:{idx}"
+
+
+def _v9_row(epi, i):
+    """单元 -> 渲染行素材 (serial, 原文, event_time)。预算计数与最终渲染共用。"""
+    m = epi.metas[i] if i < len(epi.metas) else {}
+    return (v9_unit_serial(m, i), epi.texts[i], m.get("event_time"))
+
+
 def build_block_v8(epi, st, q, meta, qi):
     """v8 读出：全池 IDF-MaxSim + 邻域扩展 + 状态单元补充，按句序拼块。
     返回 (block, dbg, diag_ctx)。"""
-    empty = {"pool": epi, "hits": [], "used_ids": [], "used_texts": []}
+    empty = {"pool": epi, "hits": [], "used_ids": [], "used_texts": [],
+             "state_pool": st, "used_state_ids": []}
     if len(epi) == 0 and len(st) == 0:
         return "", {}, empty
     q_core = core_question(q)
@@ -664,14 +1145,19 @@ def build_block_v8(epi, st, q, meta, qi):
             lines_out.append(epi.texts[i])
             used_epi.append(int(i))
     st_order = sorted(st_idx, key=lambda i: st.metas[i].get("start", i))
+    used_st = []
     for i in st_order:
         k = _norm_unit(st.texts[i])
         if k not in seen:
             seen.add(k)
             lines_out.append(st.texts[i])
+            used_st.append(int(i))
     dbg["n_units"] = len(lines_out)
+    # diag_ctx 必须带 state_pool/used_state_ids：ar_diag.record 按关键字展开 diag_ctx，
+    # 缺了这两个键状态行槽位 ID 会落 None、used_alignment 退化成 texts_without_ids。
     return "\n".join(lines_out), dbg, {"pool": epi, "hits": hits,
-                                       "used_ids": used_epi, "used_texts": lines_out}
+                                       "used_ids": used_epi, "used_texts": lines_out,
+                                       "state_pool": st, "used_state_ids": used_st}
 
 
 # ----------------------------- v9 非重叠索引检索 -----------------------------
@@ -690,11 +1176,34 @@ def v9_import():
 
 
 V9_TOPK_STATE = int(os.environ.get("AR_V9_TOPK_STATE", "4"))      # 状态池附带单元数
-V9_CTX_UNITS  = int(os.environ.get("AR_V9_CTX_MAX_UNITS", "40"))  # 拼给 LLM 的单元上限
+# 拼给 LLM 的**单元数**上限：默认 0 = 关闭。t6 起拼块大小由 AR_V9_CTX_TOKEN_BUDGET
+# （2500 token）决定；这个开关只保留作"按个数限流"老口径的消融（>0 时作为二级硬上限）。
+V9_CTX_UNITS  = int(os.environ.get("AR_V9_CTX_MAX_UNITS", "0"))
 EQA_BACK      = int(os.environ.get("AR_V9_EQA_BACK", "16"))       # EventQA 锚点前取几句
 EQA_AHEAD     = int(os.environ.get("AR_V9_EQA_AHEAD", "4"))       # EventQA 锚点后取几句
 V9_L18        = os.environ.get("AR_V9_L18", "0") == "1"           # 第 18 层稠密通道开关
 V9_L18_LAYER  = int(os.environ.get("AR_V9_L18_LAYER", "18"))
+
+# ---- 时间信息进生成 Prompt（t5）----
+# 问题：extract_units 把 "In <ts>: <text>" 只写进 index_text（打分用），拼给 LLM 的
+# 仍是 epi.texts 原文 -> 模型看不到继承来的 Session 日期，多会话时间推理必然失败。
+# 现在 build_block_v9 输出统一格式 '<serial>. [<date>] <原文>'：
+#   - date 取单元的 event_time（本句显式时间戳 或 Session 头日期继承），无时间则**省略方括号**
+#     （不伪造日期）；只解析到年份时输出 [YYYY]，不补月份/日；
+#   - serial 是**全局递增**编号（= 单元在上下文中的 1-based 写入顺序），"编号越大越新"的
+#     反事实规则不变：日期前缀只加信息，不改变编号顺序。
+# 开关：AR_V9_PROMPT_DATE=1（默认，新格式）| 0（旧格式，用于对照）；
+#       AR_V9_PROMPT_SERIAL 不设时跟随 AR_V9_PROMPT_DATE（DATE=0 -> 与旧实现逐字节一致）；
+#       显式设 AR_V9_PROMPT_SERIAL=1/0 可单独消融"编号前缀"（编号本身不带任何新信息，
+#       只影响模型对新鲜度的判断，因此可单独开）。
+V9_PROMPT_DATE = os.environ.get("AR_V9_PROMPT_DATE", "1") == "1"
+_serial_env = os.environ.get("AR_V9_PROMPT_SERIAL", "").strip().lower()
+if _serial_env in ("1", "true", "yes", "on"):
+    V9_PROMPT_SERIAL = True
+elif _serial_env in ("0", "false", "no", "off"):
+    V9_PROMPT_SERIAL = False
+else:
+    V9_PROMPT_SERIAL = V9_PROMPT_DATE      # 未显式指定 -> 跟随 DATE（DATE=0 时逐字节等于旧输出）
 
 
 def build_pool_for_context_v9(ctx):
@@ -731,52 +1240,137 @@ def _layer18_provider(texts, kind):
 
 
 def build_block_v9(epi, st, q, meta, qi):
-    """v9 读出：非重叠索引 + 先分数选 Top-K 再位置排序 + EventQA 后向非对称扩展。
-    返回 (block, dbg, diag_ctx)。"""
-    empty = {"pool": epi, "hits": [], "used_ids": [], "used_texts": []}
+    """v9 读出：非重叠索引 + 分数序装填（token 预算）+ 位置序输出 + EventQA 后向非对称扩展。
+
+    拼块格式（t5）：'<serial>. [<date>] <原文>'
+      - serial = 单元的全局递增编号（写入顺序），"编号越大越新"不变，日期不改变编号顺序；
+      - date 取单元 event_time（显式或 Session 头继承），无时间省略方括号（不伪造）；
+      - AR_V9_PROMPT_DATE=0（且未显式开 AR_V9_PROMPT_SERIAL）时逐字节等于旧输出。
+
+    预算（t6）：
+      - AR_V9_CTX_TOKEN_BUDGET（默认 2500）按**分数降序**装填证据行，超预算即停；
+        装完再按原文位置排序输出（I2 不变）。
+      - AR_V9_CTX_MAX_UNITS（默认 0=关闭）只是**二级单元数硬上限**，用于消融"按个数限流"
+        的老口径；预算模式下不再由它决定块大小。
+      - 被预算裁掉的槽位/token 数写进 dbg.dropped_ids / dbg.dropped_tokens，
+        并给出 dropped_ids_total / dropped_ids_truncated（列表有上限，避免 JSONL 爆炸）。
+
+    返回 (block, dbg, diag_ctx)。
+    """
+    empty = {"pool": epi, "hits": [], "used_ids": [], "used_texts": [],
+             "state_pool": st, "used_state_ids": []}
     if len(epi) == 0 and len(st) == 0:
         return "", {}, empty
     q_core = core_question(q)
-    cap_epi = max(1, V9_CTX_UNITS - (V9_TOPK_STATE if len(st) > 0 else 0))
+    budget = V9_TOKEN_BUDGET
+    state_slots = V9_TOPK_STATE if len(st) > 0 else 0
+    cap_epi = max(1, V9_CTX_UNITS - state_slots) if V9_CTX_UNITS > 0 else 0
+
+    # 全池分数（降序）：预算装填的优先级 + 诊断 hits 的来源
+    ranked_all = [(int(i), float(s)) for i, s in epi.retrieve(q_core, top_k=len(epi))]
+    score_of = dict(ranked_all)
+    cap_dropped = []        # 被二级单元数上限截掉的候选（单独记账，别让它凭空消失）
 
     if FAMILY == "eventqa":
         evs = parse_prev_events(meta, qi)
-        idxs, dbg = epi.readout(q_core, top_k=min(TOP_K, cap_epi), mode="eventqa",
+        idxs, dbg = epi.readout(q_core, top_k=min(TOP_K, cap_epi or TOP_K), mode="eventqa",
                                 anchor_events=evs, back=EQA_BACK, ahead=EQA_AHEAD)
         # 扩展窗超配额时保留锚点邻域（先截断，readout 返回的已是位置升序）
         idxs = _cap_before_sort(idxs, cap_epi, anchor=dbg.get("anchor"))
         # 诊断用 query 侧分数序命中（实际拼块是锚点扩展窗，二者分开记）
-        hits = epi.retrieve(q_core, top_k=TOP_K)
+        hits = ranked_all[:TOP_K]
+        # 预算装填只在锚点窗口内进行（不越出窗口，也不改成全池 Top-N）
+        ranked_epi = sorted((int(i) for i in idxs),
+                            key=lambda i: (-score_of.get(i, float("-inf")), i)) \
+            if budget > 0 else [int(i) for i in idxs]
     else:
         # readout(topk) = 先按分数选 Top-K，再把选中的 K 个按原文位置排序
-        idxs, dbg = epi.readout(q_core, top_k=min(TOP_K, cap_epi), mode="topk")
+        idxs, dbg = epi.readout(q_core, top_k=min(TOP_K, cap_epi or TOP_K), mode="topk")
         hits = [(int(i), float(s)) for i, s in dbg.get("hits", [])]
+        if budget > 0:
+            # 预算模式：候选 = 全池分数序（单元数上限若显式开启则再截断，截掉的要记账）
+            ranked_epi = [i for i, _ in ranked_all]
+            if cap_epi > 0 and len(ranked_epi) > cap_epi:
+                cap_dropped = ranked_epi[cap_epi:]
+                ranked_epi = ranked_epi[:cap_epi]
+        else:
+            ranked_epi = [int(i) for i in idxs]
 
-    if len(st) > 0:
-        st_hits = st.retrieve(q_core, top_k=V9_TOPK_STATE)
-        st_idx = [i for i, _ in st_hits]
+    def _epi_line(i):
+        return render_v9_prompt_lines([_v9_row(epi, i)])[0]
+
+    kept_epi, dropped_epi, tok_epi, dtok_epi = fill_token_budget(
+        ranked_epi, budget, _epi_line)
+    dtok_cap = sum(prompt_tokens(_epi_line(i)) for i in cap_dropped)
+
+    # 状态池：在剩余预算内按分数装填（状态行排在情景行之后，顺序约定不变）
+    st_hits = st.retrieve(q_core, top_k=V9_TOPK_STATE) if len(st) > 0 else []
+    st_ranked = [int(i) for i, _ in st_hits]
+    st_score = {int(i): float(s) for i, s in st_hits}
+
+    def _st_line(i):
+        return render_v9_prompt_lines([_v9_row(st, i)])[0]
+
+    if budget <= 0:
+        kept_st, dropped_st, tok_st, dtok_st = list(st_ranked), [], 0, 0
     else:
-        st_idx = []
-    dbg["state_idxs"] = st_idx
+        remaining = budget - tok_epi
+        if remaining <= 0:
+            # 预算已被情景行用光：状态行全部不装（如实记录，不偷偷塞）
+            kept_st = []
+            dropped_st = list(st_ranked)
+            tok_st, dtok_st = 0, sum(prompt_tokens(_st_line(i)) for i in st_ranked)
+        else:
+            kept_st, dropped_st, tok_st, dtok_st = fill_token_budget(
+                st_ranked, remaining, _st_line, already=tok_epi)
+    dbg["state_idxs"] = kept_st      # 实际装入的状态槽位（被预算裁掉的见 dropped_state_ids）
     dbg["stats"] = epi.stats()
 
-    lines_out, seen, used_epi = [], set(), []
-    for i in idxs:
+    rows, seen, used_epi, used_st, line_ids, line_prio = [], set(), [], [], [], []
+    for i in sorted(kept_epi, key=lambda j: epi.metas[j].get("start", j)):
         k = _norm_unit(epi.texts[i])
         if k not in seen:
             seen.add(k)
-            lines_out.append(epi.texts[i])
+            rows.append(_v9_row(epi, i))
             used_epi.append(int(i))
-    st_order = sorted(st_idx, key=lambda i: st.metas[i].get("start", i))
-    for i in st_order:
+            line_ids.append(_uid("epi", i))
+            line_prio.append(score_of.get(int(i), 0.0))
+    # ⚠️ 状态补充行沿用"情景行在前、状态行在后"的既有约定（ar_diag._align_used 依赖此顺序
+    # 对齐跨池 ID），因此整块的 serial 在最后几行可能回退——每行都带编号与日期，模型可自行
+    # 判断新旧；若将来要严格单调，需同时改 ar_diag 的对齐约定。
+    for i in sorted(kept_st, key=lambda j: st.metas[j].get("start", j)):
         k = _norm_unit(st.texts[i])
         if k not in seen:
             seen.add(k)
-            lines_out.append(st.texts[i])
+            rows.append(_v9_row(st, i))
+            used_st.append(int(i))
+            line_ids.append(_uid("state", i))
+            line_prio.append(st_score.get(int(i), 0.0))
+    lines_out = render_v9_prompt_lines(rows)
     dbg["n_units"] = len(lines_out)
+    # 诊断：逐行 serial / 日期（None=该行没有时间，Prompt 里就没有方括号）
+    dbg["serials"] = [r[0] for r in rows]
+    dbg["unit_dates"] = [format_event_date(r[2]) if V9_PROMPT_DATE else None for r in rows]
+    dbg["prompt_date"] = bool(V9_PROMPT_DATE)
+    dbg["prompt_serial"] = bool(V9_PROMPT_SERIAL)
+    # 预算账本：ctx_tokens 按**最终拼进 prompt 的行**重新统计（去重后才是真实占用）
+    dbg["ctx_budget"] = budget
+    dbg["ctx_tokens"] = sum(prompt_tokens(l) for l in lines_out)
+    dropped_all = [int(i) for i in dropped_epi] + [int(i) for i in cap_dropped]
+    dbg["dropped_ids"] = dropped_all[:V9_DROPPED_ID_CAP]
+    dbg["dropped_ids_total"] = len(dropped_all)
+    dbg["dropped_ids_truncated"] = len(dropped_all) > len(dbg["dropped_ids"])
+    dbg["dropped_reasons"] = {"budget": len(dropped_epi), "unit_cap": len(cap_dropped),
+                              "state_budget": len(dropped_st)}
+    dbg["dropped_state_ids"] = [int(i) for i in dropped_st][:V9_DROPPED_ID_CAP]
+    dbg["dropped_tokens"] = int(dtok_epi + dtok_st + dtok_cap)
+    # OOM 重试要用：逐行槽位 ID + 证据优先级（分数越大越重要）
+    dbg["line_ids"] = line_ids
+    dbg["line_prio"] = [round(float(p), 6) for p in line_prio]
     # used_ids 只含情景槽位（状态槽位跨池、无统一下标；used_texts 含全部拼块行）
     return "\n".join(lines_out), dbg, {"pool": epi, "hits": hits,
-                                       "used_ids": used_epi, "used_texts": lines_out}
+                                       "used_ids": used_epi, "used_texts": lines_out,
+                                       "state_pool": st, "used_state_ids": used_st}
 
 
 # ----------------------------- 读出块 -----------------------------
@@ -878,6 +1472,7 @@ def dry_run():
     print(f"[dry-run] strict_retrieval={int(strict_retrieval_enabled())} "
           f"(raw={STRICT_RETRIEVAL})")
     print(f"[dry-run] delta: WRITE={int(DELTA_WRITE)} RESTORE={int(DELTA_RESTORE)} "
+          f"strategy={DELTA_WRITE_STRATEGY} topk={DELTA_WRITE_TOPK} "
           f"state_api={'ok' if get_delta_mem_online_state is not None else 'fallback'}"
           f"{'' if _STATE_API_ERR is None else f'({_STATE_API_ERR})'}")
     if READOUT_MODE == "latent":
@@ -885,8 +1480,43 @@ def dry_run():
         return 2
     if MODE == "v9":
         print(f"[dry-run] v9: EQA_BACK={EQA_BACK} EQA_AHEAD={EQA_AHEAD} "
-              f"CTX_UNITS={V9_CTX_UNITS} TOPK_STATE={V9_TOPK_STATE} "
-              f"L18={'on' if V9_L18 else 'off'} layer={V9_L18_LAYER}")
+              f"CTX_UNITS={V9_CTX_UNITS or 'off'} "
+              f"CTX_TOKEN_BUDGET={V9_TOKEN_BUDGET or 'off'} "
+              f"TOPK_STATE={V9_TOPK_STATE} "
+              f"L18={'on' if V9_L18 else 'off'} layer={V9_L18_LAYER} "
+              f"prompt_date={'on' if V9_PROMPT_DATE else 'off'} "
+              f"prompt_serial={'on' if V9_PROMPT_SERIAL else 'off'}")
+
+    # v9 拼块格式自检（纯函数，不碰模型）：日期前缀 / 编号递增 / DATE=0 时逐字节等于旧输出
+    _demo_rows = [(3, "Alice likes tea.", "2023-05-20"),
+                  (4, "She moved to Paris.", None),
+                  (9, "Bob visited her in 2024.", "2024")]
+    print("[dry-run] v9 prompt lines (DATE=1 SERIAL=1):")
+    for _ln in render_v9_prompt_lines(_demo_rows, with_date=True, with_serial=True):
+        print(f"           {_ln}")
+    _old = [r[1] for r in _demo_rows]
+    if render_v9_prompt_lines(_demo_rows, with_date=False, with_serial=False) != _old:
+        print("[dry-run][ERR] DATE=0/SERIAL=0 未能还原旧输出（应逐字节等于原文逐行）")
+        return 2
+    print(f"[dry-run] v9 prompt lines (DATE=0 SERIAL=0) == 旧输出: "
+          f"{render_v9_prompt_lines(_demo_rows, with_date=False, with_serial=False)}")
+
+    # token 预算自检（t6）：分数降序装填、超预算即停、最高分必在块内、dropped 可解释
+    _brows = {i: render_v9_prompt_lines([(i + 1, f"Evidence line {i}.", None)])[0]
+              for i in range(12)}
+    _btok = {i: prompt_tokens(t) for i, t in _brows.items()}
+    _budget = sum(_btok[i] for i in range(3))          # 恰好装 3 行
+    _ranked = list(range(12))                          # 已按分数降序（0 最高）
+    _kept, _dropped, _used, _dtok = fill_token_budget(
+        _ranked, _budget, lambda i: _brows[i])
+    print(f"[dry-run] v9 budget: budget={_budget} kept={_kept} used_tokens={_used} "
+          f"dropped={_dropped[:6]}{'...' if len(_dropped) > 6 else ''} "
+          f"dropped_tokens={_dtok}")
+    if (_used > _budget or 0 not in _kept or not _dropped
+            or _kept != _ranked[:len(_kept)]):
+        print("[dry-run][ERR] token 预算装填自检失败（应为分数序前缀、最高分在块内、"
+              "总 token ≤ 预算、dropped 非空）")
+        return 2
     print(f"[dry-run] torch={'ok' if torch is not None else 'missing'}"
           f"({_TORCH_ERR})  "
           f"model-stack={'ok' if _STACK_ERR is None else 'missing'}"
@@ -904,6 +1534,30 @@ def dry_run():
               f"ts={[u['ts'] for u in units]}")
     except Exception as e:
         print(f"[dry-run][warn] v9_slotpool 自检失败: {e}")
+
+    # Delta 写入策略自检（纯正则/纯标准库）：合成上下文含重复与覆写事实，
+    # 三档写入条数必须互相区分，且 filtered 只留最终值 —— 与单测同一套断言逻辑。
+    try:
+        _demo = ("Session 1\n2021-03-05\nAlice lives in Paris.\nAlice lives in Paris.\n"
+                 "In 2021 Alice moved to Lyon.\nAlice is a doctor.\n"
+                 "Alice is vegetarian.\nShe worked there for years.\n"
+                 "Session 2\n2022-01-09\nAlice lives in London.")
+        _demo_all = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", _demo) if s.strip()]
+        for _st in DELTA_WRITE_STRATEGIES:
+            _t, _s = plan_delta_writes(_demo, strategy=_st,
+                                       questions=["Where does Alice live?"],
+                                       all_chunks=_demo_all, topk=2)
+            print(f"[dry-run] delta strategy={_st:<12} write={_s['write_chunks']} "
+                  f"skipped={_s['skipped_chunks']} reasons={_s['skip_reasons']} "
+                  f"texts={_t if _st != 'all' else '<all chunks>'}")
+        _tf, _sf = plan_delta_writes(_demo, strategy="filtered")
+        if not (len(_tf) < len(_demo_all) and any("London" in t for t in _tf)
+                and not any("Paris" in t for t in _tf)):
+            print("[dry-run][ERR] delta 过滤自检失败：filtered 未减少写入或未保留最终值")
+            return 2
+        print("[dry-run] delta 过滤自检 ok（filtered 条数 < all 且只保留最终值）")
+    except Exception as e:
+        print(f"[dry-run][warn] delta 写入策略自检失败: {e}")
 
     # 诊断字段自检：假池 + 1 条命中
     if ar_diag is not None:
@@ -965,7 +1619,8 @@ def main():
         rows = rows[:LIMIT_ROWS]
     print(f"[cfg] SRC={SRC} MODE={MODE} CHUNK={CHUNK} TOP_K={TOP_K} RERANK_M={RERANK_M} "
           f"EQA_WIN={EQA_WIN} CTX_MAX_TOK={CTX_MAX_TOK} "
-          f"DELTA_WRITE={int(DELTA_WRITE)} READOUT={READOUT_MODE} "
+          f"DELTA_WRITE={int(DELTA_WRITE)} DELTA_STRATEGY={DELTA_WRITE_STRATEGY} "
+          f"DELTA_TOPK={DELTA_WRITE_TOPK} READOUT={READOUT_MODE} "
           f"DELTA_RESTORE={int(DELTA_RESTORE)} strict_retrieval="
           f"{int(strict_retrieval_enabled())} rows={len(rows)}", flush=True)
     print(f"[manifest] {(run_manifest.describe(MANIFEST) if run_manifest else 'unavailable')} "
@@ -1014,7 +1669,9 @@ def main():
         # 每个 context 起点清空 delta 状态（含上一 context 残差）；此后查询期不再 reset。
         reset_delta_mem_states(model)
         # 查询前完成 delta 写入并拿快照；先于建池，保证 L18 单元/query 编码看到同一记忆状态。
-        snap = prepare_delta_memory(ctx)
+        # 查询前完成 delta 写入并拿快照；先于建池，保证 L18 单元/query 编码看到同一记忆状态。
+        # questions 只给 topk_refresh 做写入前的 Top-K 槽位粗排（其余策略忽略）。
+        snap = prepare_delta_memory(ctx, questions=qs)
         if MODE == "v9":
             epi, st, n_tok = build_pool_for_context_v9(ctx)
             pool = epi
@@ -1058,13 +1715,22 @@ def main():
                 print(f"[warn] retrieve fail q={qi}: {e}", flush=True)
                 block, dbg = "", {"mode": "error", "err": str(e)}
                 _p = epi if MODE in ("v8", "v9") else pool
-                diag_ctx = {"pool": _p, "hits": [], "used_ids": [], "used_texts": []}
+                diag_ctx = {"pool": _p, "hits": [], "used_ids": [], "used_texts": [],
+                            "state_pool": st if MODE in ("v8", "v9") else None,
+                            "used_state_ids": []}
 
             # 逐题恢复写后快照：前序题目的读出不会污染后续题目（查询期禁止 reset）。
             if DELTA_RESTORE:
                 delta_restore(snap)
 
-            pred, in_len, out_len = generate_readout(block, qtxt)
+            # OOM 重试要按证据优先级裁剪：把逐行槽位 ID / 优先级 / 行文本交给 generate_readout，
+            # 重试明细回填到 trim["retries"]（禁止"保留最后 N token"的静默截断）。
+            trim = None
+            if dbg.get("line_ids") and diag_ctx.get("used_texts"):
+                trim = {"lines": list(diag_ctx["used_texts"]),
+                        "prio": list(dbg.get("line_prio") or []),
+                        "ids": list(dbg.get("line_ids") or [])}
+            pred, in_len, out_len = generate_readout(block, qtxt, trim=trim)
 
             m, extra = post_process(
                 {"output": pred, "input_len": in_len,
@@ -1078,9 +1744,25 @@ def main():
                                if qi < len(meta.get("qa_pair_ids") or []) else None),
                 "question_type": qtypes[qi] if isinstance(qtypes, list) and qi < len(qtypes) else None,
                 "query": q, "answer": a, "output": pred,
-                "retrieval": dbg, "block_chunks": len(dbg.get("idxs", []) or []),
+                # block_chunks = 真正拼进 prompt 的行数（预算模式下与 readout 的 Top-K 不同）
+                "retrieval": dbg,
+                "block_chunks": len(diag_ctx.get("used_texts") or dbg.get("idxs") or []),
+                # 证据预算账本（t6）：预算值、实际装入 token、被裁掉的槽位/token，
+                # 以及 OOM 重试的 keep_ids/dropped_ids —— 全部落盘，不静默丢证据。
+                "ctx_budget": dbg.get("ctx_budget"),
+                "ctx_tokens": dbg.get("ctx_tokens"),
+                "dropped_ids": dbg.get("dropped_ids", []),
+                "dropped_tokens": dbg.get("dropped_tokens", 0),
+                "gen_retries": (trim or {}).get("retries", []),
                 "delta": {"write": bool(DELTA_WRITE), "restore": bool(DELTA_RESTORE),
-                          "snapshot_layers": len(snap)},
+                          "strategy": DELTA_WRITE_STRATEGY,
+                          "snapshot_layers": len(snap),
+                          # 写入量/跳过量/耗时：证明"Delta 有没有真正参与"而不是只看开关
+                          "write_chunks": DELTA_STATS.get("write_chunks", 0),
+                          "skipped_chunks": DELTA_STATS.get("skipped_chunks", 0),
+                          "candidate_units": DELTA_STATS.get("candidate_units", 0),
+                          "skip_reasons": DELTA_STATS.get("skip_reasons", {}),
+                          "write_seconds": DELTA_STATS.get("write_seconds", 0.0)},
                 "readout": {"mode": READOUT_MODE, "latent_slots": False,
                             "note": "text_embeds 只是 EMB[ids] 的明文 token 嵌入，"
                                     "不是槽位潜向量读出"},

@@ -3,7 +3,9 @@
 # 覆盖 t5 四项：
 #   1. StatePool._should_merge 双阈值（主语精确匹配 + 关系谓词余弦 > 0.80）
 #   2. CRStatePool：Beam=6 ego-graph 第 1 跳
-#   3. 双跳链谓词联合打分 Score_chain（谓词匹配的链分数更高、排序更靠前）
+#   3. 双跳链（2 事实 2 关系）联合打分 Score_chain：(fact1, fact2) 硬约束 obj==subj、
+#      两段关系分别与 query 两段关系匹配；3 事实链走独立 path_len=3 分支；路径渲染
+#      只渲染参与评分的事实与边（事实行数 == 边数）
 #   4. 反事实强约束 Prompt（OUTDATED / counterfactual / 最大编号 / unknown）
 import os
 import re
@@ -129,6 +131,38 @@ def test_cr_pool_upsert_dual_threshold():
     ok("same subj diff rel -> new slot", len(pool) == 3)
 
 
+# ---------------- 1b. CR 属性解析：不同属性不得撞成同一谓词 ----------------
+def test_cr_copular_attributes_not_merged():
+    """回归：'Alice is a doctor.' 与 'Alice is vegetarian.' 不得互相覆写。
+
+    旧实现把两条都解析成 ('Alice','is')，双阈值必然通过 -> 后者吃掉前者，
+    职业属性从证据块里彻底消失。
+    """
+    embed("alice", basis(0))
+    embed("doctor", basis(1))
+    embed("vegetarian", basis(2))
+    pool = v9_cr.CRStatePool()
+    ok("doctor is new slot", pool.upsert("Alice is a doctor.", 1) is False)
+    ok("vegetarian is new slot", pool.upsert("Alice is vegetarian.", 2) is False)
+    ok("both attributes kept", len(pool) == 2 and pool.n_overwrites == 0)
+    ok("doctor fact kept", any("doctor" in t for t in _texts(pool)))
+    ok("vegetarian fact kept", any("vegetarian" in t for t in _texts(pool)))
+    ok("subject index lists both", pool._subj_index.get(v9._cr_norm("Alice")) == [0, 1])
+
+    block = pool.retrieve_multihop_context("What is Alice?")
+    ok("block keeps both attributes",
+       "doctor" in block and "vegetarian" in block)
+
+    # 同类属性仍要原位覆写（槽 id 稳定）
+    ok("same attribute overwrites",
+       pool.upsert("Alice is a doctor at City Hospital.", 3) is True)
+    ok("slot count stable after overwrite", len(pool) == 2)
+    ok("doctor slot refreshed in place", "City Hospital" in pool.texts[0])
+    ok("vegetarian slot untouched", pool.texts[1] == "Alice is vegetarian.")
+    ok("serial refreshed", pool.metas[0]["serial"] == 3)
+    ok("graph keys stay aligned", len(pool.cr_E_subj) == len(pool) == len(pool.cr_attr))
+
+
 # ---------------- 2. Beam=6 ego-graph 第 1 跳 ----------------
 def test_beam6_ego_graph():
     facts = [
@@ -175,8 +209,16 @@ def test_ego_forward_neighbor():
     ok("ego block contains forward fact", "France" in block)
 
 
-# ---------------- 3. 双跳链谓词联合打分 ----------------
-def test_chain_joint_score():
+# ---------------- 3. 双跳链（2 事实 2 关系）联合打分 ----------------
+def _hop_pool():
+    """Alice --born in--> Springfield --located in--> France --located in--> Europe。
+
+    0: Alice was born in Springfield.     （fact1 候选）
+    1: Springfield is located in France.  （fact2：与 0 拼成真 2 跳，答案 France）
+    2: Springfield is famous for pizza.   （同 seed 的干扰出边）
+    3: France is located in Europe.       （第三跳：只能进 path_len=3 分支）
+    4: Pizza was created in Italy.        （与任何链都不连通的孤立边）
+    """
     embed("alice", basis(0))
     embed("springfield", basis(1))
     embed("france", basis(3))
@@ -185,36 +227,170 @@ def test_chain_joint_score():
     embed("located", basis(7))
     embed("famous", basis(8))
     embed("created", basis(9))
-
+    embed("europe", basis(10))
+    embed("italy", basis(11))
     pool = v9_cr.CRStatePool()
-    pool.upsert("Alice was born in Springfield.", 1)
-    pool.upsert("Springfield is located in France.", 2)
-    pool.upsert("Springfield is famous for pizza.", 3)
-    pool.upsert("France was born in Europe.", 4)
-    pool.upsert("Pizza was created in Italy.", 5)
-    ok("chain pool size", len(pool) == 5)
+    for i, f in enumerate(["Alice was born in Springfield.",
+                           "Springfield is located in France.",
+                           "Springfield is famous for pizza.",
+                           "France is located in Europe.",
+                           "Pizza was created in Italy."], 1):
+        pool.upsert(f, i)
+    return pool
 
-    E_q, _k, _ = v9_cr._enc("Alice was born in?")
-    E_qrel, _kr, _ = v9_cr._enc("was born in")
-    good = pool.chain_score(0, 1, 3, E_q, E_qrel)   # mid=located, tgt=born
-    bad = pool.chain_score(0, 2, 4, E_q, E_qrel)    # mid=famous,  tgt=created
-    ok("predicate-matching chain scores higher", good > bad + 0.1)
+
+Q2 = "Alice was born in Springfield and Springfield is located in France?"
+
+
+def test_chain_two_fact_structure():
+    """评分主体是 (fact1, fact2)：obj(fact1)==subj(fact2) 硬约束 + 两段关系匹配。"""
+    pool = _hop_pool()
+    ok("chain pool size", len(pool) == 5)
+    E_q, _k, _ = v9_cr._enc(Q2)
+    E_qrels = [v9_cr._enc("was born in")[0], v9_cr._enc("is located in")[0]]
+
+    good = pool.chain_score(0, 1, E_q, E_qrels)      # Alice-born->Springfield-located->France
+    bad = pool.chain_score(0, 2, E_q, E_qrels)       # 第二段关系与 query 第二段不匹配
+    ok("two-fact chain scores", good is not None and bad is not None)
+    ok("both-relations-matching chain scores higher", good > bad + 0.1)
+
+    # 硬约束：obj(fact1) != subj(fact2) 直接不构成链
+    ok("broken chain returns None", pool.chain_score(0, 4, E_q, E_qrels) is None)
+    ok("reverse chain returns None", pool.chain_score(1, 0, E_q, E_qrels) is None)
+    ok("self chain returns None", pool.chain_score(0, 0, E_q, E_qrels) is None)
+    ok("hard constraint on normalised entities",
+       pool.linked(0, 1) is True and pool.linked(1, 3) is True
+       and pool.linked(0, 3) is False)
+
+    # 单段 query 关系时两段都比它（旧口径不回归）
+    E_qrel1 = v9_cr._enc("was born in")[0]
+    ok("single query relation still scores",
+       pool.chain_score(0, 1, E_q, [E_qrel1]) is not None)
     ok("joint weights default", abs(pool.w_pred - 0.30) < 1e-9)
 
-    block = pool.retrieve_multihop_context("Alice was born in?")
+
+def test_third_hop_does_not_pollute_two_hop():
+    """第三跳存在与否不改变前两跳的分数（v9 早期把 3 事实链当双跳打分会污染）。"""
+    E_q, _k, _ = v9_cr._enc(Q2)
+    E_qrels = [v9_cr._enc("was born in")[0], v9_cr._enc("is located in")[0]]
+
+    with_third = _hop_pool()
+    without = v9_cr.CRStatePool()
+    for i, f in enumerate(["Alice was born in Springfield.",
+                           "Springfield is located in France.",
+                           "Springfield is famous for pizza.",
+                           "Pizza was created in Italy."], 1):
+        without.upsert(f, i)
+    ok("third-hop fact absent in slim pool", len(without) == 4)
+    s_with = with_third.chain_score(0, 1, E_q, E_qrels)
+    s_without = without.chain_score(0, 1, E_q, E_qrels)
+    ok("two-hop score independent of third hop", abs(s_with - s_without) < 1e-9)
+
+
+def test_two_hop_path_ranks_first():
+    """回归：真 2 跳路径必须是 dbg/路径展示里的第一选择。"""
+    pool = _hop_pool()
+    block = pool.retrieve_multihop_context(Q2)
     dbg = pool.last_dbg
+    ok("query has two relations", dbg["query_rels"] == ["was born in", "is located in"])
     ok("query relation parsed", dbg["query_rel"].lower() == "was born in")
-    chains = [c for c in dbg["chains"] if c[2] is not None]
-    ok("two-hop chains scored", len(chains) >= 2)
-    ok("best two-hop chain is predicate-matching", chains[0][1] == 1 and chains[0][2] == 3)
-    ok("chain order descending", chains[0][0] >= chains[-1][0])
-    ok("target fact retrieved", "Europe" in block)
+    ok("two-hop chains scored", len(dbg["chains2"]) >= 2)
+    ok("best two-hop chain is the real 2-hop", dbg["chains2"][0][1:] == (0, 1))
+    ok("two-hop chains ordered descending",
+       all(dbg["chains2"][i][0] >= dbg["chains2"][i + 1][0]
+           for i in range(len(dbg["chains2"]) - 1)))
+    ok("chains2 entries are 2-fact", all(len(c) == 3 for c in dbg["chains2"]))
+
+    first = dbg["paths"][0]
+    ok("first path is 2-fact", first["path_len"] == 2 and first["facts"] == [0, 1])
+    ok("two-hop path facts == edges", len(first["facts"]) == len(first["edges"]) == 2)
+    ok("answer of the two-hop path is the 2nd object", first["labels"][-1] == "France")
     ok("path view on by default", dbg["path_view"] is True and v9_cr.CR_PATH_VIEW is True)
-    ok("best path is the predicate-matching chain",
-       dbg["paths"][0]["facts"][:2] == [0, 1] and dbg["paths"][0]["target"] == 3)
-    serials = [int(m.group(1)) for m in
-               (re.match(r"\s*(\d+)\.\s", ln) for ln in block.splitlines()) if m]
-    ok("every selected fact appears once", sorted(serials) == [1, 2, 3, 4, 5])
+    ok("block renders 2-hop path first",
+       block.splitlines()[0].startswith("PATH 1") and "len=2" in block.splitlines()[0])
+    ok("block contains the two-hop answer", "France" in block)
+    ok("dbg distinguishes path_len", "path_len" in first
+       and dbg["n_paths_by_len"][2] >= 1)
+
+
+def test_three_fact_chain_independent_branch():
+    """3 事实链走独立 path_len=3 分支：单独打分、单独渲染，不被 2 跳分支吞掉。"""
+    pool = _hop_pool()
+    E_q, _k, _ = v9_cr._enc(Q2)
+    E_qrels = [v9_cr._enc("was born in")[0], v9_cr._enc("is located in")[0]]
+
+    sc3 = pool.chain_score3(0, 1, 3, E_q, E_qrels)
+    ok("three-fact chain scores", sc3 is not None)
+    ok("three-fact chain needs all links",
+       pool.chain_score3(0, 1, 4, E_q, E_qrels) is None
+       and pool.chain_score3(0, 2, 3, E_q, E_qrels) is None)
+    ok("three-fact chain rejects repeated facts",
+       pool.chain_score3(0, 1, 0, E_q, E_qrels) is None)
+
+    block = pool.retrieve_multihop_context(Q2)
+    dbg = pool.last_dbg
+    ok("three-hop branch populated", len(dbg["chains3"]) >= 1)
+    ok("best three-hop chain is the 3-fact path", dbg["chains3"][0][1:] == (0, 1, 3))
+    ok("three-hop entries are 3-fact", all(len(c) == 4 for c in dbg["chains3"]))
+    ok("3-hop chains never leak into the 2-hop branch",
+       all(len(c["facts"]) == 2 for c in dbg["chains"] if c["path_len"] == 2))
+    ok("dbg path_len counts", dbg["n_paths_by_len"][2] >= 1
+       and dbg["n_paths_by_len"][3] >= 1)
+
+    lens = [p["path_len"] for p in dbg["paths"]]
+    ok("paths keep 2-hop before 3-hop", lens == sorted(lens) and 3 in lens)
+    three = [p for p in dbg["paths"] if p["path_len"] == 3][0]
+    ok("three-hop path facts == edges", len(three["facts"]) == len(three["edges"]) == 3)
+    ok("three-hop path entities chained",
+       three["labels"] == ["Alice", "Springfield", "France", "Europe"])
+
+    # 默认 CR_PATHS 下 3 跳分支也必须有位置（不被 2 跳分支吞掉），且单独渲染
+    rendered = dbg["paths_rendered"]
+    ok("three-hop path rendered by default budget",
+       any(p["path_len"] == 3 for p in rendered))
+    hdr = [ln for ln in block.splitlines() if ln.startswith("PATH ") and "len=3" in ln]
+    ok("rendered three-hop header", len(hdr) == 1)
+    idx = block.splitlines().index(hdr[0])
+    fact_rows = 0
+    for ln in block.splitlines()[idx + 1:]:
+        if not re.match(r"\s*\d+\.\s", ln):
+            break
+        fact_rows += 1
+    ok("three-hop fact rows == edges (3)", fact_rows == 3)
+    ok("two-hop paths rendered too",
+       sum(1 for p in rendered if p["path_len"] == 2) >= 1)
+    ok("rendered paths keep 2-hop before 3-hop",
+       [p["path_len"] for p in rendered] == sorted(p["path_len"] for p in rendered))
+    ok("two-hop path still ranks first",
+       rendered[0]["path_len"] == 2 and rendered[0]["facts"] == [0, 1])
+
+
+def test_two_hop_chain_joint_score_legacy_shape():
+    """2 跳问题（Alice --attended--> UnivB --located in--> CityC，答案 CityC）。
+
+    旧实现把 3 事实链当"双跳"打分，这条 2 跳链根本排不到第一；新实现必须排第一。
+    """
+    embed("alice", basis(0))
+    embed("universityb", basis(1))
+    embed("cityc", basis(2))
+    embed("countryd", basis(4))
+    embed("educated", basis(12))
+    embed("located", basis(7))
+    embed("attended", basis(13))
+    pool = v9_cr.CRStatePool()
+    for i, f in enumerate(["Alice was educated at UniversityB.",
+                           "UniversityB is located in CityC.",
+                           "CityC is located in CountryD.",
+                           "UniversityB is famous for its museum."], 1):
+        pool.upsert(f, i)
+    q = "Alice was educated at UniversityB, and UniversityB is located in CityC?"
+    block = pool.retrieve_multihop_context(q)
+    dbg = pool.last_dbg
+    ok("legacy-shape pool size", len(pool) == 4)
+    ok("legacy-shape two-hop chain first", dbg["chains2"][0][1:] == (0, 1))
+    ok("legacy-shape answer city is 2nd object", dbg["paths"][0]["labels"][-1] == "CityC")
+    ok("legacy-shape path is 2-fact", dbg["paths"][0]["path_len"] == 2)
+    ok("legacy-shape answer in block", "CityC" in block)
 
 
 # ---------------- 4. 反事实强约束 Prompt ----------------
@@ -378,9 +554,14 @@ def test_path_view_and_flat_fallback():
 if __name__ == "__main__":
     test_state_pool_dual_threshold()
     test_cr_pool_upsert_dual_threshold()
+    test_cr_copular_attributes_not_merged()
     test_beam6_ego_graph()
     test_ego_forward_neighbor()
-    test_chain_joint_score()
+    test_chain_two_fact_structure()
+    test_third_hop_does_not_pollute_two_hop()
+    test_two_hop_path_ranks_first()
+    test_three_fact_chain_independent_branch()
+    test_two_hop_chain_joint_score_legacy_shape()
     test_counterfactual_prompt()
     test_runner_wiring_smoke()
     test_empty_and_evict()

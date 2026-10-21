@@ -6,13 +6,36 @@ sys.path.insert(0, "/share/delta-Mem")
 sys.path.insert(0, "/share/MemoryAgentBench")
 import torch
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from deltamem.core import HFDeltaMemConfig, attach_delta_mem
-from deltamem.core.delta_impl import load_delta_mem_adapter
-from deltamem.core.delta import reset_delta_mem_states, set_delta_mem_write_enabled
-from deltamem.eval.official_memory_agent_bench_templates import get_template
-from utils.eval_other_utils import chunk_text_into_sentences, post_process
-import pyarrow.parquet as pq
+
+# transformers / deltamem / MemoryAgentBench / pyarrow 只在真实跑分时需要。
+# 放进 try：--dry-run 与 CPU 逻辑单测不得因缺依赖而失败（与 run_ar_v7.py 同款）。
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from deltamem.core import HFDeltaMemConfig, attach_delta_mem
+    from deltamem.core.delta_impl import load_delta_mem_adapter
+    from deltamem.core.delta import reset_delta_mem_states, set_delta_mem_write_enabled
+    from deltamem.eval.official_memory_agent_bench_templates import get_template
+    from utils.eval_other_utils import chunk_text_into_sentences, post_process
+    import pyarrow.parquet as pq
+    _STACK_ERR = None
+except Exception as _e:
+    AutoModelForCausalLM = AutoTokenizer = None
+    HFDeltaMemConfig = attach_delta_mem = load_delta_mem_adapter = None
+    reset_delta_mem_states = set_delta_mem_write_enabled = None
+    get_template = chunk_text_into_sentences = post_process = None
+    pq = None
+    _STACK_ERR = _e
+
+# 可选：Delta 在线状态快照/恢复 API（老版本 deltamem 可能没有）。有则用官方实现，
+# 没有则退回手工 clone/restore（与 run_ar_v7.delta_snapshot/delta_restore 同一语义）。
+try:
+    from deltamem.core.delta import (get_delta_mem_online_state,
+                                     load_delta_mem_online_state,
+                                     iter_delta_mem_modules)
+except Exception:
+    get_delta_mem_online_state = load_delta_mem_online_state = None
+    iter_delta_mem_modules = None
+
 import run_manifest  # 同目录：配置指纹 / 结果文件隔离 / 续跑校验
 
 # =====================================================================
@@ -28,7 +51,6 @@ import run_manifest  # 同目录：配置指纹 / 结果文件隔离 / 续跑校
 CHUNK_TOKENS   = 512
 THETA          = float(os.environ.get("B2_THETA", "0.72"))
 POOL_MAX       = int(os.environ.get("B2_POOL_MAX", "5000"))
-KEEP_DELTA     = os.environ.get("B2_KEEP_DELTA", "1") == "1"
 KEY_TAIL_CUT   = 2          # 主谓 key：切掉句尾最后 2 个词
 WHITEN_MIN     = 10         # 去中心化仅当池内 key 数 > 10
 MAX_NEW_TOKENS = 24
@@ -39,7 +61,30 @@ CF_PROMPT = os.environ.get("V9_CR_CF_PROMPT", "1") == "1"   # 反事实强约束
 if CR_MODE not in ("v7", "v9"):
     raise SystemExit(f"CR_MODE must be v7 or v9, got {CR_MODE!r}")
 
-SRC = sys.argv[1]; GPU = sys.argv[2]
+# Delta State 接入模式（**替代旧的 B2_KEEP_DELTA**：那个开关只进配置指纹，
+# 从不控制查询前的 reset_delta_mem_states，所以 Delta State 永远不参与 CR 查询）：
+#   off     —— 查询前清零（历史行为，逐字节不变）；
+#   context —— 写入后快照、每题恢复（复用 AR 的 delta_snapshot/delta_restore 语义）；
+#   refresh —— 在 context 之上，每题用本题 Top-K 检索结果重写这些槽位文本，
+#              与 AR 侧 DELTA_WRITE_STRATEGY=topk_refresh 同口径（只刷新 Top-K）。
+CR_DELTA_MODE = os.environ.get("CR_DELTA_MODE", "off").strip().lower() or "off"
+CR_DELTA_MODES = ("off", "context", "refresh")
+if CR_DELTA_MODE not in CR_DELTA_MODES:
+    raise SystemExit(f"CR_DELTA_MODE must be one of {CR_DELTA_MODES}, got {CR_DELTA_MODE!r}")
+CR_DELTA_REFRESH_TOPK = int(os.environ.get("CR_DELTA_REFRESH_TOPK", "6"))
+
+# --dry-run：不加载模型、不读 parquet，只打印解析后的配置 + 指纹 + 纯逻辑自检
+DRY_RUN = "--dry-run" in sys.argv[1:]
+_ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+SRC = _ARGS[0] if _ARGS else "FactConsolidation"
+GPU = _ARGS[1] if len(_ARGS) > 1 else "0"
+
+# v9_cr 提供 CR 常量、Delta 模式纯函数（delta_plan/refresh_slots）与证据日志解析
+# （block_fact_lines）；v7 模式也要用它解析证据行，故无条件导入（无模型副作用）。
+import v9_cr        # noqa: E402
+import v9_slotpool  # noqa: E402  _cr_params() 要读 v9 常量（tok/EMB 稍后注入）
+import ar_diag      # noqa: E402  逐题检索证据日志（与 AR 同等级字段）
+
 BASE = "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554"
 ADAPTER = "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5"
 PQ = "/share/hf_home/hub/datasets--ai-hyz--MemoryAgentBench/snapshots/7ea066982b140a19337e17e60d45d4076e042faf/data/Conflict_Resolution-00000-of-00001.parquet"
@@ -52,7 +97,10 @@ RUN_ID = ""
 def _cr_params():
     """所有影响结果的 CR 配置（改这里必须同步 v9_cr / v9_slotpool 常量）。"""
     p = {"mode": CR_MODE, "theta": THETA, "pool_max": POOL_MAX,
-         "keep_delta": KEEP_DELTA, "key_tail_cut": KEY_TAIL_CUT,
+         # 三档 Delta 模式必须进指纹：off/context/refresh 是互相对照的实验组，
+         # 共用结果文件会让 B2_RESUME 把另一组的题目当成"已完成"直接跳过。
+         "delta_mode": CR_DELTA_MODE, "delta_refresh_topk": CR_DELTA_REFRESH_TOPK,
+         "key_tail_cut": KEY_TAIL_CUT,
          "chunk_tokens": CHUNK_TOKENS, "max_new_tokens": MAX_NEW_TOKENS,
          "whiten_min": WHITEN_MIN}
     if CR_MODE == "v9":
@@ -95,6 +143,34 @@ def init_run():
         os.remove(OUT)
     run_manifest.write(OUT, m)          # 先落 manifest，崩溃后也能校验
     return done
+
+if not DRY_RUN and _STACK_ERR is not None:
+    raise SystemExit(f"[fatal] 缺少运行依赖（--dry-run 之外必须装齐）：{_STACK_ERR}")
+
+# ---------------- --dry-run：不加载模型 / 不读 parquet / 不占 GPU ----------------
+if DRY_RUN:
+    print(f"[dry-run] CR_MODE={CR_MODE} CR_DELTA_MODE={CR_DELTA_MODE} "
+          f"CF_PROMPT={CF_PROMPT} delta_refresh_topk={CR_DELTA_REFRESH_TOPK} SRC={SRC}",
+          flush=True)
+    _m = run_manifest.build(kind="cr", src=SRC, params=_cr_params())
+    _prefix = "v9groupB2" if CR_MODE == "v9" else "v7groupB2"
+    print(f"[dry-run] manifest {run_manifest.describe(_m)}", flush=True)
+    print(f"[dry-run] OUT would be "
+          f"{run_manifest.default_out('/share/exp4group/results', _prefix, SRC, _m['config_id'])}",
+          flush=True)
+    # 指纹隔离自检：三档 Delta 模式必须是三个不同的 config_id（否则共用结果文件）
+    for _mode in CR_DELTA_MODES:
+        _p = dict(_cr_params()); _p["delta_mode"] = _mode
+        print(f"[dry-run] config_id(delta_mode={_mode:8s}) = "
+              f"{run_manifest.config_id(_p, kind='cr', src=SRC)}", flush=True)
+    # 纯逻辑自检：Delta 动作计划 + Top-K 刷新槽位选择（不碰模型）
+    print(f"[dry-run] delta_plan({CR_DELTA_MODE}) = {v9_cr.delta_plan(CR_DELTA_MODE)}",
+          flush=True)
+    _hits = [(3, 0.91), (1, 0.88), (3, 0.90), (7, 0.70)]
+    print(f"[dry-run] refresh_slots(hits, top_k={CR_DELTA_REFRESH_TOPK}) = "
+          f"{v9_cr.refresh_slots(_hits, CR_DELTA_REFRESH_TOPK)}", flush=True)
+    print("[dry-run] OK（未加载模型、未占 GPU）", flush=True)
+    sys.exit(0)
 
 tok = AutoTokenizer.from_pretrained(BASE)
 model = AutoModelForCausalLM.from_pretrained(BASE, torch_dtype=torch.bfloat16,
@@ -320,7 +396,81 @@ class SlotPool:
         order = sorted(top, key=lambda i: self.serial[i])
         return "\n".join(f"{self.serial[i]}. {self.texts[i]}" for i in order)
 
-reset_delta_mem_states(model)
+def _v7_diag_ctx(pool, block):
+    """v7 池的逐题证据：只记录"实际拼进 prompt 的事实行"，不伪造检索排名。
+
+    v7 SlotPool.retrieve_multihop_context 不返回分数序候选（没有 hits），
+    所以 retrieved_* 留空、diag_status 标成 hits_not_exposed —— 宁可说"没暴露"，
+    也不能把 used 顺序当成检索排名。
+    """
+    lines = v9_cr.block_fact_lines(pool, block)
+    return {"pool": pool, "hits": [], "used_ids": [i for i, _ in lines],
+            "used_texts": [t for _, t in lines], "pool_kind": "cr"}
+
+
+# ---------------- Delta 在线状态：快照 / 恢复 / Top-K 刷新 ----------------
+def delta_snapshot(model):
+    """把当前 delta 在线状态 clone 到 CPU（每题恢复的基线）。语义同 run_ar_v7。"""
+    if get_delta_mem_online_state is not None:
+        return get_delta_mem_online_state(model)
+    if iter_delta_mem_modules is None:
+        return {}
+    snap = {}
+    for name, m in iter_delta_mem_modules(model):
+        st = getattr(m, "delta_state", None)
+        if st is not None:
+            snap[name] = st.detach().cpu().clone()
+    return snap
+
+
+def delta_restore(snapshot):
+    """把快照写回模型（每题生成前调用），保证每题从同一记忆状态出发。"""
+    if not snapshot:
+        return
+    if load_delta_mem_online_state is not None:
+        load_delta_mem_online_state(model, snapshot)
+        return
+    mods = dict(model.named_modules())
+    for name, t in snapshot.items():
+        m = mods.get(name)
+        if m is None:
+            continue
+        p0 = next(m.parameters())
+        m.delta_state = t.to(device=p0.device, dtype=p0.dtype)
+
+
+def refresh_delta_texts(texts):
+    """用本题 Top-K 证据文本重写 Delta（CR_DELTA_MODE=refresh）。返回写入条数。
+
+    与 AR 侧 DELTA_WRITE_STRATEGY=topk_refresh 同口径：只刷新 Top-K 槽位，
+    不重写整篇 context。写入前必须已经 delta_restore 到写后基线，否则会叠加上
+    前一题的残留状态。
+    """
+    texts = [t for t in (texts or []) if str(t).strip()]
+    if not texts:
+        return 0
+    set_delta_mem_write_enabled(model, True)
+    try:
+        with torch.no_grad():
+            for t in texts:
+                txt = tok.apply_chat_template(
+                    [{"role": "system", "content": sys_msg},
+                     {"role": "user", "content": fmt(mem_tpl, context=str(t))}],
+                    add_generation_prompt=True, tokenize=False)
+                ids = tok(txt, return_tensors="pt").input_ids.to(DEV)
+                model(input_ids=ids, use_cache=True)
+    finally:
+        set_delta_mem_write_enabled(model, False)
+    return len(texts)
+
+
+DELTA_PLAN = (v9_cr.delta_plan(CR_DELTA_MODE) if CR_MODE == "v9" else
+              {"mode": CR_DELTA_MODE, "reset_before_query": CR_DELTA_MODE == "off",
+               "restore_snapshot": CR_DELTA_MODE != "off",
+               "refresh_topk": CR_DELTA_REFRESH_TOPK if CR_DELTA_MODE == "refresh" else 0})
+DELTA_SNAP = None
+
+reset_delta_mem_states(model)      # 写前清零：两种模式都要（清掉上一 context 残差）
 if CR_MODE == "v9":
     import v9_slotpool  # noqa: E402
     import v9_cr        # noqa: E402
@@ -334,7 +484,9 @@ else:
     v7_slotpool.EMB = EMB
     from v7_slotpool import *  # noqa: E402,F403  覆盖本地 v4 SlotPool
     pool = SlotPool()
-print(f"CR_MODE={CR_MODE} pool={type(pool).__name__}", flush=True)
+DELTA_PLAN["n_pool"] = len(pool)          # 诊断用：池规模写进计划
+print(f"CR_MODE={CR_MODE} pool={type(pool).__name__} delta_mode={CR_DELTA_MODE} "
+      f"pool_n={len(pool)}", flush=True)
 
 all_facts = extract_all_facts(ctx)
 print(f"extracted facts: {len(all_facts)} (numbered+fallback)", flush=True)
@@ -361,7 +513,14 @@ set_delta_mem_write_enabled(model, False)
 print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flush=True)
 
 # ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
-reset_delta_mem_states(model)
+# Delta 状态：context/refresh 取"写后快照"供每题恢复；off 则查询前清零（历史行为）。
+if DELTA_PLAN["restore_snapshot"]:
+    DELTA_SNAP = delta_snapshot(model)
+    print(f"[delta] mode={CR_DELTA_MODE} snapshot_layers={len(DELTA_SNAP)} "
+          f"refresh_topk={DELTA_PLAN['refresh_topk']}", flush=True)
+else:
+    reset_delta_mem_states(model)
+    print(f"[delta] mode={CR_DELTA_MODE} reset_before_query=1（Delta 不参与查询）", flush=True)
 done_q = init_run()
 results = []
 with torch.no_grad():
@@ -370,7 +529,19 @@ with torch.no_grad():
             continue
         try: qtxt = qry_tpl.format(question=q)
         except KeyError: qtxt = qry_tpl.format(query=q)
+        # 逐题恢复"写后快照"：前序题目的读出不得污染后续题目（查询期不 reset）
+        if DELTA_PLAN["restore_snapshot"]:
+            delta_restore(DELTA_SNAP)
         block = pool.retrieve_multihop_context(q)
+        # 逐题检索证据（与 AR 同等级字段）：检索给了什么 / 实际拼进 prompt 什么
+        diag = (pool.diag_ctx(block) if CR_MODE == "v9"
+                else _v7_diag_ctx(pool, block))
+        # refresh：用本题 Top-K 检索结果重写这些槽位（AR 的 topk_refresh 同口径）
+        ref_slots, n_refresh = [], 0
+        if DELTA_PLAN["refresh_topk"] and diag.get("hits"):
+            ref_slots = v9_cr.refresh_slots(diag["hits"], DELTA_PLAN["refresh_topk"])
+            n_refresh = refresh_delta_texts([pool.texts[i] for i in ref_slots
+                                             if 0 <= i < len(pool.texts)])
         if CR_MODE == "v9" and CF_PROMPT:
             user_msg = v9_cr.build_cr_prompt(qtxt, block)   # 反事实强约束 Prompt
         else:
@@ -396,6 +567,18 @@ with torch.no_grad():
                "run_id": RUN_ID, **m}
         if CR_MODE == "v9":
             rec["cr_dbg"] = pool.last_dbg
+        # Delta 有没有真正参与：模式 / 快照层数 / 本题刷新了哪些槽位（不是只看开关）
+        rec["delta"] = {"mode": DELTA_PLAN["mode"],
+                        "restore_snapshot": bool(DELTA_PLAN["restore_snapshot"]),
+                        "snapshot_layers": len(DELTA_SNAP or {}),
+                        "refresh_topk": DELTA_PLAN["refresh_topk"],
+                        "refresh_slots": ref_slots, "n_refresh": n_refresh}
+        # 逐题检索证据日志（retrieved_slot_ids/scores/texts + used_slot_ids/texts +
+        # 跨池统一 ID 'cr:<idx>'）：与 AR 的 ar_diag 同等级，供 diag-attribution 归因。
+        rec.update(ar_diag.record(answer=a, query=q, flat=True, **diag))
+        if CR_MODE != "v9" and not diag.get("hits"):
+            # v7 池不暴露分数序候选：显式标注"没暴露"，而不是让它看起来像"没命中"
+            rec["diag_status"] = "hits_not_exposed"
         results.append(rec)
         with open(OUT, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -414,3 +597,22 @@ with open(OUT) as f:
 sf = sum(r.get("substring_exact_match", 0) for r in all_recs) / max(len(all_recs), 1)
 print(f"FINAL groupB2 {SRC} [{CR_MODE}] run={RUN_ID}: SF={sf:.4f} n={len(all_recs)} "
       f"pool={len(pool)} overwrites={pool.n_overwrites}", flush=True)
+
+# CR 答案命中率（与 AR 的 answer_recall_at_k 同口径，分母只算可计算的记录）：
+#   hit@K  = gold 出现在 Top-K 检索槽位文本里的比例（检索侧）；
+#   hit_ctx= gold 出现在实际拼块文本里的比例（读出侧）。
+# 分母为 0（v7 未暴露 hits / 全是 rubric 题）时打印 n=0 而不是 0.0000，避免误读。
+_app = [r for r in all_recs if r.get("answer_in_retrieved") is not None]
+_ctx = [r for r in all_recs if r.get("answer_in_context") is not None]
+
+
+def _rate(rs, key):
+    return (sum(1 for r in rs if r.get(key)) / len(rs)) if rs else None
+
+
+_hit_k, _hit_ctx = _rate(_app, "answer_in_retrieved"), _rate(_ctx, "answer_in_context")
+_fmt = lambda v: "n/a" if v is None else f"{v:.4f}"
+print(f"FINAL-CR {SRC} [{CR_MODE}] delta={CR_DELTA_MODE} run={RUN_ID}: "
+      f"answer_hit@K={_fmt(_hit_k)} (n={len(_app)}) "
+      f"answer_hit_ctx={_fmt(_hit_ctx)} (n={len(_ctx)}) "
+      f"n_attr_rejected={getattr(pool, 'n_attr_rejected', 'n/a')}", flush=True)

@@ -6,6 +6,7 @@
 #   3. EventQA 后向 12-16 句非对称扩展（含边界裁剪）
 #   4. 时间戳前缀参与检索打分 + 时序重排
 #   5. 第 18 层隐状态混合稠密打分接口（provider / attach / 退化）
+import datetime
 import os
 import sys
 
@@ -481,6 +482,83 @@ def test_cr_pending_merge_and_stable_ids():
     ok("reject counted", st2.n_merge_rejected == 1)
 
 
+# ---------------- 6b. CR 属性解析：不同属性不得撞成同一谓词 ----------------
+def test_cr_parse_copular_predicate():
+    """系表结构必须把表语头词并入谓词键（'is a doctor' vs 'is vegetarian'）。"""
+    ok("copular nominal key",
+       v9._cr_parse_fact("Alice is a doctor.") == ("Alice", "is a doctor"))
+    ok("copular adjective key",
+       v9._cr_parse_fact("Alice is vegetarian.") == ("Alice", "is vegetarian"))
+    ok("copular definite np key",
+       v9._cr_parse_fact("Bob is the mayor of Paris.") == ("Bob", "is the mayor"))
+    ok("article variant folds to same attribute",
+       v9._cr_attr_key("Alice is a vegetarian.") == v9._cr_attr_key("Alice is vegetarian."))
+    # 非系表结构不动宾语（宾语是"值"，进谓词键会让覆写失效）
+    ok("non-copular key unchanged",
+       v9._cr_parse_fact("Alice was born in Paris.") == ("Alice", "was born in"))
+    ok("attribute categories differ by predication",
+       v9._cr_attr_key("Alice is a doctor.") != v9._cr_attr_key("Alice is vegetarian."))
+    ok("attribute category ignores tense",
+       v9._cr_attr_key("Alice is located in Paris.") == v9._cr_attr_key("Alice was located in Paris."))
+
+
+def test_cr_attribute_category_guard():
+    """回归：不同属性类别不得互相覆写（Alice is a doctor / Alice is vegetarian）。"""
+    st = v9.StatePool()
+    st.add_batch([("Alice is a doctor.", {"start": 0, "serial": 1})])
+    st.add_batch([("Alice is vegetarian.", {"start": 1, "serial": 2})])
+    ok("different attributes coexist", len(st) == 2)
+    ok("no overwrite counted", st.n_dup == 0)
+    ok("doctor fact kept", any("doctor" in t for t in st.texts))
+    ok("vegetarian fact kept", any("vegetarian" in t for t in st.texts))
+    ok("attribute rejection counted", st.n_attr_rejected == 1)
+    ok("subject index lists both slots", st._subj_index.get(v9._cr_norm("Alice")) == [0, 1])
+
+    # 同模板不同值（doctor / dentist）也不得互相覆盖
+    st2 = v9.StatePool()
+    st2.add_batch([("Alice is a doctor.", {"start": 0})])
+    st2.add_batch([("Alice is a dentist.", {"start": 1})])
+    ok("same-frame different values coexist", len(st2) == 2)
+
+    # 非系表结构的不同属性（出生地 vs 生日）同样受保护
+    st3 = v9.StatePool()
+    st3.add_batch([("Alice was born in Paris.", {"start": 0})])
+    st3.add_batch([("Alice was born on Monday.", {"start": 1})])
+    ok("born-in vs born-on coexist", len(st3) == 2)
+
+
+def test_cr_attribute_same_category_still_overwrites():
+    """同属性类别仍要原位覆写：槽 id 稳定、serial 刷新、他槽不受影响。"""
+    st = v9.StatePool()
+    st.add_batch([("Alice is a doctor.", {"start": 0, "serial": 1})])
+    st.add_batch([("Bob is a teacher.", {"start": 1, "serial": 2})])
+    ok("two slots before update", len(st) == 2)
+    st.add_batch([("Alice is a doctor at City Hospital.", {"start": 2, "serial": 3})])
+    ok("same attribute overwrites in place", len(st) == 2 and st.n_dup == 1)
+    ok("slot id stable", st.texts[0] == "Alice is a doctor at City Hospital.")
+    ok("serial refreshed", st.metas[0]["serial"] == 3)
+    ok("other slot untouched", st.texts[1] == "Bob is a teacher.")
+    ok("attr key refreshed", st.cr_attr[0] == "|doctor")
+    ok("index consistent after in-place update",
+       st._subj_index.get(v9._cr_norm("Alice")) == [0])
+
+    # 时态变体属于同一属性类别 -> 仍可覆写（保护不误伤）
+    st2 = v9.StatePool()
+    st2.add_batch([("Alice is located in Paris.", {"start": 0, "serial": 1})])
+    st2.add_batch([("Alice was located in Paris.", {"start": 1, "serial": 2})])
+    ok("tense variant same attribute overwrites", len(st2) == 1 and st2.n_dup == 1)
+
+    # 不同属性的槽互不影响：先 doctor，再 vegetarian，再更新 doctor
+    st3 = v9.StatePool()
+    st3.add_batch([("Alice is a doctor.", {"start": 0, "serial": 1})])
+    st3.add_batch([("Alice is vegetarian.", {"start": 1, "serial": 2})])
+    st3.add_batch([("Alice is a doctor.", {"start": 2, "serial": 3})])
+    ok("update targets the right attribute slot", len(st3) == 2)
+    ok("doctor slot refreshed", st3.metas[0]["serial"] == 3)
+    ok("vegetarian slot untouched", st3.metas[1]["serial"] == 2)
+    ok("attr keys aligned with slots", st3.cr_attr == ["|doctor", "|vegetarian"])
+
+
 # ---------------- 7. Session 边界与换行切分（P1 / I3） ----------------
 def test_session_boundary_ts():
     """I3：Session 2 的事实不得继承 Session 1 的年份。"""
@@ -578,6 +656,255 @@ def test_layer18_strict_mode():
         v9.set_layer18_provider(None)
 
 
+# ---------------- 9. 相对时间语义（TIMESTAMP_RE 扩展 + Session 头锚定） ----------------
+def unit_with_marker(units, marker):
+    """取 ts_marker 命中该时间标记的单元。"""
+    for u in units:
+        if (u.get("ts_marker") or "").lower() == marker.lower():
+            return u
+    raise AssertionError(f"FAIL: no unit with ts_marker={marker!r}")
+
+
+def test_relative_timestamp_re_v9():
+    """TIMESTAMP_RE 覆盖相对时间；普通名词（sun）与绝对标记不被误判。"""
+    for s, mk in (("We met yesterday.", "yesterday"), ("It is today.", "today"),
+                  ("See you tomorrow.", "tomorrow"), ("That was last week.", "last week"),
+                  ("They met last summer.", "last summer"), ("We talked this month.", "this month"),
+                  ("It rained next year.", "next year"), ("He arrived on Monday.", "Monday"),
+                  ("Booked 2 weeks ago.", "2 weeks ago"), ("Moved 6 months ago.", "6 months ago")):
+        m = v9.TIMESTAMP_RE.search(s)
+        ok(f"relative ts matched: {mk}", m is not None and m.group(0).lower() == mk.lower())
+        ok(f"relative flag: {mk}", v9.is_relative_ts(m.group(0)) is True)
+    ok("sun not a weekday", v9.TIMESTAMP_RE.search("the sun is hot") is None)
+    ok("Sun weekday when capital", v9.TIMESTAMP_RE.search("Sun is up") is not None)
+    ok("absolute stays absolute", v9.is_relative_ts("March 3, 2001") is False
+       and v9.is_relative_ts("1997") is False)
+    ok("iso keeps full date", v9.TIMESTAMP_RE.search("dated 2001-03-03.").group(0) == "2001-03-03")
+    ok("plain prose has no ts", v9.TIMESTAMP_RE.search("He likes apples.") is None)
+
+
+def test_relative_ts_anchor_v9():
+    """'yesterday' 在已知 Session 头日期下解析正确；其它相对表达同样落到确定日期。"""
+    units = v9.extract_units("2023-05-20\nYesterday Alice visited the museum.", block_sents=1)
+    u = unit_with_marker(units, "yesterday")
+    ok("v9 yesterday resolved", u["ts"] == "2023-05-19")
+    ok("v9 yesterday marked", u["ts_relative"] is True and u["ts_unresolved"] is False)
+    # 相对标记是该句自带的标记（解析出的日期来自 Session 锚点）-> explicit，不是继承
+    ok("v9 yesterday explicit not inherited",
+       u["ts_explicit"] is True and u["ts_inherited"] is False)
+    ok("v9 yesterday year", u["year"] == 2023)
+    ok("v9 yesterday index_text", u["index_text"].startswith("In 2023-05-19:"))
+
+    u2 = unit_with_marker(v9.extract_units("2023-05-20\nOn Monday she flew to Rome."), "Monday")
+    ok("v9 weekday resolved", u2["ts"] == "2023-05-15")
+    u3 = unit_with_marker(v9.extract_units("2023-05-20\nThey travelled last summer."),
+                          "last summer")
+    ok("v9 last summer resolved", u3["ts"] == "2022-06-21" and u3["year"] == 2022)
+    u4 = unit_with_marker(v9.extract_units("2023-05-20\nShe left 3 days ago."), "3 days ago")
+    ok("v9 N days ago resolved", u4["ts"] == "2023-05-17")
+    # 月名日期头（LongMemEval 之外的写法）同样是锚点
+    u5 = unit_with_marker(v9.extract_units("March 3, 2001\nYesterday he arrived."), "yesterday")
+    ok("v9 month-name anchor resolved", u5["ts"] == "2001-03-02")
+    # 斜杠日期头：时间戳口径仍是年份，但锚点拿到整日精度
+    u6 = unit_with_marker(v9.extract_units("2021/07/15\nYesterday she arrived."), "yesterday")
+    ok("v9 slash anchor resolves to day", u6["ts"] == "2021-07-14")
+    # 解析出的日期在同 Session 内可被继承
+    units7 = v9.extract_units("2023-05-20\nYesterday Alice left.\nShe bought a ticket.",
+                              block_sents=1)
+    later = [x for x in units7 if "bought a ticket" in x["text"]][0]
+    ok("v9 resolved date inherited in session", later["ts"] == "2023-05-19"
+       and later["ts_inherited"] is True)
+
+
+def test_relative_ts_unknown_anchor_v9():
+    """无锚点 -> resolved ts 保持 None（只标记不解析，不编造日期）。"""
+    units = v9.extract_units("Session 1\nYesterday Alice visited the museum.", block_sents=1)
+    u = unit_with_marker(units, "yesterday")
+    ok("v9 unknown anchor ts None", u["ts"] is None and u["year"] is None)
+    ok("v9 unknown anchor marked",
+       (u["ts_marker"] or "").lower() == "yesterday" and u["ts_relative"] is True)
+    ok("v9 unknown anchor unresolved", u["ts_unresolved"] is True)
+    ok("v9 unknown anchor no ts prefix", u["index_text"] == u["text"])
+    ok("v9 no fabricated date", all(x["ts"] is None for x in units))
+    # 只有年份精度的锚点：不得编造月/日，只保留年
+    units2 = v9.extract_units("Session 1 — 1997\nYesterday he arrived.", block_sents=1)
+    u2 = unit_with_marker(units2, "yesterday")
+    ok("v9 year-only anchor no fabricated day",
+       u2["ts"] == "1997" and "-" not in (u2["ts"] or "") and u2["ts_unresolved"] is True)
+    ok("v9 year-level relative ok", v9.resolve_relative_ts("last year", "1997") == "1996")
+    # 跨 Session：上一段的日期不得成为下一段相对时间的锚点
+    units3 = v9.extract_units("2020-03-01\nAlice moved to Paris.\nSession 2\nYesterday she left.",
+                              block_sents=1)
+    u3 = unit_with_marker(units3, "yesterday")
+    ok("v9 no cross-session anchor", u3["ts"] is None and u3["ts_unresolved"] is True)
+
+
+def test_session_marker_ev_v9():
+    """Session 标记参与 ev 判定（is_event），纯散文句不算事件。"""
+    plain = v9.extract_units("The river flows through the town.\nThe bridge is old.",
+                             block_sents=1)
+    ok("v9 plain prose not event", all(x["is_event"] is False for x in plain))
+    units = v9.extract_units("Session 1\nThe river flows through the town.", block_sents=1)
+    by_text = {x["text"]: x for x in units}
+    ok("v9 session marker is event", by_text["Session 1"]["is_event"] is True)
+    ok("v9 body sentence not event", by_text["The river flows through the town."]["is_event"] is False)
+    # 状态池不得收 Session 标记
+    epi, st = v9.build_pools_for_context("Session 1\nThe river flows through the town.")
+    ok("v9 state excludes session marker", all("Session" not in m["text"] for m in st.metas))
+
+
+# ---------------- 10. LongMemEval：Session/Turn 扩展 + 跨 Session 配额 + 时间约束 ----------------
+LME_CTX = """Session 1 — 2021/03/05
+On 2021-03-05 I bought a red bike.
+On 2021-03-06 I painted the bike blue.
+On 2021-03-07 I sold the bike to Tom.
+
+Session 2 — 2022/07/09
+On 2022-07-09 I bought a green kayak.
+On 2022-07-10 I paddled the kayak on the lake.
+On 2022-07-11 I stored the kayak in the garage.
+
+Session 3 — 2023/11/20
+On 2023-11-20 I bought a yellow tent.
+On 2023-11-21 I pitched the tent in the woods.
+On 2023-11-22 I cleaned the tent after the trip."""
+
+
+def lme_index():
+    epi = v9.EpisodicIndex()
+    epi.add_units(v9.extract_units(LME_CTX, block_sents=1))
+    return epi
+
+
+def test_lme_session_quota_max2():
+    """跨 Session 配额：同一 Session 最多 2 个命中单元，超出的按分数顺延到别的 Session。"""
+    epi = lme_index()
+    idxs, dbg = epi.readout("bike", top_k=4, mode="lme", turn_window=0)
+    ok("lme dbg has session_quota", "session_quota" in dbg)
+    ok("lme dbg has temporal_constraint", "temporal_constraint" in dbg)
+    q = dbg["session_quota"]
+    ok("lme quota default 2", q["max_per_session"] == 2)
+    ok("lme quota dropped overflow", q["n_dropped"] >= 1)
+    ok("lme quota per session <= 2", all(c <= 2 for c in q["per_session"].values()))
+    sids = [epi.metas[i]["session_id"] for i in idxs]
+    ok("lme quota spans multiple sessions", len(set(sids)) >= 2)
+    ok("lme quota filled all slots", len(idxs) == 4)
+    # 关掉配额 -> 允许同一 Session 多取（对照，证明是配额在起作用）
+    idxs2, dbg2 = epi.readout("bike", top_k=4, mode="lme", turn_window=0, session_quota=False)
+    ok("lme quota off -> max_per_session 0", dbg2["session_quota"]["max_per_session"] == 0)
+    sids2 = [epi.metas[i]["session_id"] for i in idxs2]
+    ok("lme quota off concentrates in one session",
+       max(sids2.count(x) for x in set(sids2)) > 2)
+    # 候选全在同一 Session 时配额无多样性收益 -> 自动退回不限（不白丢召回）
+    one = v9.EpisodicIndex()
+    one.add_units(v9.extract_units(" ".join(f"I did thing{i} today." for i in range(6)),
+                                   block_sents=1))
+    idxs3, dbg3 = one.readout("thing", top_k=5, mode="lme", turn_window=0)
+    ok("lme single-session quota disabled", dbg3["session_quota"]["max_per_session"] == 0)
+    ok("lme single-session fallback recorded",
+       dbg3["session_quota"]["fallback"] == "single_session")
+    ok("lme single-session keeps top_k", len(idxs3) == 5)
+
+
+def test_lme_temporal_before_after():
+    """before/after 是硬过滤（不是仅加分）：返回单元的日期必须满足约束。"""
+    epi = lme_index()
+    target = datetime.date(2022, 1, 1)
+    idxs, dbg = epi.readout("bike before 2022-01-01", top_k=5, mode="lme", turn_window=0)
+    tc = dbg["temporal_constraint"]
+    ok("lme before parsed", tc["kind"] == "before" and tc["applied"] is True)
+    ok("lme before filter shrank pool", tc["n_out"] < tc["n_in"])
+    ok("lme before all dates < target",
+       all((v9.unit_date(epi.metas[i])[0] or target) < target for i in idxs))
+    idxs2, dbg2 = epi.readout("bike after 2022-01-01", top_k=5, mode="lme", turn_window=0)
+    tc2 = dbg2["temporal_constraint"]
+    ok("lme after parsed", tc2["kind"] == "after" and tc2["applied"] is True)
+    spans = [v9.unit_date_span(epi.metas[i]) for i in idxs2]
+    ok("lme after all spans end after target",
+       all(lo is not None and hi > target for lo, hi, _p in spans))
+    ok("lme after drops pre-target units",
+       all(epi.metas[i]["session_id"] != 0 for i in idxs2))
+    # 相对时间操作数：无锚点解析失败（退回 none），有锚点按锚点解析
+    ok("lme relative operand needs anchor",
+       v9.parse_temporal_constraint("what happened after yesterday?")["kind"] == "none")
+    tc3 = v9.parse_temporal_constraint("what happened after yesterday?", query_ts="2023-11-22")
+    ok("lme relative operand resolved with anchor",
+       tc3["kind"] == "after" and tc3["date"] == "2023-11-21")
+
+
+def test_lme_temporal_first_last():
+    """first/last/most recent 是重排：最早/最晚日期的单元排最前。"""
+    epi = lme_index()
+    centers = [v9.unit_date_center(m) for m in epi.metas]
+    known = [c for c in centers if c is not None]
+    idxs, dbg = epi.readout("What is the first thing I bought?", top_k=3,
+                           mode="lme", turn_window=0)
+    ok("lme first order parsed", dbg["temporal_constraint"]["order"] == "first")
+    # hits[0] 是重排后的首位（idxs 仍按原文位置升序返回，位置序 ≠ 排序分序）
+    ok("lme first picks earliest unit", centers[dbg["hits"][0][0]] == min(known))
+    ok("lme first returns that unit", dbg["hits"][0][0] in idxs)
+    idxs2, dbg2 = epi.readout("What is the most recent thing I bought?", top_k=3,
+                              mode="lme", turn_window=0)
+    ok("lme last order parsed", dbg2["temporal_constraint"]["order"] == "last")
+    ok("lme last picks latest unit", centers[dbg2["hits"][0][0]] == max(known))
+    ok("lme last returns that unit", dbg2["hits"][0][0] in idxs2)
+    ok("lme first/last differ", dbg["hits"][0][0] != dbg2["hits"][0][0])
+    # "last week" 是时间点（相对时间），不是"最近一次"的顺序约束
+    ok("lme last-week is not order constraint",
+       v9.parse_temporal_constraint("What did I do last week?")["order"] is None)
+    ok("lme first-week is not order constraint",
+       v9.parse_temporal_constraint("What did I do in the first week?")["order"] is None)
+    ok("lme last-time is order constraint",
+       v9.parse_temporal_constraint("When did I last time buy a bike?")["order"] == "last")
+
+
+def test_lme_temporal_none_unchanged():
+    """解析不出约束时不改变结果，只记 temporal_constraint=none。"""
+    epi = lme_index()
+    idxs, dbg = epi.readout("kayak", top_k=3, mode="lme", turn_window=0)
+    tc = dbg["temporal_constraint"]
+    ok("lme none kind", tc["kind"] == "none" and tc["applied"] is False)
+    ok("lme none no filter", tc["n_in"] == tc["n_out"])
+    ok("lme none no order", tc["order"] is None)
+    idxs2, _ = epi.readout("kayak", top_k=3, mode="lme", turn_window=0,
+                           temporal_constraint={"kind": "none"})
+    ok("lme none identical result", idxs == idxs2)
+    # 无日期的 before 操作数（"before the trip"）-> 解析失败，退回现状
+    idxs3, dbg3 = epi.readout("kayak before the trip", top_k=3, mode="lme", turn_window=0)
+    idxs4, _ = epi.readout("kayak before the trip", top_k=3, mode="lme", turn_window=0,
+                           temporal_constraint={"kind": "none"})
+    ok("lme unparsable before -> none", dbg3["temporal_constraint"]["kind"] == "none")
+    ok("lme unparsable before unchanged", idxs3 == idxs4)
+
+
+def test_lme_turn_window_expands_within_session():
+    """Session 内前后各扩 N 个 turn；跨 Session 一律不扩。"""
+    epi = lme_index()
+    # 直接测扩展边界：Session 2 的第一个单元往回扩不得进 Session 1
+    got = epi.expand_session_turns([4], window=2)
+    ok("lme no backward cross-session", 3 not in got)
+    ok("lme forward stays in session", set(got) <= {4, 5, 6, 7})
+    got2 = epi.expand_session_turns([3], window=2)
+    ok("lme no forward cross-session", 4 not in got2)
+    ok("lme backward stays in session", set(got2) <= {0, 1, 2, 3})
+    # 端到端：命中 2 个单元，window=1 后只在各自 Session 内扩到邻居
+    idxs, dbg = epi.readout("bike", top_k=2, mode="lme", turn_window=1)
+    q = dbg["session_quota"]
+    ok("lme turn_window recorded", q["turn_window"] == 1)
+    ok("lme expansion grew unit set", q["n_expanded"] > q["n_hits"])
+    hits = [h[0] for h in dbg["hits"]]
+    allowed = set()
+    for i in hits:
+        sid = epi.metas[i]["session_id"]
+        allowed |= {j for j in range(max(0, i - 1), min(len(epi), i + 2))
+                    if epi.metas[j]["session_id"] == sid}
+    ok("lme expansion only same-session neighbours", set(idxs) <= allowed)
+    # window=0 时不扩（对照）
+    idxs0, dbg0 = epi.readout("bike", top_k=2, mode="lme", turn_window=0)
+    ok("lme window 0 no expansion", dbg0["session_quota"]["n_expanded"] == dbg0["session_quota"]["n_hits"])
+    ok("lme window 0 fewer units", len(idxs0) < len(idxs))
+
+
 if __name__ == "__main__":
     test_non_overlapping_index()
     test_ts_inheritance_v9()
@@ -599,7 +926,19 @@ if __name__ == "__main__":
     test_empty()
     test_cr_overwrite_finds_same_subject_slot()
     test_cr_pending_merge_and_stable_ids()
+    test_cr_parse_copular_predicate()
+    test_cr_attribute_category_guard()
+    test_cr_attribute_same_category_still_overwrites()
     test_session_boundary_ts()
+    test_relative_timestamp_re_v9()
+    test_relative_ts_anchor_v9()
+    test_relative_ts_unknown_anchor_v9()
+    test_session_marker_ev_v9()
+    test_lme_session_quota_max2()
+    test_lme_temporal_before_after()
+    test_lme_temporal_first_last()
+    test_lme_temporal_none_unchanged()
+    test_lme_turn_window_expands_within_session()
     test_split_newline_chat()
     test_hybrid_device_consistency()
     test_layer18_strict_mode()
