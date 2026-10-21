@@ -73,6 +73,35 @@ if CR_DELTA_MODE not in CR_DELTA_MODES:
     raise SystemExit(f"CR_DELTA_MODE must be one of {CR_DELTA_MODES}, got {CR_DELTA_MODE!r}")
 CR_DELTA_REFRESH_TOPK = int(os.environ.get("CR_DELTA_REFRESH_TOPK", "6"))
 
+# CR 读出方式（P1）：
+#   prompt  默认：多跳寻址 -> 渲染明文证据块 -> 拼进 prompt（历史行为，逐字节不变）
+#   latent  潜层读出：多跳**寻址** -> 取槽位载荷 Z -> LatentBridge 变 soft tokens，
+#           明文事实行一行都不进 prompt。需要 CR_MODE=v9（寻址层在图检索上）与训练好的
+#           LATENT_CKPT；预算按**软 token 数**（LATENT_READ_BUDGET）算，且按整条路径保留
+#           —— 半条多跳路径没有意义（第二跳常排在后面）。
+CR_READOUT_MODE = os.environ.get("CR_READOUT_MODE", "prompt").strip().lower() or "prompt"
+if CR_READOUT_MODE not in ("prompt", "latent"):
+    raise SystemExit(f"CR_READOUT_MODE must be prompt or latent, got {CR_READOUT_MODE!r}")
+if CR_READOUT_MODE == "latent" and CR_MODE != "v9":
+    raise SystemExit("CR_READOUT_MODE=latent 需要 CR_MODE=v9（潜层读出复用图检索寻址层）")
+LATENT_CKPT            = os.environ.get("LATENT_CKPT", "").strip()
+LATENT_M               = int(os.environ.get("LATENT_M", "4"))
+LATENT_LAYER           = int(os.environ.get("LATENT_LAYER", "18"))
+LATENT_INNER_DIM       = int(os.environ.get("LATENT_INNER_DIM", "512"))
+LATENT_MAX_UNIT_TOKENS = int(os.environ.get("LATENT_MAX_UNIT_TOKENS", "64"))
+LATENT_READ_BUDGET     = int(os.environ.get("LATENT_READ_BUDGET", "32"))
+LATENT_BANK_MAX        = int(os.environ.get("LATENT_BANK_MAX", "0"))
+latent_memory = None
+
+
+def latent_import():
+    """惰性导入 latent_memory（只有 CR_READOUT_MODE=latent 才需要 torch 侧神经网络）。"""
+    global latent_memory
+    if latent_memory is None:
+        import importlib
+        latent_memory = importlib.import_module("latent_memory")
+    return latent_memory
+
 # --dry-run：不加载模型、不读 parquet，只打印解析后的配置 + 指纹 + 纯逻辑自检
 DRY_RUN = "--dry-run" in sys.argv[1:]
 _ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -115,6 +144,22 @@ def _cr_params():
             "path_view": v9_cr.CR_PATH_VIEW, "paths": v9_cr.CR_PATHS,
             "hop1_m": v9_cr.CR_HOP1_M,
         }
+    if CR_READOUT_MODE != "prompt":
+        # 只有非 prompt 读出才加这一节：prompt 模式的 config_id 必须与历史结果逐字节一致，
+        # 否则全部已完成的 CR 结果文件会失效、续跑被拒。
+        try:
+            fp = run_manifest.file_fingerprint(LATENT_CKPT, label="checkpoint")
+        except Exception:
+            fp = {"checkpoint": LATENT_CKPT, "exists": False}
+        p["readout"] = {
+            "mode": CR_READOUT_MODE, "checkpoint": fp,
+            "n_slots": LATENT_M, "layer": LATENT_LAYER, "inner_dim": LATENT_INNER_DIM,
+            "max_unit_tokens": LATENT_MAX_UNIT_TOKENS,
+            "read_budget": LATENT_READ_BUDGET, "tokens_per_slot": LATENT_M,
+            "bank_max": LATENT_BANK_MAX,
+            "compression_ratio_max": (round(LATENT_M / LATENT_MAX_UNIT_TOKENS, 6)
+                                      if LATENT_MAX_UNIT_TOKENS > 0 else None),
+        }
     return p
 
 
@@ -150,7 +195,8 @@ if not DRY_RUN and _STACK_ERR is not None:
 # ---------------- --dry-run：不加载模型 / 不读 parquet / 不占 GPU ----------------
 if DRY_RUN:
     print(f"[dry-run] CR_MODE={CR_MODE} CR_DELTA_MODE={CR_DELTA_MODE} "
-          f"CF_PROMPT={CF_PROMPT} delta_refresh_topk={CR_DELTA_REFRESH_TOPK} SRC={SRC}",
+          f"CF_PROMPT={CF_PROMPT} delta_refresh_topk={CR_DELTA_REFRESH_TOPK} "
+          f"CR_READOUT_MODE={CR_READOUT_MODE} SRC={SRC}",
           flush=True)
     _m = run_manifest.build(kind="cr", src=SRC, params=_cr_params())
     _prefix = "v9groupB2" if CR_MODE == "v9" else "v7groupB2"
@@ -169,6 +215,36 @@ if DRY_RUN:
     _hits = [(3, 0.91), (1, 0.88), (3, 0.90), (7, 0.70)]
     print(f"[dry-run] refresh_slots(hits, top_k={CR_DELTA_REFRESH_TOPK}) = "
           f"{v9_cr.refresh_slots(_hits, CR_DELTA_REFRESH_TOPK)}", flush=True)
+    if CR_READOUT_MODE == "latent":
+        # 潜层读出必须显式自检：缺 checkpoint / 预算算不出槽位 / 路径被截断，
+        # 这三类错误在真实跑分里都会伪装成"方法变差"。
+        if not LATENT_CKPT:
+            print("[dry-run][ERR] CR_READOUT_MODE=latent 需要 LATENT_CKPT"
+                  "（未训练的压缩器/桥接器只是随机投影）", flush=True)
+            sys.exit(2)
+        try:
+            lm = latent_import()
+        except Exception as e:                     # 没装 torch 也能看配置，但不能假装跑得通
+            print(f"[dry-run][warn] latent_memory 不可导入（{e}），跳过载荷自检", flush=True)
+            sys.exit(0)
+        print(f"[dry-run] latent: {lm.describe()}", flush=True)
+        print(f"[dry-run] latent checkpoint: "
+              f"{run_manifest.file_fingerprint(LATENT_CKPT, label='checkpoint')}",
+              flush=True)
+        print(f"[dry-run] latent budget: {LATENT_READ_BUDGET} soft tokens / m={LATENT_M} "
+              f"-> K<={LATENT_READ_BUDGET // max(LATENT_M, 1)} slots", flush=True)
+        # 路径预算：整条保留（不 selected[:K] 截断，否则可能只留第一跳）
+        _kept, _info = lm.select_latent_cr_paths(
+            [0, 1, 2, 3],
+            [{"path_len": 2, "facts": [0, 2]}, {"path_len": 2, "facts": [1, 3]}],
+            LATENT_READ_BUDGET, LATENT_M)
+        print(f"[dry-run] latent path budget: kept={_kept} "
+              f"paths_kept={_info['n_paths_kept']} "
+              f"skipped={len(_info['n_paths_skipped'])} overflow={_info['overflow']}",
+              flush=True)
+        # 指纹隔离：latent 与 prompt 必须是不同 config_id（否则两组结果互相覆盖）
+        print(f"[dry-run] config_id(readout={CR_READOUT_MODE}) = "
+              f"{run_manifest.config_id(_cr_params(), kind='cr', src=SRC)}", flush=True)
     print("[dry-run] OK（未加载模型、未占 GPU）", flush=True)
     sys.exit(0)
 
@@ -512,6 +588,30 @@ with torch.no_grad():
 set_delta_mem_write_enabled(model, False)
 print(f"write done. pool_final={len(pool)} overwrites={pool.n_overwrites}", flush=True)
 
+# 潜层载荷（CR_READOUT_MODE=latent）：每个**存活**事实槽位压成 Z 一次，之后读出只用载荷。
+# 为什么在写入完成之后才编码：CR 的双阈值覆写发生在写入期，被覆写的旧值已经不存在于槽位里，
+# 只需要为最终文本建载荷（等价于 Hard Overwrite：Alice→Microsoft 被 Alice→Raytheon 覆盖后，
+# 槽里只剩 Raytheon，载荷自然也只有 Raytheon）。
+# 挂钩子（encode_existing=False：载荷刚建好，不重复编码）保证后续 upsert/_evict 也同步。
+latent_reader = None
+latent_bank = None
+if CR_READOUT_MODE == "latent":
+    if not LATENT_CKPT:
+        raise SystemExit("[ERR] CR_READOUT_MODE=latent 需要 LATENT_CKPT"
+                         "（train_latent_memory.py 的产物）")
+    latent_reader = latent_import().load_latent_reader(LATENT_CKPT, model, tok, device=DEV)
+    latent_bank, lb = latent_import().build_latent_bank(
+        state_pool=pool, encoder=latent_reader.encoder, namespaces={"state": "cr"},
+        max_slots=LATENT_BANK_MAX)
+    pool.attach_latent_bank(latent_bank, "cr", latent_reader.encoder,
+                            encode_existing=False)
+    print(f"[latent] {latent_import().describe()}", flush=True)
+    print(f"[latent] reader={latent_reader} bank_slots={len(latent_bank)} "
+          f"soft_vectors={lb['n_soft_tokens']} tokens_in={lb['n_tokens_in']} "
+          f"ratio={lb.get('compression_ratio')} skipped={lb['n_skipped']} "
+          f"budget={LATENT_READ_BUDGET}/m={LATENT_M}->K<={LATENT_READ_BUDGET // LATENT_M}",
+          flush=True)
+
 # ---------- (4) 读出：clean context 重编码，单次前向 generate ----------
 # Delta 状态：context/refresh 取"写后快照"供每题恢复；off 则查询前清零（历史行为）。
 if DELTA_PLAN["restore_snapshot"]:
@@ -532,39 +632,89 @@ with torch.no_grad():
         # 逐题恢复"写后快照"：前序题目的读出不得污染后续题目（查询期不 reset）
         if DELTA_PLAN["restore_snapshot"]:
             delta_restore(DELTA_SNAP)
-        block = pool.retrieve_multihop_context(q)
-        # 逐题检索证据（与 AR 同等级字段）：检索给了什么 / 实际拼进 prompt 什么
-        diag = (pool.diag_ctx(block) if CR_MODE == "v9"
-                else _v7_diag_ctx(pool, block))
+        latent_slot_ids, latent_z, gen_meta, keep_info = [], None, None, None
+        if CR_READOUT_MODE == "latent":
+            # 只做寻址：拿到槽位 ID 与**完整路径**，不渲染任何明文证据块。
+            ids, paths, cdbg = pool.retrieve_multihop_ids(q)
+            latent_slot_ids, keep_info = latent_import().select_latent_cr_paths(
+                ids, paths, LATENT_READ_BUDGET, LATENT_M)
+            latent_z = (latent_bank.gather(latent_slot_ids, device=DEV)
+                        if latent_slot_ids else None)
+            block = ""
+            # 诊断口径：retrieved 仍按 hop1 分数降序记录（检索侧命中率可单独报告），
+            # 但 used_texts/used_ids 保持空 —— 没有任何明文进 prompt，
+            # 因此 ar_diag 的 answer_in_context 会是 None 而不是被误记成 False。
+            diag = {"pool": pool,
+                    "hits": [(int(i), float(s)) for s, i in (cdbg.get("hop1") or [])],
+                    "used_ids": [], "used_texts": [],
+                    "used_state_ids": [], "state_pool": None}
+        else:
+            block = pool.retrieve_multihop_context(q)
+            # 逐题检索证据（与 AR 同等级字段）：检索给了什么 / 实际拼进 prompt 什么
+            diag = (pool.diag_ctx(block) if CR_MODE == "v9"
+                    else _v7_diag_ctx(pool, block))
         # refresh：用本题 Top-K 检索结果重写这些槽位（AR 的 topk_refresh 同口径）
         ref_slots, n_refresh = [], 0
         if DELTA_PLAN["refresh_topk"] and diag.get("hits"):
             ref_slots = v9_cr.refresh_slots(diag["hits"], DELTA_PLAN["refresh_topk"])
             n_refresh = refresh_delta_texts([pool.texts[i] for i in ref_slots
                                              if 0 <= i < len(pool.texts)])
-        if CR_MODE == "v9" and CF_PROMPT:
-            user_msg = v9_cr.build_cr_prompt(qtxt, block)   # 反事实强约束 Prompt
+        if CR_READOUT_MODE == "latent":
+            # 生成端只接收 system(正常 token) + soft tokens + 问题：
+            # generate_latent_answer 的签名里没有任何参数能塞回明文证据块。
+            pred, gen_meta = latent_import().generate_latent_answer(
+                model=model, tokenizer=tok, bridge=latent_reader.bridge,
+                payloads=latent_z, question=qtxt, system_prompt=sys_msg,
+                max_new_tokens=MAX_NEW_TOKENS)
+            in_len, out_len = int(gen_meta["n_in"]), int(gen_meta["n_out"])
         else:
-            user_msg = f"{block}\n\n{qtxt}" if block else qtxt
-        text = tok.apply_chat_template(
-            [{"role": "system", "content": sys_msg},
-             {"role": "user", "content": user_msg}],
-            add_generation_prompt=True, tokenize=False)
-        ids = tok(text, return_tensors="pt").input_ids.to(DEV)
-        out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
-                             do_sample=False, use_cache=True,
-                             pad_token_id=tok.eos_token_id or 0)
-        pred = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True)
+            if CR_MODE == "v9" and CF_PROMPT:
+                user_msg = v9_cr.build_cr_prompt(qtxt, block)   # 反事实强约束 Prompt
+            else:
+                user_msg = f"{block}\n\n{qtxt}" if block else qtxt
+            text = tok.apply_chat_template(
+                [{"role": "system", "content": sys_msg},
+                 {"role": "user", "content": user_msg}],
+                add_generation_prompt=True, tokenize=False)
+            ids = tok(text, return_tensors="pt").input_ids.to(DEV)
+            out = model.generate(input_ids=ids, max_new_tokens=MAX_NEW_TOKENS,
+                                 do_sample=False, use_cache=True,
+                                 pad_token_id=tok.eos_token_id or 0)
+            pred = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True)
+            in_len, out_len = int(ids.shape[1]), int(out.shape[1] - ids.shape[1])
         pred_norm = pred.strip()
         pred_norm = re.sub(r"^(?:answer|答案)\s*[:：]\s*", "", pred_norm, flags=re.IGNORECASE).strip().lower()  # 大小写归一，避免 "Rugby" vs "rugby" 白丢分
         ans_norm = [x.strip().lower() if isinstance(x, str) else [g.strip().lower() for g in x] if isinstance(x, list) else x for x in [a]][0]
         m, _ = post_process(
-            {"output": pred_norm, "input_len": ids.shape[1],
-             "output_len": out.shape[1] - ids.shape[1],
+            {"output": pred_norm, "input_len": in_len,
+             "output_len": out_len,
              "memory_construction_time": 0, "query_time_len": 0},
             ans_norm, {"sub_dataset": SRC, "debug": False})
         rec = {"question_idx": qi, "query": q, "answer": a, "output": pred,
                "run_id": RUN_ID, **m}
+        if CR_READOUT_MODE == "latent":
+            # 潜层读出的账本：注入了哪些槽位 / 预算用掉多少 / 哪些路径因预算被整条跳过。
+            # 与 CR 的明文证据行是两套口径（软 token vs 明文 token），不可混用。
+            rec["readout"] = latent_import().latent_readout_record(
+                latent_reader, latent_slot_ids,
+                n_vectors=int(latent_z.shape[0]) if latent_z is not None else 0,
+                extra={"budget": LATENT_READ_BUDGET,
+                       "budget_used": (keep_info or {}).get("budget_used"),
+                       "tokens_per_slot": LATENT_M,
+                       "n_paths_kept": (keep_info or {}).get("n_paths_kept"),
+                       "n_paths_skipped": len((keep_info or {}).get("n_paths_skipped") or []),
+                       "overflow": (keep_info or {}).get("overflow"),
+                       "decode_mode": (gen_meta or {}).get("decode_mode")})
+            rec["latent"] = {"slot_ids": list(latent_slot_ids),
+                             "n_slots": len(latent_slot_ids),
+                             "n_vectors": int(latent_z.shape[0]) if latent_z is not None else 0,
+                             "budget": LATENT_READ_BUDGET,
+                             "budget_used": (keep_info or {}).get("budget_used"),
+                             "kept_paths": (keep_info or {}).get("kept_paths"),
+                             "skipped_paths": (keep_info or {}).get("n_paths_skipped"),
+                             "overflow": (keep_info or {}).get("overflow"),
+                             "checkpoint": LATENT_CKPT,
+                             "decode_mode": (gen_meta or {}).get("decode_mode")}
         if CR_MODE == "v9":
             rec["cr_dbg"] = pool.last_dbg
         # Delta 有没有真正参与：模式 / 快照层数 / 本题刷新了哪些槽位（不是只看开关）
@@ -596,7 +746,7 @@ with open(OUT) as f:
                 pass
 sf = sum(r.get("substring_exact_match", 0) for r in all_recs) / max(len(all_recs), 1)
 print(f"FINAL groupB2 {SRC} [{CR_MODE}] run={RUN_ID}: SF={sf:.4f} n={len(all_recs)} "
-      f"pool={len(pool)} overwrites={pool.n_overwrites}", flush=True)
+      f"pool={len(pool)} overwrites={pool.n_overwrites} readout={CR_READOUT_MODE}", flush=True)
 
 # CR 答案命中率（与 AR 的 answer_recall_at_k 同口径，分母只算可计算的记录）：
 #   hit@K  = gold 出现在 Top-K 检索槽位文本里的比例（检索侧）；

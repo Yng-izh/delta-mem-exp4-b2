@@ -4,9 +4,10 @@
 > 每个组件都带状态标记：`已实现` / `已接线·未验证` / `规划中`。
 > 指标与实验结论见 `README.md`、`CHANGELOG.md`、`experiments/`；本文只谈结构与契约。
 >
-> **最重要的一句**：目前**没有任何"潜槽位读出"**。读出层只有"明文 prompt"和
-> "明文 token 的嵌入矩阵（`EMB[ids]`）"两种模式，二者都基于外部明文证据。
-> 真正的 latent readout 是路径 B，仍在规划中（§6）。
+> **最重要的一句**：潜层读出（路径 B）**代码已落地但从未训练、从未跑分**。
+> `AR_READOUT_MODE=latent` 现在会真的把槽位压成软 token 送进 `inputs_embeds`（明文进不去），
+> 但压缩器/桥接器是随机初始化的 —— 没有 `LATENT_CKPT` 时 runner 直接报错退出。
+> 因此**目前所有指标仍来自明文 prompt 模式**，不能声称任何 latent 效果（§6）。
 
 ---
 
@@ -43,12 +44,13 @@
 
                        ▼
               ⑤ Latent Readout（潜层读出）
-                 现状：明文块 + prompt  |  EMB[ids] 的 inputs_embeds
-                 目标：槽位内潜向量直接进入第 1 层 Attention（未实现）
+                 明文模式（默认）：明文块 + prompt  |  EMB[ids] 的 inputs_embeds
+                 潜层模式（latent，需训练）：槽位 [h0;h18] → Z∈R^{m×d} → 软 token → inputs_embeds
 ```
 
 **层间边界**：②③ 是两套**独立**的槽位语义，共享同一套 unit 与同一套打分器；
-④ 只决定"取哪些槽位"；⑤ 只决定"怎么把槽位送进模型"。当前 ⑤ 拿到的是**文本**。
+④ 只决定"取哪些槽位"；⑤ 只决定"怎么把槽位送进模型"。⑤ 默认拿到的是**文本**；
+`AR_READOUT_MODE=latent` 时拿到的是**槽位载荷 `Z`**（无明文，但需先训练）。
 
 ## 3. 设计不变量（invariants）
 
@@ -105,18 +107,38 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 |---|---|---|---|
 | `prompt` | `AR_READOUT_MODE=prompt`（默认） | 证据文本拼进 user prompt，`generate(input_ids=...)` | 否，明文 RAG |
 | `text_embeds` | `AR_READOUT_MODE=text_embeds` | `generate(inputs_embeds=EMB[ids])`：把**同一段明文**换成查表嵌入 | **否**。等价于 prompt，只是绕过 embedding 层；无任何槽位内部状态 |
-| `latent` | `AR_READOUT_MODE=latent` | **未实现**，runner 直接退出码 2 报错 | — |
+| `latent` | `AR_READOUT_MODE=latent`（需 `AR_MODE=v9` + `LATENT_CKPT`） | 槽位先压成 `Z∈R^{m×d}`，经桥接器变成 k×m 个**软 token 嵌入**直接拼进 `inputs_embeds`；生成端拿不到任何明文 | **是**（通路成立）；但**未训练 = 无意义**，见下方"必须先训练" |
 
-因此：**"双模态潜槽位记忆"目前只有记忆组织层成立，读出层仍是明文。**
-论文里若声称 latent memory，必须有 §7 路径 B 的实现与消融；否则只能主张
-"结构化双流记忆 + 无损证据路由"。
+因此：**"双模态潜槽位记忆"的读出层现在有了实现，但仍没有指标。**
+`latent` 通路的正确性有机制性单测兜底（明文进不去、软 token 位置/掩码/梯度、分块不截断、
+载荷库语义、路径预算、checkpoint 严格加载），**效果一个数字都没有**。
 
 **路径 A（delta 状态）**：`AR_DELTA_WRITE=1` 时建池前分块流式写，写后关写并 `clone` 快照，
 每题生成前 `load` 恢复。这是**唯一**真正把上下文写进模型内部状态的通道，
 但它对细粒度问答的贡献尚无证据（见 §9 风险 2）。
 
-**路径 B（纯潜槽位表征，规划中）**：槽位不再存 `texts`，而存进入第 1 层 Attention 前的
-隐向量序列（或池化 latent tokens），读出时直接拼接 `inputs_embeds`。当前**无实现**。
+**路径 B（潜槽位读出，v9.3 已实现）**：
+
+```
+槽位原文 ──冻结 Qwen──> [h0; h18] token 级 [L,d]
+                              │  LatentCompressor: m 个可学习 query 做 cross-attention
+                              ▼
+                        Z ∈ R^{m×d}（每槽 m 个软向量）──存入 LatentSlotBank（键=稳定槽位 ID）
+                              │  读出时按检索结果取载荷 → LatentBridge
+                              ▼
+                    [k·m, d] 软 token 嵌入 ──拼进 inputs_embeds（system 之后、query 之前）
+```
+
+- **为什么单独写 `encode_latent_units()`**：`_layer18_provider()` 返回的是 mean-pool 后的
+  `[N,d]`，token 轴已经没了，拿它做 token-level 压缩等于对着一句向量再注意一次。
+- **分块而非截断**：单元长于 `LATENT_MAX_UNIT_TOKENS=64` 时切成不重叠块并记父槽位 ID；
+  截断可能正好丢掉答案。
+- **载荷以 ID 为键**：`_replace` 原位覆写（下标稳定、版本 +1），`_drop`/`_evict` 会移动下标，
+  必须 `shift_index(namespace, drop_index)`，否则 `state:5` 指向另一条事实。
+- **必须先训练**：`LATENT_CKPT` 缺失时 runner 直接报错退出，**不会**拿随机投影跑对照。
+  训练见 `train_latent_memory.py`（冻结 Qwen + Adapter，只训 Compressor + Bridge）。
+- **CR 侧同一通路**：`CR_READOUT_MODE=latent` 时 CR 生成从潜载荷构造，不再拼事实块；
+  多跳路径整条保留/整条跳过（`select_latent_cr_paths`），不出现半条路径。
 
 ## 7. 关键参数
 
@@ -137,7 +159,7 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | 组装 | `AR_V9_PROMPT_DATE` / `AR_V9_PROMPT_SERIAL` | 1 / 跟随 DATE | 行前缀 `[date]` / 行前缀编号（消融用） |
 | 组装 | `AR_V9_DROPPED_ID_CAP` | 200 | 预算/裁剪记账里 `dropped_ids` 的落盘上限 |
 | 组装 | `AR_CTX_MAX_TOK` | 0 | 0 = 全上下文不截断（对外披露项） |
-| 读出 | `AR_READOUT_MODE` | `prompt` | `prompt / text_embeds / latent(未实现)` |
+| 读出 | `AR_READOUT_MODE` | `prompt` | `prompt / text_embeds / latent`（latent 需 `AR_MODE=v9` + `LATENT_CKPT`） |
 | Delta | `AR_DELTA_WRITE` / `AR_DELTA_RESTORE` / `AR_ALLOW_EMPTY_DELTA_SNAP` | 0 / 1 / 0 | 写开关 / 快照恢复 / 空快照放行 |
 | Delta | `AR_DELTA_WRITE_STRATEGY` / `AR_DELTA_WRITE_TOPK` / `AR_DELTA_WRITE_CHUNK` | `all` / 12 / 512 | 写入策略（`topk_refresh` 为词面近似） / 刷新条数 / 分块大小 |
 | 严格性 | `AR_STRICT_RETRIEVAL` | `auto` | auto：稠密/潜层/写入开启时检索异常直接抛 |
@@ -146,6 +168,15 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | CR | `V9_CR_BEAM` / `V9_CR_EGO_K` / `V9_CR_REL_THETA` / `V9_CR_HOPS` | 6 / 12 / 0.80 / 4 | 束宽、ego 上限、关系阈值、跳数 |
 | CR | `V9_CR_HOP1_M` / `V9_CR_PATH_VIEW` / `V9_CR_PATHS` | 96 / 1 / 3 | Hop1 矩阵初筛候选数 / 路径式读出 / 最多路径数 |
 | CR | `CR_DELTA_MODE` / `CR_DELTA_REFRESH_TOPK` | `off` / 6 | Delta 参与查询的方式（非法值 SystemExit） / 刷新条数 |
+| 潜层 | `LATENT_CKPT` | 空 | 压缩器+桥接器权重路径；latent 模式下缺失直接报错退出 |
+| 潜层 | `LATENT_M` / `LATENT_LAYER` / `LATENT_INNER_DIM` | 4 / 18 / 512 | 每槽软 token 数 / 取哪层 hidden_states / 注意力内宽 |
+| 潜层 | `LATENT_MAX_UNIT_TOKENS` | 64 | 单元再分块宽度（**不截断**，超出切成多块并记父 ID） |
+| 潜层 | `LATENT_READ_BUDGET` / `LATENT_TOKENS_PER_SLOT` | 32 / 4 | 软 token 预算 → K ≤ budget//m 个槽位（预算>0 时至少 1） |
+| 潜层 | `LATENT_BANK_MAX` | 0 | >0 时只编码前 N 个槽位（smoke / 大池调试）；0=不限制 |
+| 潜层 | `LATENT_DTYPE` | `bf16` | 载荷**存储**精度（不决定训练精度：Compressor/Bridge 恒 fp32） |
+| 潜层 | `CR_READOUT_MODE` | `prompt` | CR 生成从潜载荷构造（`latent`）还是拼事实块（`prompt`） |
+| 潜层 | `AR_QTXT_NO_GOLD` | latent 下强制 1 | 查询模板不再注入金标（`{label}` 填空串，记 `query_label=empty(no_gold)`） |
+| 训练 | `LATENT_TRAIN_BATCH` / `LATENT_GRAD_ACCUM` / `LATENT_LR` | 1 / 16 / 1e-4 | 训练超参（**未验证**） |
 
 ## 8. 实现状态矩阵
 
@@ -176,8 +207,11 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | LongMemEval 官方 Judge（http / local 双后端） | 已实现·未判题 | `--selftest` 76 项，`--dry-run` 零网络；`--compare-backends` 验等价性 |
 | Delta 写入顺序 / 快照恢复 | 已接线·未验证 | `test_ar_delta_alignment.py` 37 断言 |
 | `inputs_embeds` 读出通路 | 已接线·未验证 | 明文嵌入，**不是**潜槽位 |
-| **槽位存潜向量（替换明文）** | **规划中** | 无实现 |
-| **潜层读出（latent readout）** | **未实现** | `AR_READOUT_MODE=latent` 直接 exit 2；槽向量从未进入模型输入 |
+| **槽位存潜向量（附加，不替换明文）** | 已实现·**未训练** | `latent_memory.LatentSlotBank`：以稳定槽位 ID 为键存 `[k,m,d]`；`test_latent_readout.py` 库语义用例 |
+| **潜层读出（latent readout，路径 B）** | 已实现·**未训练 / 未跑分** | `AR_READOUT_MODE=latent`；明文进不去（签名 + tokenizer 文本双重断言）、软 token = `bridge(Z)`、梯度到 Compressor/Bridge |
+| 长单元再分块（不截断） | 已实现 | `test_latent_readout.py`：`Σn_tokens` 守恒、span 连续、父 ID 一致 |
+| CR 多跳路径预算（整条保留/整条跳过） | 已实现 | `test_latent_readout.py`：不出现半条路径、被跳过路径的 facts 不得补位 |
+| checkpoint 进配置指纹 | 已实现 | `run_manifest.file_fingerprint()`；缺失/隐藏层不一致/未给路径三种情况均报错 |
 | EventQA 窗口方向验证（back/ahead） | 不成立（指标失效） | 金标为改写句、不在原文中，见 `experiments/eventqa_window_sweep.md` |
 | 证据级召回指标 | **缺失** | 无金标 span，`evidence_recall_at_k` 恒 None；EventQA 无法算 |
 | 可学习门控（何时写/何时读） | 规划中 | 无实现 |
@@ -186,7 +220,7 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 
 1. **稠密通道依赖冻结模型第 18 层**，层号与 `α=0.3` 都是拍定的，无消融。
 2. **Delta 状态 + rank=8 冻结适配器**对细粒度问答是否有正贡献，**无证据**；
-   若为负，架构主张须退回路径 B（而路径 B 未实现）。
+   若为负，架构主张须退回路径 B（路径 B 已实现，但**未训练未跑分**，见风险 11）。
 3. **CR 与 AR 池语义不同**（覆写 vs 追加），统一为"双模态"是设计意图，
    缺跨任务族一致性验证。
 4. **v9 没有任何指标**：全部结论来自 dry-run 与 CPU 单测；v7/v8 历史数字不得当作 v9 效果。
@@ -206,7 +240,11 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 10. **块内 serial 可能回退**：拼块是"情景行在前、状态行在后"，而每行 serial 取绝对位置，故块尾状态行的
     serial 可能小于前面的情景行，与反事实 prompt 的"编号越大越新"约定冲突。有 `[date]` 前缀时影响小，
     无日期时会让旧状态看起来最新。修它需同时改 `ar_diag` 的对齐位置约定，**本轮未修**。
-11. **CR 两处硬门控是保守选择**（t19 已量化，`experiments/results/cr_link_recall.json`）：
+11. **潜层读出的软 token 通路无效果证据**（v9.3）：压缩器/桥接器是随机初始化的，
+    没有 `LATENT_CKPT` 时 runner 直接报错退出；即便训练，也没有任何真实数据上的对照跑分。
+    另外 `answer_in_context` 在 latent 模式下是 **None**（`used_texts` 保持空）而非 `False`，
+    检索侧命中率与读出准确率必须分开报，不能拿明文匹配当"答案进了上下文"。
+12. **CR 两处硬门控是保守选择**（t19 已量化，`experiments/results/cr_link_recall.json`）：
     - 属性类别门控 `_attr_compatible`：槽级真 stale **0/260 = 0.00%**（同主语同属性下池中没有并存多值的活槽），
       pair 级属性冲突率亦 0.00% → **未超阈，不加归一**。子串粗代理 61.7% 是噪声，不可引用。
     - 2 跳 `linked()` 要求 `obj(f1) == subj(f2)` 归一化精确相等：失败率 mh_6k 0.00%（判定样本 10 条）、
@@ -223,7 +261,7 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | P3 | 路径 A 消融：`AR_DELTA_WRITE=1` vs 0 | 同切片 A/B |
 | P4 | **潜层读出**：槽位向量接读出头（A/B/C 三档） | 摆脱"明文 RAG"质疑 |
 | P4-A | 线性 probe：top-k 槽向量池化 → 与候选答案 embedding 比相似度（零生成） | 回答"槽向量里有没有答案信息"；若 <0.5 则表征层需重做，B 不必做 |
-| P4-B | soft prefix：top-k 槽向量经 MLP → 8 个软 token 前置到 `inputs_embeds` | 生成式潜层读出，输入 token 数降 1–2 个数量级且精度接近 prompt |
+| P4-B（**代码已实现，未训练未跑分**） | soft prefix：槽位 `[h0;h18]` → m 个可学习 query 交叉注意压成 `Z∈R^{m×d}` → 桥接器变软 token 拼进 `inputs_embeds` | 生成式潜层读出；退出条件未达成（需先训练 + 与 `prompt` / `text_embeds` 三臂对照） |
 | P4-C | cross-attention：问题向量当 query attend 全部槽向量 | 按需寻址；需改 attention + KV cache，最后做 |
 | P5 | 可学习写入/读出策略（替代手工阈值 0.80 / 0.92） | 与手工阈值对照 |
 

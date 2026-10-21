@@ -67,8 +67,23 @@ Accurate_Retrieval runner（v7 检索管线在"非冲突"任务族上的对照�
 #   AR_READOUT_MODE=text_embeds  用 EMB[ids] 走 inputs_embeds —— 这是【明文 token 的嵌入】，
 #                                **没有**注入槽位内部状态或压缩 latent tokens；
 #                                论文里不得当作已实现的 latent memory 方法
-#   AR_READOUT_MODE=latent       未实现（真正的潜槽位读出仍在规划中）-> 显式报错
+#   AR_READOUT_MODE=latent       真正的潜层读出（latent_memory.py）：
+#                               历史证据先压成 Z∈R^{m×d}（LatentCompressor），再经
+#                               LatentBridge 变成 soft tokens 插在 system 段之后；生成时
+#                               **只有 system/question 是正常 token**，明文证据行一行都不进
+#                               prompt（generate_latent_answer 的签名也不接受 block）。
+#                               需要 AR_MODE=v9（复用 v9 的寻址层）+ 训练好的 LATENT_CKPT；
+#                               缺 checkpoint 直接报错，绝不拿随机投影跑论文对比。
+#                               预算单位变了：LATENT_READ_BUDGET 是**软 token 数**（K×m），
+#                               不是 AR_V9_CTX_TOKEN_BUDGET 的 2500 个明文 token。
+#                               逐题记录 readout.latent_slots=True + 注入槽位数/向量数/checkpoint；
+#                               answer_in_context 在 latent 模式下不适用（没有明文进上下文），
+#                               检索侧证据命中率仍由 answer_in_retrieved / recall_at_k 单独报告。
 #   AR_INPUTS_EMBEDS=1 等价于 text_embeds（兼容旧命令）。
+#
+# 查询模板不用金标（AR_QTXT_NO_GOLD）：模板里的 {label} 若填成 gold，等于把答案塞进问题，
+# 是一条潜在评测泄漏通道。latent 模式强制关闭（模板确实需要 {label} 时填空串并记
+# query_label="empty(no_gold)"）；其它模式默认保持历史行为（=0），可显式置 1 做对照。
 #
 # 结果文件与 manifest（P0）：
 #   输出默认带配置指纹 ar_{MODE}_{SRC}_{config_id}.jsonl，并写 <out>.manifest.json。
@@ -189,7 +204,9 @@ LIMIT_ROWS  = int(os.environ.get("AR_LIMIT_ROWS", "0"))    # smoke：限制上�
 LIMIT_Q     = int(os.environ.get("AR_LIMIT_Q", "0"))       # smoke：限制每题数
 RESUME      = os.environ.get("AR_RESUME", "1") == "1"
 
-# 读出模式：prompt | text_embeds | latent（latent 未实现，显式拒绝而不是假装支持）
+# 读出模式：prompt | text_embeds | latent
+#   latent = 真正的潜层读出（latent_memory.py），需要 AR_MODE=v9 + LATENT_CKPT；
+#   校验放在 main()/dry_run() 里（配置指纹要先能算出来，才能说清缺什么）。
 READOUT_MODE = os.environ.get("AR_READOUT_MODE", "").strip().lower()
 if not READOUT_MODE:
     READOUT_MODE = "text_embeds" if INPUTS_EMBEDS else "prompt"
@@ -197,6 +214,31 @@ if READOUT_MODE not in ("prompt", "text_embeds", "latent"):
     raise SystemExit(f"[ERR] AR_READOUT_MODE={READOUT_MODE!r} 非法；"
                      f"可选 prompt | text_embeds | latent")
 INPUTS_EMBEDS = READOUT_MODE == "text_embeds"
+
+# ---- 潜层读出配置（AR_READOUT_MODE=latent；其它模式完全不触碰，旧 config_id 不变）----
+LATENT_CKPT          = os.environ.get("LATENT_CKPT", "").strip()
+LATENT_M             = int(os.environ.get("LATENT_M", "4"))            # 每单元潜槽位数 m
+LATENT_LAYER         = int(os.environ.get("LATENT_LAYER", "18"))       # 取第几层隐状态
+LATENT_INNER_DIM     = int(os.environ.get("LATENT_INNER_DIM", "512"))
+LATENT_MAX_UNIT_TOKENS = int(os.environ.get("LATENT_MAX_UNIT_TOKENS", "64"))
+# 读出预算 = **软 token 数**（K×m）。32 / m=4 -> 最多 8 个槽位。
+# 与 AR_V9_CTX_TOKEN_BUDGET（2500 个明文 token）不是同一个量，不能互相换算。
+LATENT_READ_BUDGET   = int(os.environ.get("LATENT_READ_BUDGET", "32"))
+LATENT_TOKENS_PER_SLOT = LATENT_M
+# 与 latent_memory.latent_budget_slots 同一口径：预算 > 0 时至少给 1 个槽位，
+# 否则 3 个软 token / m=4 会算出 K=0，"有预算却读出为空"。
+LATENT_SLOTS_MAX = (max(1, LATENT_READ_BUDGET // LATENT_M)
+                    if (LATENT_READ_BUDGET > 0 and LATENT_M > 0) else 0)
+LATENT_BANK_MAX      = int(os.environ.get("LATENT_BANK_MAX", "0"))     # >0 只编码前 N 槽（smoke）
+
+# 查询模板不用金标（潜在泄漏通道）：latent 模式强制开，其它模式默认保持历史行为。
+_nogold_env = os.environ.get("AR_QTXT_NO_GOLD", "").strip().lower()
+if READOUT_MODE == "latent":
+    QTXT_NO_GOLD = True
+elif _nogold_env:
+    QTXT_NO_GOLD = _nogold_env in ("1", "true", "yes", "on")
+else:
+    QTXT_NO_GOLD = False
 
 # 检索异常策略：auto = 稠密/潜层通道开启时必须报错（否则故障伪装成指标骤降）
 STRICT_RETRIEVAL = os.environ.get("AR_STRICT_RETRIEVAL", "auto").strip().lower()
@@ -260,6 +302,33 @@ def _manifest_params():
             # 时间进 Prompt 的开关也必须进指纹：DATE=0/1 是互相对照的读出实验组
             "prompt_date": V9_PROMPT_DATE, "prompt_serial": V9_PROMPT_SERIAL,
         }
+    if READOUT_MODE == "latent":
+        # 潜层读出的结果**完全由 checkpoint 决定**：路径 + 内容哈希 + 压缩结构 + 读出方式
+        # 全部进指纹。否则同一路径换了新一代 checkpoint 后 config_id 不变，续跑会把两代
+        # 模型的结果混进同一个文件。
+        try:
+            fp = (run_manifest.file_fingerprint(LATENT_CKPT, label="checkpoint")
+                  if run_manifest is not None
+                  else {"checkpoint": LATENT_CKPT, "exists": False})
+        except Exception:
+            fp = {"checkpoint": LATENT_CKPT, "exists": False}
+        p["latent"] = {
+            "readout": "latent",
+            "checkpoint": fp,
+            "n_slots": LATENT_M, "layer": LATENT_LAYER, "inner_dim": LATENT_INNER_DIM,
+            "max_unit_tokens": LATENT_MAX_UNIT_TOKENS,
+            "read_budget": LATENT_READ_BUDGET,
+            "tokens_per_slot": LATENT_TOKENS_PER_SLOT,
+            "max_slots": LATENT_SLOTS_MAX,
+            "bank_max": LATENT_BANK_MAX,
+            # 压缩率上限：最多 LATENT_MAX_UNIT_TOKENS 个 token -> m 个向量
+            "compression_ratio_max": (round(LATENT_M / LATENT_MAX_UNIT_TOKENS, 6)
+                                      if LATENT_MAX_UNIT_TOKENS > 0 else None),
+            "qtxt_no_gold": QTXT_NO_GOLD,
+        }
+    if _nogold_env:
+        # 显式设过 AR_QTXT_NO_GOLD 就必须进指纹（否则 0/1 两次跑会共用结果文件）
+        p["qtxt_no_gold"] = QTXT_NO_GOLD
     return p
 
 
@@ -289,7 +358,7 @@ def strict_retrieval_enabled():
         return True
     if STRICT_RETRIEVAL in ("0", "false", "no", "off"):
         return False
-    return bool(V9_L18 or DELTA_WRITE or INPUTS_EMBEDS)
+    return bool(V9_L18 or DELTA_WRITE or INPUTS_EMBEDS or READOUT_MODE == "latent")
 
 def family_of(src):
     if src.startswith("eventqa"):
@@ -359,6 +428,31 @@ def fmt(tpl, **kw):
         return tpl.format(time_stamp="", **kw)
     except KeyError:
         return tpl.format(**kw)
+
+
+def build_qtxt(q, a):
+    """构造查询文本，返回 (qtxt, query_label)。
+
+    QTXT_NO_GOLD=True（latent 模式强制）时**不**把金标答案塞进查询模板：模板里的
+    {label} 若被填成 gold 首字母，模型看问题就等于看答案，是一条潜在评测泄漏通道。
+    模板确实需要 {label} 时用空串填充并返回 "empty(no_gold)"（既不泄漏也不崩），
+    绝不偷偷把 gold 填回去。
+    """
+    label = None
+    if not QTXT_NO_GOLD:
+        label = (a[0] if isinstance(a, list) and a else a)
+    kw = {"question": q}
+    if label is not None:
+        kw["label"] = label
+    try:
+        return qry_tpl.format(**kw), ("gold" if label is not None else "omitted")
+    except (KeyError, IndexError):
+        if label is None:
+            try:
+                return qry_tpl.format(question=q, label=""), "empty(no_gold)"
+            except (KeyError, IndexError):
+                return str(q), "raw_question"
+        return qry_tpl.format(question=q), "omitted"
 
 
 # ----------------------------- Delta Memory 对齐 -----------------------------
@@ -1179,6 +1273,18 @@ def v9_import():
     return v9_slotpool
 
 
+latent_memory = None
+
+
+def latent_import():
+    """惰性导入 latent_memory（只有 AR_READOUT_MODE=latent 才需要 torch 侧神经网络）。"""
+    global latent_memory
+    if latent_memory is None:
+        import importlib
+        latent_memory = importlib.import_module("latent_memory")
+    return latent_memory
+
+
 V9_TOPK_STATE = int(os.environ.get("AR_V9_TOPK_STATE", "4"))      # 状态池附带单元数
 # 拼给 LLM 的**单元数**上限：默认 0 = 关闭。t6 起拼块大小由 AR_V9_CTX_TOKEN_BUDGET
 # （2500 token）决定；这个开关只保留作"按个数限流"老口径的消融（>0 时作为二级硬上限）。
@@ -1398,6 +1504,103 @@ def core_question(q):
     return m.group(1).strip() if m else q.strip()
 
 
+def select_latent_slots(epi, st, q, meta, qi, latent_token_budget=None,
+                        tokens_per_slot=None, topk_state=None):
+    """潜层读出的**槽位选择**：复用既有检索寻址，但预算单位是槽位而不是明文 token。
+
+    与 build_block_v9 的关键区别（必须分清，否则预算口径会算错）：
+      - 不装填 2500 个明文 token，而是最多 K = LATENT_READ_BUDGET // m 个槽位
+        （每个槽位贡献 m 个软 token）；
+      - 返回**命名空间化**槽位 ID（'epi:3' / 'state:0'），交给 LatentSlotBank.gather；
+      - 不返回任何明文行（dbg 只有 ID/分数/诊断），所以 latent 模式下 block 是空串。
+
+    寻址规则与明文基线保持一致：
+      - EventQA：事件锚点 + 后向非对称窗口；预算不足时**优先保留锚点**
+        （它是"已发生事件"的定位点，丢掉锚点整题就失去时序参照）；
+      - LongMemEval：复用 readout(mode="lme") 的时间约束 + 跨 Session 配额 + turn 扩展，
+        只在预算不足时按检索分数裁，**不再做全池重排**（否则配额与约束会被覆盖）；
+      - 其它：分数优先取 Top-K。
+    返回 (slot_ids, dbg)。
+    """
+    lm = latent_import()
+    budget = LATENT_READ_BUDGET if latent_token_budget is None else int(latent_token_budget)
+    tps = LATENT_TOKENS_PER_SLOT if tokens_per_slot is None else int(tokens_per_slot)
+    max_slots = lm.latent_budget_slots(budget, tps)
+    n_state = (V9_TOPK_STATE if topk_state is None else int(topk_state))
+    n_state = max(0, n_state) if (st is not None and len(st) > 0) else 0
+    dbg = {"mode": "latent_select", "budget": int(budget),
+           "tokens_per_slot": int(tps), "max_slots": int(max_slots),
+           "hits": [], "epi_ids": [], "state_ids": [], "slot_ids": [],
+           "dropped_epi_ids": [], "dropped_state_ids": [],
+           "anchor": None, "anchor_used": None, "anchor_cov": None,
+           "anchor_forced": False, "lme": None, "budget_used": 0,
+           "pool": "epi"}
+    if epi is None or len(epi) == 0 or max_slots <= 0:
+        return [], dbg
+
+    q_core = core_question(q)
+    ranked_all = [(int(i), float(s)) for i, s in epi.retrieve(q_core, top_k=len(epi))]
+    score_of = dict(ranked_all)
+    epi_budget = max(0, max_slots - n_state)
+    neg = float("-inf")
+
+    if FAMILY == "eventqa":
+        evs = parse_prev_events(meta, qi)
+        idxs, rdbg = epi.readout(q_core, top_k=min(TOP_K, max(1, max_slots)),
+                                 mode="eventqa", anchor_events=evs,
+                                 back=EQA_BACK, ahead=EQA_AHEAD)
+        anchor = rdbg.get("anchor")
+        dbg["anchor"] = anchor
+        dbg["anchor_used"] = rdbg.get("anchor_used")
+        dbg["anchor_cov"] = rdbg.get("anchor_cov")
+        window = [int(i) for i in idxs]
+        ranked = sorted(window, key=lambda i: (-score_of.get(int(i), neg), int(i)))
+        if anchor is not None and int(anchor) in ranked and ranked[0] != int(anchor):
+            ranked.remove(int(anchor))
+            ranked.insert(0, int(anchor))
+            dbg["anchor_forced"] = True
+        hits = ranked_all[:TOP_K]
+    elif FAMILY == "longmemeval":
+        idxs, rdbg = epi.readout(q_core, top_k=min(TOP_K, max(1, max_slots)), mode="lme")
+        sel = [int(i) for i in idxs]
+        # 预算不足时按检索分数裁，但保留 lme 的筛选结果集合（不回到全池重排）
+        ranked = sorted(sel, key=lambda i: (-score_of.get(i, neg), i))
+        dbg["lme"] = {"session_quota": rdbg.get("session_quota"),
+                      "temporal_constraint": rdbg.get("temporal_constraint"),
+                      "turn_window": (rdbg.get("session_quota") or {}).get("turn_window")}
+        # 诊断用命中：lme 的 picked 已是分数降序（含配额顺延后的结果），比全池 Top-K 更准
+        hits = [(int(i), float(s)) for i, s in rdbg.get("hits", [])] or ranked_all[:TOP_K]
+    else:
+        idxs, rdbg = epi.readout(q_core, top_k=min(TOP_K, max(1, max_slots)), mode="topk")
+        ranked = [int(i) for i, _s in ranked_all]
+        hits = [(int(i), float(s)) for i, s in rdbg.get("hits", [])]
+
+    kept = ranked[:epi_budget] if epi_budget > 0 else []
+    kept = sorted(kept, key=lambda i: epi.metas[i].get("start", i))
+    dbg["dropped_epi_ids"] = [int(i) for i in ranked[len(kept):]][:V9_DROPPED_ID_CAP]
+    dbg["dropped_epi_total"] = max(0, len(ranked) - len(kept))
+
+    kept_state = []
+    if n_state > 0 and len(kept) < max_slots:
+        st_hits = st.retrieve(q_core, top_k=n_state)
+        room = max_slots - len(kept)
+        kept_state = [int(i) for i, _s in st_hits][:room]
+        dbg["dropped_state_ids"] = [int(i) for i, _s in st_hits][room:][:V9_DROPPED_ID_CAP]
+        dbg["state_scores"] = [[int(i), round(float(s), 4)] for i, s in st_hits]
+
+    # 用池自己的命名空间生成槽位 ID（epi/state），不硬编码前缀：
+    # 一旦 attach 时换了 namespace，硬编码会让 gather 静默取错载荷。
+    _uid_e = getattr(epi, "slot_uid", lambda i: f"epi:{int(i)}")
+    _uid_s = getattr(st, "slot_uid", lambda i: f"state:{int(i)}")
+    slot_ids = [_uid_e(i) for i in kept] + [_uid_s(i) for i in kept_state]
+    dbg["epi_ids"] = kept
+    dbg["state_ids"] = kept_state
+    dbg["slot_ids"] = list(slot_ids)
+    dbg["hits"] = hits
+    dbg["budget_used"] = len(slot_ids) * tps
+    return slot_ids, dbg
+
+
 def build_block(pool, q, meta, qi):
     """v7 / plain 读出。返回 (context_block, debug_info, diag_ctx)。"""
     empty = {"pool": pool, "hits": [], "used_ids": [], "used_texts": []}
@@ -1448,6 +1651,75 @@ def build_block(pool, q, meta, qi):
 
 
 # ----------------------------- 主流程 -----------------------------
+def latent_dry_run():
+    """latent 模式的 dry-run 自检：不加载模型、不读 parquet、不初始化 CUDA。
+
+    检查四件事（缺一项潜层读出就跑不出有意义的结果）：
+      1) AR_MODE=v9（复用 v9 的寻址层）与预算能算出可读槽位数；
+      2) LATENT_CKPT 存在（没有训练过的压缩器/桥接器，潜层读出只是随机投影）；
+      3) 载荷库的命名空间与 gather 形状（epi / state 都从 0 开始，不加命名空间必然串味）；
+      4) 路径预算按整条保留（不是 selected[:K] 截断），且不同 m 的 config_id 不同。
+    """
+    try:
+        lm = latent_import()
+    except Exception as e:                     # torch / 依赖缺失也要给出可读错误
+        print(f"[dry-run][ERR] latent_memory 不可导入：{e}")
+        return 2
+    print(f"[dry-run] latent: {lm.describe()}")
+    if MODE != "v9":
+        print(f"[dry-run][ERR] AR_READOUT_MODE=latent 需要 AR_MODE=v9（复用 v9 寻址层），"
+              f"当前 AR_MODE={MODE}")
+        return 2
+    if LATENT_SLOTS_MAX <= 0:
+        print(f"[dry-run][ERR] 预算算不出可读槽位数："
+              f"LATENT_READ_BUDGET={LATENT_READ_BUDGET} / LATENT_M={LATENT_M}")
+        return 2
+    if not LATENT_CKPT:
+        print("[dry-run][ERR] 未设置 LATENT_CKPT（train_latent_memory.py 的产物）："
+              "未训练的压缩器/桥接器在维度上合法，但冻结 Qwen 没有理由读懂它")
+        return 2
+    if not os.path.isfile(LATENT_CKPT):
+        print(f"[dry-run][ERR] LATENT_CKPT 不存在：{LATENT_CKPT}")
+        return 2
+    if run_manifest is not None:
+        print(f"[dry-run] latent checkpoint: "
+              f"{run_manifest.file_fingerprint(LATENT_CKPT, label='checkpoint')}")
+    print(f"[dry-run] latent budget: {LATENT_READ_BUDGET} soft tokens / m={LATENT_M} "
+          f"-> K<={LATENT_SLOTS_MAX} slots（state 池附加最多 {V9_TOPK_STATE}）")
+    if torch is None:
+        print(f"[dry-run][warn] torch 不可用（{_TORCH_ERR}），跳过载荷/路径预算自检")
+        return 0
+    # 自检 1：命名空间 + gather 形状（epi:0 与 state:0 必须互不覆盖）
+    bank = lm.LatentSlotBank(n_slots=LATENT_M, dim=8, dtype=torch.float32)
+    bank.append("epi:0", torch.zeros(LATENT_M, 8))
+    bank.append("state:0", torch.ones(LATENT_M, 8))
+    z = bank.gather(["epi:0", "state:0"])
+    print(f"[dry-run] latent bank: ids={bank.slot_ids()} gather={tuple(z.shape)} "
+          f"epi0_is_zero={bool(float(z[0].abs().sum()) == 0.0)} "
+          f"state0_is_one={bool(float(z[1].abs().sum()) == float(LATENT_M * 8))}")
+    # 自检 2：路径预算整条保留（不 selected[:K] 截断）
+    kept, info = lm.select_latent_cr_paths(
+        [0, 1, 2, 3],
+        [{"path_len": 2, "facts": [0, 2]}, {"path_len": 2, "facts": [1, 3]}],
+        LATENT_READ_BUDGET, LATENT_M)
+    print(f"[dry-run] latent path budget: kept={kept} "
+          f"paths_kept={info['n_paths_kept']} skipped={len(info['n_paths_skipped'])} "
+          f"overflow={info['overflow']}")
+    # 自检 3：指纹隔离（不同 m 必须不同 config_id，否则两组消融共用一个结果文件）
+    if run_manifest is not None:
+        base = _manifest_params()
+        ids = set()
+        for m in (LATENT_M, LATENT_M + 1):
+            p = dict(base)
+            p["latent"] = dict(base["latent"], n_slots=m)
+            cid = run_manifest.config_id(p, kind="ar", src=SRC)
+            ids.add(cid)
+            print(f"[dry-run] config_id(latent m={m}) = {cid}")
+        print(f"[dry-run] 指纹隔离: "
+              f"{'ok' if len(ids) == 2 else 'FAIL（不同 m 撞了同一个 id）'}")
+    return 0
+
+
 def dry_run():
     """只检查配置与可导入性：不加载模型、不读 parquet、不初始化 CUDA。
 
@@ -1471,7 +1743,9 @@ def dry_run():
           f"{'' if _MANIFEST_ERR is None else f' ({_MANIFEST_ERR})'}")
     print(f"[dry-run] CHUNK={CHUNK} TOP_K={TOP_K} RERANK_M={RERANK_M} EQA_WIN={EQA_WIN} "
           f"CTX_MAX_TOK={CTX_MAX_TOK}")
-    print(f"[dry-run] readout: mode={READOUT_MODE} latent_slots=False "
+    print(f"[dry-run] readout: mode={READOUT_MODE} "
+          f"latent_slots={READOUT_MODE == 'latent'} "
+          f"qtxt_no_gold={int(QTXT_NO_GOLD)} "
           f"(text_embeds = EMB[ids] 明文 token 嵌入，不是槽位潜向量)")
     print(f"[dry-run] strict_retrieval={int(strict_retrieval_enabled())} "
           f"(raw={STRICT_RETRIEVAL})")
@@ -1480,8 +1754,9 @@ def dry_run():
           f"state_api={'ok' if get_delta_mem_online_state is not None else 'fallback'}"
           f"{'' if _STATE_API_ERR is None else f'({_STATE_API_ERR})'}")
     if READOUT_MODE == "latent":
-        print("[dry-run][ERR] AR_READOUT_MODE=latent 未实现（真正的潜槽位读出仍是规划中）")
-        return 2
+        rc = latent_dry_run()
+        if rc != 0:
+            return rc
     if MODE == "v9":
         print(f"[dry-run] v9: EQA_BACK={EQA_BACK} EQA_AHEAD={EQA_AHEAD} "
               f"CTX_UNITS={V9_CTX_UNITS or 'off'} "
@@ -1599,16 +1874,32 @@ def main():
                          f"（ruler_* 需 choice 指标）")
     MAX_NEW_TOKENS = MAX_NEW[FAMILY]
     if READOUT_MODE == "latent":
-        raise SystemExit(
-            "[ERR] AR_READOUT_MODE=latent 未实现：当前槽位存的是明文 + 可选第 18 层向量，"
-            "真正的 latent slot readout（ARCHITECTURE.md 路径 B）仍是规划中。"
-            "请用 prompt 或 text_embeds；不要用未实现的能力跑论文对比。")
+        # 潜层读出复用 v9 的寻址层（非重叠单元 / IDF-MaxSim / 时间约束 / EventQA 窗口）。
+        if MODE != "v9":
+            raise RuntimeError(
+                f"[ERR] AR_READOUT_MODE=latent 需要 AR_MODE=v9（潜层读出复用 v9 的寻址层），"
+                f"当前 AR_MODE={MODE}")
+        if LATENT_SLOTS_MAX <= 0:
+            raise SystemExit(
+                f"[ERR] 潜层预算算不出可读槽位数：LATENT_READ_BUDGET={LATENT_READ_BUDGET} / "
+                f"LATENT_M={LATENT_M}（两者都必须 > 0）")
+        if not LATENT_CKPT:
+            raise SystemExit(
+                "[ERR] AR_READOUT_MODE=latent 需要 LATENT_CKPT（train_latent_memory.py 的产物）；"
+                "未训练的压缩器/桥接器只是随机投影，跑出来的分数不能当方法效果。")
     init_manifest()
     init_templates()
     claim_gpu()     # 先占显存，再慢慢加载权重
     init_model()
     # AR 读出默认只读；写入只在 prepare_delta_memory 内显式开关。
     set_delta_mem_write_enabled(model, False)
+    latent_reader = None
+    if READOUT_MODE == "latent":
+        # checkpoint 缺失/结构不符/hidden_size 不匹配 -> 直接报错（load_latent_reader 内）。
+        latent_reader = latent_import().load_latent_reader(LATENT_CKPT, model, tok, device=DEV)
+        print(f"[latent] {latent_import().describe()}", flush=True)
+        print(f"[latent] reader={latent_reader} "
+              f"ckpt_sha256_16={(latent_reader.fingerprint or {}).get('sha256_16')}", flush=True)
     if MODE == "v9" and V9_L18:
         # 第 18 层稠密通道：建池时按单元文本前向取隐状态，查询期同层 mean-pool。
         # strict=True：provider 失败/形状不符必须报错，禁止静默退化成纯词面。
@@ -1629,6 +1920,11 @@ def main():
           f"{int(strict_retrieval_enabled())} rows={len(rows)}", flush=True)
     print(f"[manifest] {(run_manifest.describe(MANIFEST) if run_manifest else 'unavailable')} "
           f"OUT={OUT}", flush=True)
+    if READOUT_MODE == "latent":
+        print(f"[latent] budget={LATENT_READ_BUDGET} soft tokens, m={LATENT_M}, "
+              f"K<={LATENT_SLOTS_MAX} slots, layer={LATENT_LAYER}, "
+              f"max_unit_tokens={LATENT_MAX_UNIT_TOKENS}, ckpt={LATENT_CKPT}, "
+              f"qtxt_no_gold={int(QTXT_NO_GOLD)}", flush=True)
 
     done = set()
     prev_sf = []
@@ -1661,6 +1957,7 @@ def main():
 
     results = []
     t_start = time.time()
+    latent_bank = None
     for ci, row in enumerate(rows):
         ctx = str(row.get("context", ""))
         qs = list(row.get("questions") or [])
@@ -1681,6 +1978,22 @@ def main():
             pool = epi
             print(f"[ctx {ci+1}/{len(rows)}] tokens={n_tok} episodic={len(epi)} "
                   f"state={len(st)} stats={epi.stats()} ({time.time()-t_start:.0f}s)", flush=True)
+            if READOUT_MODE == "latent":
+                # 编码每个槽位的**原始内容**一次（读出只用载荷）：编码期模型冻结、Delta 写入关闭。
+                latent_bank, lb = latent_import().build_latent_bank(
+                    epi=epi, state_pool=st, encoder=latent_reader.encoder,
+                    max_slots=LATENT_BANK_MAX)
+                # 挂钩子（encode_existing=False：刚建的载荷已在库里，不重复编码）。
+                # 之后任何 _store/_replace/_drop 都会同步潜载荷，不必改检索算法。
+                epi.attach_latent_bank(latent_bank, "epi", latent_reader.encoder,
+                                       encode_existing=False)
+                st.attach_latent_bank(latent_bank, "state", latent_reader.encoder,
+                                      encode_existing=False)
+                _per = {k: v.get("n_slots") for k, v in (lb.get("per_pool") or {}).items()}
+                print(f"[latent] bank slots={len(latent_bank)} "
+                      f"soft_vectors={lb['n_soft_tokens']} tokens_in={lb['n_tokens_in']} "
+                      f"ratio={lb.get('compression_ratio')} per_pool={_per} "
+                      f"skipped={lb['n_skipped']} ({time.time()-t_start:.0f}s)", flush=True)
         elif MODE == "v8":
             epi, st, n_tok = build_pool_for_context_v8(ctx)
             pool = epi
@@ -1697,13 +2010,22 @@ def main():
             if qi >= len(ans):
                 break
             a = ans[qi]
-            try:
-                qtxt = qry_tpl.format(question=q, label=(a[0] if isinstance(a, list) and a else a))
-            except KeyError:
-                qtxt = qry_tpl.format(question=q)
+            # 查询模板：latent 模式强制不用金标（{label} 填 gold 等于把答案塞进问题）
+            qtxt, qtxt_label = build_qtxt(q, a)
 
+            latent_slot_ids = []
+            latent_z = None
+            gen_meta = None
             try:
-                if MODE == "v9":
+                if READOUT_MODE == "latent":
+                    # 潜层读出：只做寻址 + 取载荷，**不构造任何明文证据行**
+                    latent_slot_ids, dbg = select_latent_slots(epi, st, q, meta, qi)
+                    block = ""
+                    diag_ctx = {"pool": epi, "hits": dbg.get("hits") or [],
+                                "used_ids": [], "used_texts": [],
+                                "state_pool": st, "used_state_ids": [],
+                                "pool_kind": "epi"}
+                elif MODE == "v9":
                     block, dbg, diag_ctx = build_block_v9(epi, st, q, meta, qi)
                 elif MODE == "v8":
                     block, dbg, diag_ctx = build_block_v8(epi, st, q, meta, qi)
@@ -1727,14 +2049,29 @@ def main():
             if DELTA_RESTORE:
                 delta_restore(snap)
 
-            # OOM 重试要按证据优先级裁剪：把逐行槽位 ID / 优先级 / 行文本交给 generate_readout，
-            # 重试明细回填到 trim["retries"]（禁止"保留最后 N token"的静默截断）。
-            trim = None
-            if dbg.get("line_ids") and diag_ctx.get("used_texts"):
-                trim = {"lines": list(diag_ctx["used_texts"]),
-                        "prio": list(dbg.get("line_prio") or []),
-                        "ids": list(dbg.get("line_ids") or [])}
-            pred, in_len, out_len = generate_readout(block, qtxt, trim=trim)
+            if READOUT_MODE == "latent":
+                if latent_bank is None:
+                    raise RuntimeError("latent_bank 未构建（AR_MODE 必须是 v9 且建池成功）")
+                latent_z = (latent_bank.gather(latent_slot_ids, device=DEV)
+                            if latent_slot_ids else None)
+                # 签名只接受 (model, tokenizer, bridge, payloads, question, system_prompt)：
+                # 没有任何参数能把明文证据块塞回生成端。
+                pred, gen_meta = latent_import().generate_latent_answer(
+                    model=model, tokenizer=tok, bridge=latent_reader.bridge,
+                    payloads=latent_z, question=qtxt, system_prompt=sys_msg,
+                    max_new_tokens=MAX_NEW_TOKENS)
+                in_len, out_len = int(gen_meta["n_in"]), int(gen_meta["n_out"])
+                trim = None
+            else:
+                # OOM 重试要按证据优先级裁剪：把逐行槽位 ID / 优先级 / 行文本交给
+                # generate_readout，重试明细回填到 trim["retries"]
+                # （禁止"保留最后 N token"的静默截断）。
+                trim = None
+                if dbg.get("line_ids") and diag_ctx.get("used_texts"):
+                    trim = {"lines": list(diag_ctx["used_texts"]),
+                            "prio": list(dbg.get("line_prio") or []),
+                            "ids": list(dbg.get("line_ids") or [])}
+                pred, in_len, out_len = generate_readout(block, qtxt, trim=trim)
 
             m, extra = post_process(
                 {"output": pred, "input_len": in_len,
@@ -1767,9 +2104,23 @@ def main():
                           "candidate_units": DELTA_STATS.get("candidate_units", 0),
                           "skip_reasons": DELTA_STATS.get("skip_reasons", {}),
                           "write_seconds": DELTA_STATS.get("write_seconds", 0.0)},
-                "readout": {"mode": READOUT_MODE, "latent_slots": False,
-                            "note": "text_embeds 只是 EMB[ids] 的明文 token 嵌入，"
-                                    "不是槽位潜向量读出"},
+                "readout": (latent_import().latent_readout_record(
+                    latent_reader, latent_slot_ids,
+                    n_vectors=int(latent_z.shape[0]) if latent_z is not None else 0,
+                    extra={"budget": LATENT_READ_BUDGET,
+                           "budget_used": dbg.get("budget_used"),
+                           "tokens_per_slot": LATENT_TOKENS_PER_SLOT,
+                           "max_slots": LATENT_SLOTS_MAX,
+                           "decode_mode": (gen_meta or {}).get("decode_mode"),
+                           "n_sys_tokens": (gen_meta or {}).get("n_sys_tokens"),
+                           "insert_at": (gen_meta or {}).get("insert_at"),
+                           "has_payload": (gen_meta or {}).get("has_payload")})
+                    if READOUT_MODE == "latent" else
+                    {"mode": READOUT_MODE, "latent_slots": False,
+                     "note": ("text_embeds 只是 EMB[ids] 的明文 token 嵌入，"
+                              "不是槽位潜向量读出" if READOUT_MODE == "text_embeds"
+                              else "prompt 模式：明文证据行直接拼进 prompt")}),
+                "query_label": qtxt_label,
                 "run_id": RUN_ID,
                 "window": ({"back": EQA_BACK, "ahead": EQA_AHEAD}
                            if FAMILY == "eventqa" else None),
@@ -1777,6 +2128,24 @@ def main():
             }
             # 逐题诊断（answer_recall@K / answer_in_retrieved / answer_in_context）：
             # hits 必须是分数降序；used_ids/used_texts 是实际拼进 prompt 的槽位。
+            if READOUT_MODE == "latent":
+                # 潜层读出的账本：注入了哪些槽位、预算用掉多少、裁掉了哪些。
+                # 与 ctx_budget/ctx_tokens 是**两套口径**（软 token vs 明文 token），不可混用。
+                rec["latent"] = {
+                    "slot_ids": list(latent_slot_ids),
+                    "n_slots": len(latent_slot_ids),
+                    "n_vectors": int(latent_z.shape[0]) if latent_z is not None else 0,
+                    "budget": LATENT_READ_BUDGET,
+                    "budget_used": dbg.get("budget_used"),
+                    "tokens_per_slot": LATENT_TOKENS_PER_SLOT,
+                    "dropped_epi_ids": dbg.get("dropped_epi_ids", []),
+                    "dropped_epi_total": dbg.get("dropped_epi_total", 0),
+                    "dropped_state_ids": dbg.get("dropped_state_ids", []),
+                    "anchor": dbg.get("anchor"),
+                    "anchor_forced": dbg.get("anchor_forced"),
+                    "checkpoint": LATENT_CKPT,
+                    "decode_mode": (gen_meta or {}).get("decode_mode"),
+                }
             if ar_diag is not None:
                 try:
                     rec.update(ar_diag.record(answer=a, query=q, flat=True, **diag_ctx))

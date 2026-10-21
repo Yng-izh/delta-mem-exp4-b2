@@ -95,6 +95,28 @@ def env_info():
     return env
 
 
+def file_fingerprint(path, label="file"):
+    """外部权重/checkpoint 的身份指纹：路径 + 字节数 + 全文 sha256 前 16 位。
+
+    为什么必须进指纹：潜层读出（AR_READOUT_MODE=latent / CR_READOUT_MODE=latent）的结果
+    完全由 checkpoint 决定。只记路径不够——同一路径被重新训练覆盖后 config_id 不变，
+    续跑会把两代模型的结果混进一个文件；只记 mtime 也不够——复制/检出会改 mtime
+    但内容相同，会让同一次实验无端换文件。因此用内容哈希
+    （压缩器 + 桥接器只有几 MB，全文哈希 <1s）。
+    """
+    if not path:
+        return {label: "", "exists": False}
+    p = str(path)
+    if not os.path.isfile(p):
+        return {label: p, "exists": False}
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return {label: p, "exists": True, "bytes": os.path.getsize(p),
+            "sha256_16": h.hexdigest()[:16]}
+
+
 # ----------------------------- 构建 / 读写 -----------------------------
 def build(kind, src, params, extra=None, now=None, cwd=None):
     """构建 manifest。`params` 必须包含所有影响结果的配置（否则指纹会撞）。"""

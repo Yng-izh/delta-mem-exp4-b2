@@ -126,7 +126,19 @@ class CRStatePool(v9.StatePool):
 
     与 v7 的差异：Hop1 Beam=6 并做 ego-graph 扩展；Hop2+ 用 Score_chain 联合打分；
     输出按 serial（事实原文序号）升序，保证 Prompt 的"编号越大越新"成立。
+
+    潜层载荷（CR_READOUT_MODE=latent）：继承 StatePool 的载荷同步钩子，命名空间为 'cr'。
+      - 写入新事实 -> bank.append('cr:<i>')；命中双阈值原位覆写 -> bank.overwrite（版本 +1）；
+        淘汰（_evict/_drop）-> bank.drop('cr:<j>') + shift_index 重编号。
+      - 这正是"Hard Latent Overwrite"：Alice works at Microsoft -> Z(Microsoft)，
+        再写 Alice works at Raytheon -> 同一槽 id 的载荷被 Z(Raytheon) 覆盖，
+        查询 "Where does Alice work?" 时直接注入 Z(Raytheon)。
+      - 门控残差融合（(1-G)Z_old + G·Z_new）第一阶段**不做**：未训练的融合门没有意义，
+        还可能把旧事实串扰进来。顺序是 Hard Overwrite -> Append-Only 对照 ->
+        固定线性融合对照 -> 有效之后再考虑训练 Gated Update。
     """
+
+    latent_namespace = "cr"
 
     def __init__(self, theta=None, beam=None, ego_k=None, subj_gate=None,
                  bridge_th=None, hops=None, pool_max=None):
@@ -418,8 +430,16 @@ class CRStatePool(v9.StatePool):
             "edge_scores": [round(x, 4) for x in self._edge_rel_scores(facts, E_qrels)],
         }
 
-    def retrieve_multihop_context(self, query_text, hops=None, beam=None):
-        """多跳读出，返回可直接拼进 prompt 的证据块；dbg 写入 self.last_dbg。
+    def retrieve_multihop_ids(self, query_text, hops=None, beam=None):
+        """多跳**寻址**：返回 (slot_ids, paths, dbg)，不构造任何明文证据块。
+
+        为什么要拆开：潜层读出（CR_READOUT_MODE=latent）只需要槽位 ID 与路径结构。
+        寻址与渲染分离后，latent 模式连中间明文块都不必构造，也就不存在
+        "顺手把明文拼进 prompt" 的口子。明文基线继续用 retrieve_multihop_context()
+        （= 本方法 + render_context）。
+
+        paths 与 selected 是按预算保留**完整路径**的输入：多跳链的第二跳往往排在后面，
+        简单 selected[:K] 截断会只留第一跳、删掉回答需要的第二跳。
 
         链检索分三条**互不混排**的分支：
           - path_len=2（主分支）：(fact1, fact2) 二元双跳链，chain_score 打分；
@@ -434,8 +454,11 @@ class CRStatePool(v9.StatePool):
         """
         n = len(self)
         self.last_dbg = {"n_pool": n}
+        # 寻址阶段没有渲染，先清掉上一次的渲染明细：否则 latent 模式下若有人误调
+        # diag_ctx()，会拿到上一题的 paths_rendered（跨题串味）。
+        self._rendered_paths = []
         if n == 0:
-            return ""
+            return [], [], dict(self.last_dbg)
         E_q, _kq, _ = _enc(query_text)
         q_rels = self._query_rels(query_text)
         E_qrels = [_enc(r)[0] for r in q_rels] or [_enc(query_text)[0]]
@@ -507,13 +530,6 @@ class CRStatePool(v9.StatePool):
         cap = max(int(beam), 4)
         paths = paths2[:cap] + paths3[:cap]
         order = sorted(selected, key=lambda i: self.metas[i].get("serial", i))
-        rendered, self._rendered_paths = [], []
-        if CR_PATH_VIEW and paths:
-            block = self._render_paths(paths, order)
-            rendered = self._rendered_paths
-        else:
-            block = "\n".join(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}"
-                              for i in order)
         self.last_dbg.update({
             "hop1": [[round(s, 4), i] for s, i in h1[:beam]],
             "seeds": seeds,
@@ -527,13 +543,38 @@ class CRStatePool(v9.StatePool):
                       [{"path_len": 3, "score": sc, "facts": [a, b, c]}
                        for sc, a, b, c in chains3],
             "paths": paths,                 # 候选路径（2 跳在前、3 跳在后），带 path_len
-            "paths_rendered": rendered,
             "n_paths_by_len": {2: len(paths2), 3: len(paths3)},
-            "path_view": bool(CR_PATH_VIEW and paths),
             "selected": order,
             "n_selected": len(order),
             "beam": beam,
             "n_overwrites": self.n_overwrites,
+        })
+        return order, paths, dict(self.last_dbg)
+
+    def render_context(self, slot_ids=None, paths=None):
+        """明文基线渲染：仅供 prompt 模式使用（latent 模式不要调用它）。
+
+        slot_ids 缺省取 self.last_dbg["selected"]，paths 缺省取 self.last_dbg["paths"]。
+        渲染明细写进 self._rendered_paths（ar_diag 的 used_alignment 依赖事实行与槽位一一对应）。
+        """
+        ids = list(slot_ids if slot_ids is not None
+                   else ((self.last_dbg or {}).get("selected") or []))
+        ps = list(paths if paths is not None else ((self.last_dbg or {}).get("paths") or []))
+        self._rendered_paths = []
+        if not ids:
+            return ""
+        if CR_PATH_VIEW and ps:
+            return self._render_paths(ps, ids)
+        return "\n".join(f"{self.metas[i].get('serial', i + 1)}. {self.texts[i]}"
+                         for i in ids)
+
+    def retrieve_multihop_context(self, query_text, hops=None, beam=None):
+        """明文多跳读出（基线）：寻址 + 渲染。dbg 写入 self.last_dbg（含渲染明细）。"""
+        ids, paths, _dbg = self.retrieve_multihop_ids(query_text, hops=hops, beam=beam)
+        block = self.render_context(ids, paths)
+        self.last_dbg.update({
+            "paths_rendered": list(getattr(self, "_rendered_paths", None) or []),
+            "path_view": bool(CR_PATH_VIEW and paths),
         })
         return block
 

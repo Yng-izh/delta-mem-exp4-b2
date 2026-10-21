@@ -50,6 +50,15 @@
 #         串行号（早期实现按 offset 盲切，StatePool 传自己的槽 id 会静默取到别人的向量）；
 #       - 只有调用方明确给 position 语义（未给 texts）时才退化为按 offset 切片，并告警一次；
 #       - 没给 precomputed 时退回"按需前向"的旧行为，并在首次真正前向时告警一次。
+#   (6) 潜载荷关联（P1，latent_memory.py）：本模块**不**实现神经网络，只提供两件事：
+#       - 稳定槽位 ID：slot_uid(i) -> '<namespace>:<i>'（namespace ∈ epi/state/cr），
+#         因为 AR 的 Episodic 与 State 池都用从 0 开始的局部下标，不加命名空间必然串味；
+#       - 载荷同步钩子：attach_latent_bank(bank, namespace, encoder) 之后，
+#         _store / _replace / _drop 自动 append / overwrite / drop(+shift_index) 潜载荷。
+#         原位覆写（_replace）保持槽 id 稳定；**淘汰会移动下标**，因此必须 shift_index
+#         重编号，否则 'state:5' 会静默指向另一条事实的载荷。
+#       检索算法（IDF-MaxSim / 稠密 / 时序 / 双阈值覆写）一行未改；texts/tokv/words/metas
+#       继续保留，因为检索、结构化分析与诊断都依赖它们。
 #
 # 注入约定（同 v6/v7/v8）：v9_slotpool.tok = tok ; v9_slotpool.EMB = EMB。
 # CR（FactConsolidation）主路径仍走 v7_slotpool.py；本文件 StatePool 只作为 AR 的
@@ -1019,9 +1028,118 @@ class _ScoreStore:
         self._l18_cache = None  # 池内 whitening 变换缓存：(Z, mean, W, info)；None = 需重算
         self._idf = None
         self._mean_mat = None
+        # ---- 潜层载荷关联（P1，latent_memory.LatentSlotBank）----
+        # 刻意**并行**存在：texts/tokv/words/metas 继续承担检索、结构化分析与诊断，
+        # 潜载荷只是额外挂一份，检索算法一行都不改。
+        self.latent_bank = None       # LatentSlotBank | None
+        self.latent_encoder = None    # LatentEncoder | None（同步载荷时需要）
+        self.n_latent_sync = 0        # 已同步（新增/覆写）的载荷数
+        self.n_latent_shift = 0       # 因淘汰而重编号的载荷数
 
     def __len__(self):
         return len(self.texts)
+
+    # ---- 潜层载荷关联（P1）：稳定槽位 ID + 载荷同步 ----
+    # 约定：槽位 ID = "<namespace>:<池内下标>"，namespace ∈ {epi, state, cr}。
+    # AR 的 Episodic 与 State 池都用从 0 开始的局部下标，不加命名空间必然串味。
+    latent_namespace = "epi"
+
+    def slot_uid(self, i):
+        """稳定槽位 ID：slot_uid(3) -> 'epi:3'（与 ar_diag.slot_uid 同一口径）。"""
+        return f"{self.latent_namespace}:{int(i)}"
+
+    def attach_latent_bank(self, bank, namespace=None, encoder=None,
+                           encode_existing=True):
+        """挂上潜载荷库；可选地把当前已有槽位一次性编码进去。返回编码的槽位数。
+
+        encoder 必须给：没有编码器就只能"挂个空库"，那种静默空转比直接报错更难查。
+        之后 `_store` / `_replace` / `_drop` 会自动同步载荷（见各 hook）。
+        """
+        if bank is None:
+            raise ValueError("attach_latent_bank 需要 bank")
+        if encoder is None:
+            raise ValueError("attach_latent_bank 需要 encoder（LatentEncoder）；"
+                             "否则新增/覆写后的载荷无法同步")
+        ns = str(namespace or self.latent_namespace).strip().rstrip(":")
+        if not ns:
+            raise ValueError("namespace 不能为空")
+        self.latent_bank = bank
+        self.latent_encoder = encoder
+        self.latent_namespace = ns
+        n = 0
+        if encode_existing and len(self):
+            parents = [f"{ns}:{i}" for i in range(len(self))]
+            payloads, _info = encoder.encode(list(self.texts), parent_ids=parents)
+            for sid, z in zip(parents, payloads):
+                if sid in bank:
+                    bank.overwrite(sid, z)
+                else:
+                    bank.append(sid, z)
+                n += 1
+            self.n_latent_sync += n
+        return n
+
+    def latent_payload(self, i, device=None):
+        """取第 i 个槽位的潜载荷（缺库/缺载荷都报错，不静默补零）。"""
+        if self.latent_bank is None:
+            raise RuntimeError("该池没有挂潜载荷库（先 attach_latent_bank）")
+        return self.latent_bank.payload(self.slot_uid(i), device=device)
+
+    def latent_slot_ids(self, idxs=None):
+        """下标 -> 命名空间化槽位 ID 列表。"""
+        idxs = range(len(self)) if idxs is None else idxs
+        return [self.slot_uid(i) for i in idxs]
+
+    def _latent_on_store(self, n_before):
+        """新增槽位后同步载荷（`_ScoreStore._store` 末尾调用）。"""
+        if self.latent_bank is None or self.latent_encoder is None:
+            return 0
+        idxs = list(range(int(n_before), len(self)))
+        if not idxs:
+            return 0
+        parents = [self.slot_uid(i) for i in idxs]
+        payloads, _info = self.latent_encoder.encode([self.texts[i] for i in idxs],
+                                                    parent_ids=parents)
+        for sid, z in zip(parents, payloads):
+            if sid in self.latent_bank:
+                self.latent_bank.overwrite(sid, z)
+            else:
+                self.latent_bank.append(sid, z)
+        self.n_latent_sync += len(idxs)
+        return len(idxs)
+
+    def _latent_on_replace(self, j):
+        """原位覆写后同步载荷（槽 id 不变 -> overwrite，版本号 +1）。"""
+        if self.latent_bank is None or self.latent_encoder is None:
+            return 0
+        sid = self.slot_uid(j)
+        payloads, _info = self.latent_encoder.encode([self.texts[j]], parent_ids=[sid])
+        if sid in self.latent_bank:
+            self.latent_bank.overwrite(sid, payloads[0])
+        else:
+            self.latent_bank.append(sid, payloads[0])
+        self.n_latent_sync += 1
+        return 1
+
+    def _latent_on_drop(self, j):
+        """淘汰第 j 个槽位后同步载荷：删除 ns:j，并把 ns:i (i>j) 重编号成 ns:i-1。
+
+        原位覆写保持下标稳定，但**淘汰会移动下标**。载荷以 ID 为键，不同步就会出现
+        "state:5 指向另一条事实"的静默错位。
+        """
+        if self.latent_bank is None:
+            return 0
+        sid = self.slot_uid(j)
+        if sid in self.latent_bank:
+            self.latent_bank.drop(sid)
+        moved = int(self.latent_bank.shift_index(self.latent_namespace, j))
+        self.n_latent_shift += moved
+        return moved
+
+    def latent_stats(self):
+        return {"attached": self.latent_bank is not None,
+                "namespace": self.latent_namespace,
+                "n_sync": self.n_latent_sync, "n_shifted": self.n_latent_shift}
 
     # ---- 写入 ----
     def _store(self, texts, index_texts, metas):
@@ -1083,6 +1201,8 @@ class _ScoreStore:
                     raise RuntimeError(
                         f"[v9/l18] 稠密通道与单元数不同步：l18={None if self.l18 is None else self.l18.shape[0]} "
                         f"n_before={n_before} batch={h.shape[0]}（L18_STRICT=1）")
+        # 潜载荷同步（P1）：新增槽位在检索算法之外多存一份潜向量；未挂库时是 no-op。
+        self._latent_on_store(n_before)
 
     def attach_layer18(self, hidden):
         """直接注入单元侧第 18 层隐状态 [N, d]（N 必须等于当前单元数）。
@@ -1273,6 +1393,9 @@ class _ScoreStore:
 class EpisodicIndex(_ScoreStore):
     """非重叠情景索引：单元按原文位置一一对应，检索分数优先、按 anchor 做窗口扩展
     （默认前 16 后 4；窗口方向未定，见 EQA_BACK/EQA_AHEAD 与 expand_backward 的注释）。"""
+
+    # 潜载荷命名空间（与 StatePool 的 'state' 区分：两池下标都从 0 开始）
+    latent_namespace = "epi"
 
     def add_units(self, units):
         """units: list[dict]（extract_units 的产物）。按位置全量保留，不做文本去重
@@ -1662,6 +1785,9 @@ class StatePool(_ScoreStore):
     建池复杂度：每条事实 O(同主语槽数)，不再是 O(N) 全池比较。
     """
 
+    # 潜载荷命名空间：必须与 EpisodicIndex 的 'epi' 区分（两池下标都从 0 开始）。
+    latent_namespace = "state"
+
     def __init__(self, theta=None):
         super().__init__()
         self.theta = STATE_THETA if theta is None else float(theta)
@@ -1818,6 +1944,8 @@ class StatePool(_ScoreStore):
         self._rebuild_subj_index()
         self._idf = None
         self._mean_mat = None
+        # 潜载荷同步：淘汰会移动下标 -> 删 ns:j 并把 ns:i(i>j) 重编号（不能只删不挪）。
+        self._latent_on_drop(j)
 
     def _replace(self, j, text, meta):
         """原位覆写第 j 个槽（P1：CR 覆写保持槽 id 稳定，不 drop+append）。
@@ -1874,6 +2002,8 @@ class StatePool(_ScoreStore):
             h = _call_l18([it], "units", offset=j)
             if h is not None and h.shape[0] == 1:
                 self.l18[j] = h[0]
+        # 潜载荷同步：原位覆写保持槽 id 稳定 -> overwrite（版本号 +1），不 append。
+        self._latent_on_replace(j)
 
     def _mean_only(self, index_text):
         dev = EMB.device if EMB is not None else torch.device("cpu")
@@ -1943,3 +2073,47 @@ def build_pools_for_context(ctx, block_sents=None):
     st.add_batch([(u["text"], u) for u in units
                   if (not u["is_event"]) and (not u["ts_explicit"])])
     return epi, st
+
+
+# ----------------------------- 潜载荷索引包装（P1） -----------------------------
+class LatentIndexedPool:
+    """检索索引 + 潜载荷库的只读包装：把 retrieve() 的下标换成命名空间化槽位 ID。
+
+    刻意**不**继承 `_ScoreStore`、也不改任何打分逻辑：本类只做"下标 -> 'epi:3'"的翻译
+    与载荷取用，因此 MaxSim / 时间重排 / CR 双阈值覆写的既有测试一条都不受影响。
+
+    用法：
+        wrap = LatentIndexedPool(epi, bank, namespace="epi")
+        ids, z = wrap.retrieve_payloads(query, top_k=8, device="cuda:0")
+        # ids == ['epi:3', 'epi:7', ...]；z 形状 [Σk, m, d]（k=1 时即 [K, m, d]）
+    """
+
+    def __init__(self, index, bank, namespace=None):
+        if index is None:
+            raise ValueError("LatentIndexedPool 需要 index")
+        if bank is None:
+            raise ValueError("LatentIndexedPool 需要 bank（LatentSlotBank）")
+        self.index = index
+        self.bank = bank
+        ns = namespace or getattr(index, "latent_namespace", "epi")
+        self.namespace = str(ns).strip().rstrip(":")
+        if not self.namespace:
+            raise ValueError("namespace 不能为空")
+
+    def __len__(self):
+        return len(self.index)
+
+    def slot_ids(self, idxs):
+        return [f"{self.namespace}:{int(i)}" for i in idxs]
+
+    def retrieve(self, query, top_k=12, **kw):
+        return self.index.retrieve(query, top_k=top_k, **kw)
+
+    def retrieve_payloads(self, query, top_k=12, device="cpu", **kw):
+        """检索 -> (命名空间化槽位 ID 列表, 潜载荷 [Σk, m, d])。"""
+        hits = self.index.retrieve(query, top_k=top_k, **kw)
+        ids = self.slot_ids([i for i, _s in hits])
+        return ids, self.bank.gather(ids, device=device)
+
+    def payloads_for(self, idxs, device="cpu"):
+        return self.bank.gather(self.slot_ids(idxs), device=device)

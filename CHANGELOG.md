@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## [v9.3-latent] — 2026-10-21 — 潜层读出（路径 B）代码落地：压缩器 + 桥接器 + 软 token 注入
+
+**一句话**：`AR_READOUT_MODE=latent` 从"直接 exit 2 的占位开关"变成**真正可运行的潜层读出通路** ——
+证据不再以明文进入生成端，而是先压成 `Z ∈ R^{m×d}`（m=4 个软 token/槽位），
+经桥接器投影后直接拼进 `inputs_embeds`；配套训练脚本与机制性单测。
+
+### 新增文件
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `latent_memory.py` | 1068 | 压缩器 / 桥接器 / 载荷库 / 编码器 / 读出器 / CR 路径预算 / checkpoint |
+| `train_latent_memory.py` | 642 | 冻结 Qwen + Delta-Mem adapter，只训 Compressor + Bridge（两阶段） |
+| `tests/test_latent_readout.py` | 540 | 10 组机制断言（见下"测试"） |
+
+### 核心接口
+
+- `LatentCompressor`：m 个**可学习 query** 对 token 级 `[h0; h18]` 做 cross-attention
+  → `[B, m, d]`。为什么不用现成的 `_layer18_provider()`：那个接口返回 mean-pool 后的 `[N,d]`，
+  token 轴已被压掉，拿它做 token-level 压缩等于对着一句向量再注意一次。
+- `LatentBridge`：`LayerNorm → Linear(d→512) → SiLU → Linear(512→d)`，把 `[k,m,d]` 映射成
+  k×m 个软 token 的**嵌入**（与词嵌入同空间，可直接拼 `inputs_embeds`）。
+- `LatentSlotBank`：以**稳定槽位 ID**（`epi:3` / `state:0` / `cr:12`）为键存载荷；
+  `append` 重复 ID 报错、`overwrite` 缺失 ID 报错、淘汰后 `shift_index()` 重编号。
+- `generate_latent_answer(model, tokenizer, bridge, payloads, question, system_prompt, ...)`：
+  签名里**没有任何**能塞回明文证据块的参数；返回 `decode_mode` 记录后端 `generate`
+  返回的是"新 token"还是"整条序列"（两种真实实现都存在，切错会静默错位）。
+
+### 接线
+
+- `run_ar_v7.py`：`AR_READOUT_MODE=latent` 全链路（建池 → 建载荷库 → 逐题寻址 → 取载荷 → 生成），
+  逐题记录 `readout.mode="latent"` / `latent.slot_ids` / `n_vectors` / `budget_used` /
+  `dropped_epi_ids` / `checkpoint` / `decode_mode`；新增 `latent_dry_run()`（CPU 自检）。
+- `run_group_b2_v7.py`：`CR_READOUT_MODE=prompt|latent`，latent 下 CR 生成**从潜载荷构造**，
+  不再拼接事实块；多跳路径按 `select_latent_cr_paths()` 整条保留/整条跳过。
+- `v9_slotpool.py`：`slot_uid()`、`attach_latent_bank()`、`latent_payload()` 与
+  `_store` / `_replace` / `_drop` 三处同步钩子；新增 `LatentIndexedPool`。
+- `v9_cr.py`：`retrieve_multihop_ids()`（纯寻址，**不渲染明文**）/ `render_context()`（明文基线）
+  / `retrieve_multihop_context()`（兼容包装，`last_dbg` 键全保留）。
+- `run_manifest.py`：`file_fingerprint(path, label)` → `{label, exists, bytes, sha256_16}`，
+  checkpoint 进 `config_id`（换了权重不会撞同一个结果文件）。
+
+### 三个设计决策（都写在代码注释里）
+
+1. **分块而非截断**：单元长于 `LATENT_MAX_UNIT_TOKENS=64` 时切成不重叠块并记父槽位 ID。
+   截断可能正好丢掉答案，指标下降却查不出原因。
+2. **载荷以 ID 为键**：`_replace` 是原位覆写（下标稳定，版本号 +1），但 `_drop`/`_evict`
+   会移动下标 → 必须 `shift_index(namespace, drop_index)`，否则 `state:5` 会指向另一条事实。
+3. **`detach` 分两条路**：存储路径默认 `detach=True`（不把训练图带进库）；
+   训练路径必须 `detach=False` 且 student 前向**不能**放进 `torch.no_grad()`。
+
+### 默认行为变化
+
+**没有默认行为变化**。所有新开关默认关闭（`AR_READOUT_MODE=prompt` / `CR_READOUT_MODE=prompt`），
+且指纹字段是**条件写入**：`latent` 节只在 latent 模式加、`readout` 节只在 CR 非 prompt 时加、
+`qtxt_no_gold` 只在显式设过环境变量时加 —— 既有 `config_id` 全部不变，旧结果文件与续跑校验不受影响。
+
+### 测试
+
+`tests/test_latent_readout.py` 10 组 / **82 条断言**（75 个断言点，其中签名黑名单 1 处展开为 8 条），覆盖：
+读出接口无明文（签名 + 实际送进 tokenizer 的文本）、软 token 位置/掩码/内容、
+梯度到 Compressor/Bridge 而冻结模型无梯度、长单元分块不截断（`Σn_tokens` 守恒、span 连续）、
+载荷库语义（重复/缺失/版本/淘汰重编号/命名空间隔离）、CR 路径预算（不出现半条路径）、
+`config_id` 隔离 + `file_fingerprint`、全 padding 行不产生 NaN、checkpoint 往返与三种报错。
+
+**未做的部分（如实披露）**：
+
+1. **本轮没有运行任何代码**（用户明确要求"先统一修改好代码，不允许运行"）。只做了
+   `py_compile` 静态语法检查（**受影响的 8 个文件**全过，全仓 34 个 `.py` 未逐一重跑）与
+   AST 未定义名扫描 —— 二者都不导入、不执行模块。
+   因此 `test_latent_readout.py` **从未被执行过**，首次运行可能有个别 API 细节要修。
+2. **压缩器与桥接器至今未训练一步**。`LATENT_CKPT` 缺失时两个 runner 直接报错退出，
+   不会拿随机投影跑对照 —— 随机初始化在维度上完全合法，但冻结 Qwen 没有理由读懂它，
+   指标会接近"没有记忆"，一旦被当成"方法无效"就是误判。
+3. **没有任何 latent 指标**。训练超参（`LATENT_LR=1e-4`、`LATENT_GRAD_ACCUM=16`、KL 权重、
+   `--counterfactual`）都是设计值，收敛性与收益均未验证。
+4. `answer_in_context` 在 latent 模式下是 **None**（`used_texts` 保持空），不是 `False`；
+   检索侧命中率与潜层读出准确率必须分开报，不能拿明文匹配当"答案进了上下文"。
+
 ## [v9.2-l18] — 2026-10-21 — 第 18 层稠密通道：池内 whitening（默认开）+ 复用流式中间态
 
 **一句话**：L18 稠密通道从"纯 L2 余弦"升级为"池内中心化 + 协方差白化"，并把调用方

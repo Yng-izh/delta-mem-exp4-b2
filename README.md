@@ -5,6 +5,82 @@
 > **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
+## 最新进展（v9.3-latent 轮，2026-10-21）——潜层读出（路径 B）代码落地，未训练未跑分
+
+**结论先行**：
+
+1. `AR_READOUT_MODE=latent` 从"直接 exit 2 的占位开关"变成**真正可运行的通路**：
+   槽位 → `Z∈R^{m×d}`（m=4）→ 桥接器 → k×m 个软 token 拼进 `inputs_embeds`，**生成端拿不到任何明文**。
+2. **本轮没有跑任何代码**（按"先改代码、不允许运行"的约束）：只对**受影响的 8 个文件**做了
+   `py_compile` 静态语法检查（全过）与 AST 未定义名扫描（无未定义引用）；全仓 34 个 `.py` 未逐一重跑。
+   新增的单测**从未被执行过**。
+3. **压缩器与桥接器未训练一步**。`LATENT_CKPT` 缺失时两个 runner 直接报错退出 ——
+   随机初始化在维度上完全合法，但冻结 Qwen 没有理由读懂它，指标会接近"没有记忆"。
+4. **因此没有任何 latent 指标**。下表所有"已实现"都只是通路成立，**不是**效果成立。
+
+### 1. 新增文件
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `latent_memory.py` | 1068 | 压缩器（m 个可学习 query 交叉注意）/ 桥接器 / 载荷库 / 编码器 / 读出器 / CR 路径预算 / checkpoint |
+| `train_latent_memory.py` | 642 | 冻结 Qwen + Delta-Mem adapter，只训 Compressor + Bridge；`--smoke-model` 可在纯 CPU 自检 |
+| `tests/test_latent_readout.py` | 540 | 10 组机制断言（明文进不去 / 软 token 位置 / 梯度 / 分块不截断 / 库语义 / 路径预算 / 指纹 / NaN / checkpoint） |
+
+### 2. 改动的文件
+
+| 文件 | 改动 |
+|---|---|
+| `run_ar_v7.py` | `AR_READOUT_MODE=latent` 全链路 + `latent_dry_run()` + 逐题 `latent` 账本 + `build_qtxt()`（latent 下不注入金标） |
+| `run_group_b2_v7.py` | `CR_READOUT_MODE=prompt\|latent`：latent 下 CR 生成从潜载荷构造，不再拼事实块 |
+| `v9_slotpool.py` | `slot_uid()` / `attach_latent_bank()` / `latent_payload()` + `_store`/`_replace`/`_drop` 三处同步钩子 + `LatentIndexedPool` |
+| `v9_cr.py` | `retrieve_multihop_ids()`（纯寻址，不渲染明文）/ `render_context()` / 兼容包装；`latent_namespace="cr"` |
+| `run_manifest.py` | `file_fingerprint()`：checkpoint 的路径+字节数+sha256 前 16 位进 `config_id` |
+
+### 3. 新增开关（全部默认关闭，无默认行为变化）
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `AR_READOUT_MODE` | `prompt` | 加 `latent` 后生效（需 `AR_MODE=v9`） |
+| `CR_READOUT_MODE` | `prompt` | CR 生成从潜载荷构造（需 `CR_MODE=v9`） |
+| `LATENT_CKPT` | 空 | 压缩器+桥接器权重；latent 模式下缺失**直接报错退出** |
+| `LATENT_M` / `LATENT_LAYER` / `LATENT_INNER_DIM` | 4 / 18 / 512 | 每槽软 token 数 / 取哪层 / 注意力内宽 |
+| `LATENT_MAX_UNIT_TOKENS` | 64 | 单元再分块宽度（**不截断**，超出切成多块并记父槽位 ID） |
+| `LATENT_READ_BUDGET` / `LATENT_TOKENS_PER_SLOT` | 32 / 4 | 软 token 预算 → K ≤ budget//m（预算>0 时至少 1） |
+| `LATENT_BANK_MAX` | 0 | >0 时只编码前 N 个槽位（smoke 用） |
+| `LATENT_DTYPE` | `bf16` | 载荷**存储**精度（训练精度恒 fp32） |
+| `AR_QTXT_NO_GOLD` | latent 下强制 1 | 查询模板不再注入金标 |
+
+**指纹兼容性**：新字段是**条件写入**（`latent` 节只在 latent 模式加、`readout` 节只在 CR 非 prompt 时加、
+`qtxt_no_gold` 只在显式设过环境变量时加），既有 `config_id` 全部不变，旧结果文件与续跑校验不受影响。
+
+### 4. 怎么训练（未执行）
+
+```bash
+# 0) 纯 CPU 自检：不加载 Qwen，验证数据/损失/梯度通路（本轮未运行）
+python train_latent_memory.py --dry-run --stage a --smoke-model
+
+# 1) 阶段 A：单事实 QA，让 Z 学会携带答案（CE）
+python train_latent_memory.py --stage a --base <qwen3_4b> --adapter <delta-mem adapter> \
+  --out ckpt/latent_a.pt --gpu cuda:0
+
+# 2) 阶段 B：明文 teacher → 潜层 student 的 KL 蒸馏，从阶段 A 初始化
+python train_latent_memory.py --stage b --init ckpt/latent_a.pt \
+  --base <qwen3_4b> --adapter <delta-mem adapter> --out ckpt/latent_b.pt --gpu cuda:0
+
+# 3) 三臂对照（prompt / text_embeds / latent），同检索结果、同解码参数
+AR_MODE=v9 AR_READOUT_MODE=latent LATENT_CKPT=ckpt/latent_b.pt ... python run_ar_v7.py
+```
+
+### 5. 未验证清单（引用任何 latent 数字前必读）
+
+1. **训练本身未跑过**：`LATENT_LR=1e-4`、`LATENT_GRAD_ACCUM=16`、KL 权重、`--counterfactual` 都是设计值。
+2. **单测未执行**：断言是照着实现逐条对齐的，首次运行仍可能有个别 API 细节要修。
+3. **没有任何三臂对照**：`prompt` vs `text_embeds` vs `latent` 的准确率 / 输入 token 数 / 延迟全部空缺。
+4. **`answer_in_context` 在 latent 模式下是 `None`**（`used_texts` 保持空），不是 `False`；
+   检索侧命中率与潜层读出准确率必须分开报，不能拿明文匹配当"答案进了上下文"。
+5. **P4-A（线性 probe）仍建议先做**：如果探针都读不出答案信息，B 的软 token 也读不出，
+   能省掉一次训练。见 §"下一步"。
+
 ## 最新进展（v9 收口轮，2026-10-21）——20 项审计落地 + 能力矩阵更新
 
 > 逐条核验表（每项带 `文件:行` 与测试名）：[experiments/audit_2026-10-21.md](experiments/audit_2026-10-21.md)
@@ -68,7 +144,7 @@
 | P0 | 稠密通道失败静默退化为纯词面 | `set_layer18_provider(fn, strict=True)` + `_l18_fail` | `test_layer18_strict_mode` |
 | P0 | CR 覆写可能找不到正确的旧槽 | `v9_slotpool.py:843`：主语倒排定位同主语槽，再按关系谓词双阈值判定 | `test_cr_overwrite_finds_same_subject_slot`（旧实现必失败） |
 | P0 | 不同实验配置复用同一个结果文件 | `run_manifest.py`：配置指纹进文件名 + sidecar manifest + 续跑三级校验（配置/参数/commit） | `test_run_manifest.py` 27 断言 |
-| P1 | `inputs_embeds` 读出被当成潜层读出 | `AR_READOUT_MODE=prompt\|text_embeds\|latent`，`latent` 显式报错退出；记录内写 `readout.mode` / `latent_slots=false` | `test_ar_delta_alignment.py` |
+| P1 | `inputs_embeds` 读出被当成潜层读出 | `AR_READOUT_MODE=prompt\|text_embeds\|latent`，当时 `latent` 显式报错退出（**v9.3 起已实现，见顶部**）；记录内写 `readout.mode` / `latent_slots=false` | `test_ar_delta_alignment.py` |
 | P1 | 时间戳跨 Session 继承（违反 I3） | `split_sessions` + 每 Session 重置 `last_ts` | `test_session_boundary_ts` |
 | P1 | CR 覆写是 drop+append（槽 id 漂移） | `_replace` 原位更新，CR 图键与主语索引同步 | `test_inplace_replace_keeps_graph_keys` |
 | P1 | StatePool O(N²) 建池 | 主语倒排 + 批内 pending 合并，单条事实只碰同主语槽 | `test_cr_pending_merge_and_stable_ids`、`test_subject_index_survives_eviction` |
@@ -114,16 +190,19 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 
 ### 4. 下一步：P4 潜层读出（让论文立起来的唯一一条路）
 
+> **2026-10-21 更新**：B 档**代码已实现**（`latent_memory.py` + `train_latent_memory.py`），
+> 但未训练、未跑分，见本文顶部 v9.3-latent 轮。A 档仍建议先做（几小时就能否掉 B）。
+
 现状：所有跑出来的数字都是 `AR_READOUT_MODE=prompt`——检索明文拼进 prompt，**就是普通 RAG**。
 `StatePool` 里每个槽的向量（`mean` / `tokv` / 可选 `l18`）只用于检索打分，**从未进入模型输入**。
 
-三档实现（成本递增），设计细节见 [ARCHITECTURE.md](ARCHITECTURE.md) §10：
+三档实现（成本递增），设计细节见 [ARCHITECTURE.md](ARCHITECTURE.md) §6 / §10：
 
-| 档 | 做法 | 目的 | 成本 |
-|---|---|---|---|
-| A | 线性 probe：top-k 槽向量池化后与候选答案 embedding 比相似度 | 最快回答"槽向量里有没有答案信息" | 几小时 |
-| B | soft prefix：top-k 槽向量经 MLP 投影成 8 个软 token，前置到 `inputs_embeds` | 生成式潜层读出，输入 1500 → ~8 token | 1–2 天 |
-| C | cross-attention：问题向量当 query attend 全部槽向量 | 按需寻址的记忆读取 | 需改 attention + KV cache |
+| 档 | 做法 | 目的 | 成本 | 状态 |
+|---|---|---|---|---|
+| A | 线性 probe：top-k 槽向量池化后与候选答案 embedding 比相似度 | 最快回答"槽向量里有没有答案信息" | 几小时 | 未实现 |
+| B | soft prefix：槽位 `[h0;h18]` 经 m 个可学习 query 压成 `Z∈R^{m×d}`，桥接器变软 token 拼进 `inputs_embeds` | 生成式潜层读出，输入 1500 → ~8 token | 1–2 天 | **代码已实现·未训练** |
+| C | cross-attention：问题向量当 query attend 全部槽向量 | 按需寻址的记忆读取 | 需改 attention + KV cache | 未实现 |
 
 对比口径固定为三臂：`prompt`（基线）/ `text_embeds`（明文嵌入对照）/ `latent`，同检索结果、同解码参数，
 记录准确率 + 输入 token 数 + 延迟。
@@ -192,6 +271,10 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 | `run_ar_v7.py --dry-run` | `AR_MODE=v7 / v8 / v9 / plain` 四种均退出码 0，末行 `cuda_initialized=False model_loaded=False` |
 | `eval_longmemeval_judge.py --dry-run` | 合成 3 题渲染 3 条 prompt，未发起任何网络请求 |
 | 守卫断言 | 零网络、零 `transformers/pyarrow/deltamem` 导入、无文件写入、无残留进程 |
+
+> **v9.3-latent 轮（同日稍后）新增 3 个 `.py`**：`latent_memory.py` / `train_latent_memory.py` /
+> `tests/test_latent_readout.py`，git 跟踪的 `.py` 总数变为 **34**。该轮**只对受影响的 8 个文件**
+> 做了 `py_compile` 静态检查，**没有重跑**上表的全仓编译与全部单测（约束：本轮不允许运行）。
 
 环境事实：本机 Python 3.9.6 + torch 2.8.0（CPU，`device_count=0`），`transformers` / `pyarrow` / `deltamem` **缺失**——真实跑分路径本机不可执行，dry-run 已证明不依赖它们。
 
@@ -399,6 +482,9 @@ v2 架构（clean 重编码读出）：
 ## 文件
 
 - `ARCHITECTURE.md` — **当前预期架构设计**（设计不变量、数据流、组件契约、两条潜层读出路径、参数表、实现状态矩阵、风险与演进路线）
+- `latent_memory.py` — **潜层读出核心**（`LatentCompressor` / `LatentBridge` / `LatentSlotBank` / `encode_latent_units` / `LatentEncoder` / `LatentReader` / `generate_latent_answer` / `select_latent_cr_paths` / checkpoint）
+- `train_latent_memory.py` — 潜层读出训练（冻结 Qwen + Adapter，只训 Compressor + Bridge；两阶段 CE→KL；`--dry-run --smoke-model` 可纯 CPU 自检）
+- `tests/test_latent_readout.py` — 潜层读出机制单测（明文进不去 / 软 token 位置 / 梯度 / 分块不截断 / 载荷库语义 / 路径预算 / 指纹 / checkpoint）
 - `v9_slotpool.py` — **v9 AR 检索**（非重叠单句/微块索引 + 分数优先 Top-K + EventQA 后向非对称扩展 + 时间戳参与打分/时序重排 + 第 18 层混合稠密打分；`AR_MODE=v9`）
 - `v9_cr.py` — **v9 CR 强化**（主语+关系双阈值覆写 + Beam=6 ego-graph + 双跳链联合打分 + 反事实 Prompt；`CR_MODE=v9`）
 - `ar_diag.py` — 逐题诊断（`retrieved_* / answer_in_retrieved / answer_in_context / recall_at_k`）+ Recall@K 汇总 CLI
@@ -445,12 +531,19 @@ python smoke_b2.py
 
 ```bash
 # 配置 + 依赖可导入性 + 两项纯 CPU 自检；四种 AR_MODE 都可
+# （AR_READOUT_MODE=latent 时会额外跑 latent_dry_run：载荷库/路径预算/指纹隔离自检）
 python3 run_ar_v7.py eventqa_65536 --dry-run
 AR_MODE=v9 python3 run_ar_v7.py eventqa_65536 --dry-run
 
 # CPU 单测（stub tok + 小 EMB）
 for f in test_v9_slotpool.py test_v9_cr.py test_v8_slotpool.py \
-         test_ar_v9_wiring.py test_ar_delta_alignment.py; do python3 $f; done
+         test_ar_v9_wiring.py test_ar_delta_alignment.py \
+         test_ar_delta_write_strategy.py test_cr_delta_log.py test_run_manifest.py; do python3 $f; done
+python3 tests/test_latent_readout.py     # 潜层读出机制（未执行过，见顶部披露）
+
+# 潜层读出的 dry-run（CPU 自检，不加载 Qwen）
+AR_MODE=v9 AR_READOUT_MODE=latent LATENT_CKPT=<ckpt> \
+    python3 run_ar_v7.py eventqa_65536 --dry-run
 
 # 诊断 / 判题脚本自测（零网络）
 python3 ar_diag.py --selftest
