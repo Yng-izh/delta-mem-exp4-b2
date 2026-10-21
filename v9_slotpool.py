@@ -34,6 +34,22 @@
 #       - 或直接 attach_layer18(hidden) + retrieve(..., q_hidden=...)。
 #       - hybrid = (1-alpha) * IDF-MaxSim + alpha * ((cos+1)/2)，alpha=V9_L18_ALPHA。
 #       - provider 缺失/抛错/形状不符 -> 自动退化为纯词面 IDF-MaxSim（CPU 单测路径）。
+#   (5b) 池内 whitening（v9.2，默认开）：稠密余弦在原始隐空间里被"共同方向"支配
+#       （实测池内两两余弦均值可达 0.86），排序几乎退化成常数偏移。故对池内 l18 矩阵
+#       做中心化 + 协方差白化后再算余弦：
+#         V9_L18_WHITEN=1（默认） 中心化 + 白化（C=Hc^T Hc/(N-1)+eps·I，W=V·diag(1/√λ)·V^T）
+#         V9_L18_WHITEN=0        纯 L2 归一化（旧的 v9.0/v9.1 行为，仅用于消融对照）
+#         d>=N 或 N<=1（协方差秩不足，白化会放大噪声）-> 自动退化为【只中心化】
+#         eps（V9_L18_WHITEN_EPS，默认 1e-4）同时是特征值下限，保证数值稳定
+#       query 必须过【同一个】(mean, W) 变换，否则余弦不在同一空间（dense_scores 已保证）。
+#   (5c) 复用流式前向中间态（避免二次前向）：
+#       - set_layer18_provider(fn, precomputed=[N,d], precomputed_texts=[...]) 或
+#         set_layer18_precomputed(hidden, texts=...) 可把调用方【建池/流式写入时已算好】的
+#         单元侧向量交给本模块，建索引阶段直接查表，完全不调用 fn；
+#       - 查表按**文本**匹配（texts 已给时），因此 epi 池与 state 池共享同一份矩阵也不会
+#         串行号（早期实现按 offset 盲切，StatePool 传自己的槽 id 会静默取到别人的向量）；
+#       - 只有调用方明确给 position 语义（未给 texts）时才退化为按 offset 切片，并告警一次；
+#       - 没给 precomputed 时退回"按需前向"的旧行为，并在首次真正前向时告警一次。
 #
 # 注入约定（同 v6/v7/v8）：v9_slotpool.tok = tok ; v9_slotpool.EMB = EMB。
 # CR（FactConsolidation）主路径仍走 v7_slotpool.py；本文件 StatePool 只作为 AR 的
@@ -77,6 +93,7 @@ L18_ALPHA      = float(os.environ.get("V9_L18_ALPHA", "0.3"))     # 稠密通道
 L18_LAYER      = int(os.environ.get("V9_L18_LAYER", "18"))        # 调用方应取的隐状态层号
 L18_WHITEN     = os.environ.get("V9_L18_WHITEN", "1") == "1"      # 池内 whitening（=0 等价旧的纯 L2-only）
 L18_WHITEN_EPS = float(os.environ.get("V9_L18_WHITEN_EPS", "1e-4"))  # 白化正则项（特征值下限）
+L18_REUSE_EPI  = os.environ.get("V9_L18_REUSE_EPI", "1") == "1"   # 状态池复用 epi 已算好的向量（免二次前向）
 STATE_THETA    = float(os.environ.get("V9_STATE_THETA", "0.92"))  # 状态池语义合并阈值
 SPLIT_ON_NEWLINE = os.environ.get("V9_SPLIT_ON_NEWLINE", "1") == "1"  # 换行也切句（聊天多轮）
 SESSION_RESET  = os.environ.get("V9_SESSION_RESET", "1") == "1"   # Session 边界不继承时间戳
@@ -709,6 +726,8 @@ def encode_words(words):
 L18_PROVIDER = None     # fn(texts: list[str], kind: "units"|"query") -> [N, d] | None
 L18_STRICT = False      # True：provider 缺失/抛错/形状不符 -> 直接报错，禁止静默退化
 L18_PRECOMPUTED = None  # [N, d]：调用方在【流式写入时】缓存好的单元侧隐状态（避免二次前向）
+L18_PRECOMPUTED_TEXTS = None   # list[str] | None：与上面行一一对应的打分文本（用于按文本查表）
+_L18_TEXT_INDEX = None  # dict[text -> row]：由 TEXTS 惰性建好的反查表
 _L18_WARNED = False     # 一次性告警标记（"没给预计算矩阵，正在二次前向"）
 
 
@@ -726,7 +745,7 @@ def _warn_l18_once(msg):
     print(f"[v9/l18] WARN: {msg}", flush=True)
 
 
-def set_layer18_provider(fn, strict=None, precomputed=None):
+def set_layer18_provider(fn, strict=None, precomputed=None, precomputed_texts=None):
     """注入第 18 层隐状态提供者；fn=None 关闭稠密通道。
 
     fn 契约：
@@ -744,13 +763,50 @@ def set_layer18_provider(fn, strict=None, precomputed=None):
       - 没给 precomputed 时退回"按需前向"的旧行为，并在首次真正前向时打印一次告警，
         提示调用方应缓存流式写入的 hidden_states[V9_L18_LAYER]；
       - 也支持事后单独注入：set_layer18_precomputed(hidden) / clear_layer18_precomputed()。
+
+    precomputed_texts（强烈建议给）：
+      - 与 precomputed 行一一对应的打分文本（通常就是 epi.index_texts）。
+        给了它就按**文本**查表，因此 epi 池 / state 池 / 任意顺序的重复文本都能命中，
+        不会因为行号语义不同而静默取到别的向量；
+      - 不给则退回"按 offset 盲切"的位置语义（仅当调用方保证 offset 就是矩阵行号时正确），
+        并在首次命中时告警一次。
     """
-    global L18_PROVIDER, L18_STRICT, L18_PRECOMPUTED, _L18_WARNED
+    global L18_PROVIDER, L18_STRICT, L18_PRECOMPUTED, L18_PRECOMPUTED_TEXTS
+    global _L18_TEXT_INDEX, _L18_WARNED
     L18_PROVIDER = fn
-    L18_PRECOMPUTED = None if precomputed is None else _as_l18_matrix(precomputed)
-    _L18_WARNED = False
+    _set_precomputed(precomputed, precomputed_texts)
     if strict is not None:
         L18_STRICT = bool(strict)
+
+
+def _set_precomputed(hidden, texts=None):
+    """内部：写入预计算矩阵（+ 可选文本索引），并清掉一次性告警。"""
+    global L18_PRECOMPUTED, L18_PRECOMPUTED_TEXTS, _L18_TEXT_INDEX, _L18_WARNED
+    L18_PRECOMPUTED = None if hidden is None else _as_l18_matrix(hidden)
+    if texts is None or L18_PRECOMPUTED is None:
+        L18_PRECOMPUTED_TEXTS = None
+    else:
+        texts = [str(t) for t in texts]
+        if len(texts) != int(L18_PRECOMPUTED.shape[0]):
+            raise ValueError(f"precomputed_texts 条数 {len(texts)} != 矩阵行数 "
+                             f"{int(L18_PRECOMPUTED.shape[0])}（按文本查表需要一一对应）")
+        L18_PRECOMPUTED_TEXTS = texts
+    _L18_TEXT_INDEX = None
+    _L18_WARNED = False
+
+
+def _l18_text_index():
+    """惰性构建 text -> row 反查表（同文本重复出现时取最早一行）。"""
+    global _L18_TEXT_INDEX
+    if L18_PRECOMPUTED_TEXTS is None:
+        return None
+    if _L18_TEXT_INDEX is None:
+        idx = {}
+        for row, t in enumerate(L18_PRECOMPUTED_TEXTS):
+            if t not in idx:
+                idx[t] = row
+        _L18_TEXT_INDEX = idx
+    return _L18_TEXT_INDEX
 
 
 def _as_l18_matrix(hidden):
@@ -763,15 +819,15 @@ def _as_l18_matrix(hidden):
     return h.to("cpu")
 
 
-def set_layer18_precomputed(hidden):
-    """注入调用方缓存的单元侧隐状态矩阵（[N, d]，顺序与池内单元一致）。
+def set_layer18_precomputed(hidden, texts=None):
+    """注入调用方缓存的单元侧隐状态矩阵（[N, d]）。
 
-    典型用法（run_ar_v7.py 流式写入）：每写完一批单元就 `epi.attach_layer18(批向量)`，
-    或在 set_layer18_provider(..., precomputed=全部向量) 里一次给全 —— 两条路都避免二次前向。
+    texts 给定时按**文本**查表（推荐：epi/state 两池共享同一份矩阵也不会串行号）；
+    不给则按 offset 位置语义使用。典型用法（run_ar_v7.py 流式写入）：
+        v9.set_layer18_precomputed(vecs, texts=epi.index_texts)   # 建完 epi 池后
+    这样后续 state 池里文本相同的槽位直接查表，不再二次前向。
     """
-    global L18_PRECOMPUTED, _L18_WARNED
-    L18_PRECOMPUTED = None if hidden is None else _as_l18_matrix(hidden)
-    _L18_WARNED = False
+    _set_precomputed(hidden, texts)
 
 
 def clear_layer18_precomputed():
@@ -779,11 +835,14 @@ def clear_layer18_precomputed():
 
 
 # ----------------------------- 池内 whitening -----------------------------
-# ⚠️ 状态（2026-10-21）：**未接线、未测试**。l18_whiten_fit / l18_whiten_apply 与
-#    L18_WHITEN 开关已写好，但 dense_scores 目前**不调用**它们，故本段是惰性代码，
-#    行为与旧实现完全一致（纯 L2 归一化）。接入 dense_scores + 补单测属 t10 剩余工作；
-#    在接线并测出对照之前，文档/论文不得声称"已实现池内 whitening"。
-#    另：AR_V9_L18 默认 0，稠密通道本身也默认关闭。
+# 状态（2026-10-21，t10）：**已接线、已测试**。拟合后 dense_scores 用同一变换同时作用于
+#    池内向量与 query（两处 l18_whiten_apply 调用点），池内相似度不再被共同方向分量主导。
+#    口径变更：V9_L18_WHITEN=1 为默认；=0 与旧 L2-only **逐位一致**（有 torch.equal 回归断言）。
+#    与 AR_V9_L18=1 的**历史跑分不可横比**，横比前必须显式设 V9_L18_WHITEN=0。
+#    退化规则：N<=1 / d>=N（秩不足）/ eigh 失败 / 特征值非有限 -> center_only，并在 info.note 记录。
+#    仍未验证：白化对真实指标（EventQA/LongMemEval）的影响只有合成池数值证据
+#    （N=60,d=16：池内余弦 mean .8636/max .978 -> mean -.0166/max .7168），不得写成收益结论。
+#    另：AR_V9_L18 默认 0，稠密通道本身默认关闭。
 def l18_whiten_fit(hidden, eps=None):
     """拟合池内 whitening 变换：返回 (mean [d] | None, W [d,d] | None, info dict)。
 
@@ -793,6 +852,11 @@ def l18_whiten_fit(hidden, eps=None):
         (mean, None, mode="center_only")；
       - 否则 中心化 + 协方差白化：C = Hc^T Hc/(N-1) + eps·I，W = V·diag(1/sqrt(max(λ,eps)))·V^T，
         mode="whiten"。eps 同时是特征值下限，保证数值稳定（不会 1/0）。
+
+    口径说明：池内向量在落盘前已按行 L2 归一化（_call_l18 / attach_layer18 的统一口径），
+    因此这里的中心化与白化都作用在单位球面上的向量，白化后再归一化一次。
+    这不改变"去掉共同方向 + 均衡各维方差"的目的，但数值上与对原始隐状态做 whitening 不同，
+    跨实现对比时不要混用两种口径。
     """
     H = torch.as_tensor(hidden, dtype=torch.float32)
     if H.dim() == 1:
@@ -875,7 +939,10 @@ def layer18_spec():
     return {"layer": L18_LAYER, "alpha": L18_ALPHA, "enabled": _l18_available(),
             "whiten": bool(L18_WHITEN), "whiten_eps": L18_WHITEN_EPS,
             "precomputed": L18_PRECOMPUTED is not None,
-            "precomputed_rows": 0 if L18_PRECOMPUTED is None else int(L18_PRECOMPUTED.shape[0])}
+            "precomputed_rows": 0 if L18_PRECOMPUTED is None else int(L18_PRECOMPUTED.shape[0]),
+            "precomputed_texts": L18_PRECOMPUTED_TEXTS is not None,
+            "precomputed_text_rows": 0 if L18_PRECOMPUTED_TEXTS is None
+            else len(L18_PRECOMPUTED_TEXTS)}
 
 
 def _call_l18(texts, kind, offset=None):
@@ -885,18 +952,34 @@ def _call_l18(texts, kind, offset=None):
     设备一致性由 hybrid_scores 在最后一步对齐（dense 结果 .to(lexical.device)）。
 
     offset（仅 kind="units"）：本批单元在池内的起始行号。若调用方提供了预计算矩阵
-    L18_PRECOMPUTED，直接切 [offset, offset+len(texts)) 这段，**完全不调用 provider**
-    （避免对同一批文本再跑一次前向）；切片不够长则告警一次并退回 provider。
+    L18_PRECOMPUTED，优先按**文本**查表命中（texts 已给时），命中不了再看 offset：
+      - 文本索引命中 -> 直接用（epi/state 池共享同一矩阵也不会串行号）；
+      - 无文本索引 + offset 在界内 -> 按位置切片（调用方明确承诺位置语义时才对）；
+      - 都不行 -> 告警一次并退回 provider（没有 provider 则退化为纯词面）。
+    **完全不调用 provider** 的前提是查表/切片成功，这正是"避免二次前向"的收益点。
     """
     if not texts:
         return None
-    if kind == "units" and L18_PRECOMPUTED is not None and offset is not None:
-        lo = int(offset)
-        hi = lo + len(texts)
-        if hi <= L18_PRECOMPUTED.shape[0]:
-            return F.normalize(L18_PRECOMPUTED[lo:hi], dim=-1).to("cpu")
-        _warn_l18_once(f"预计算矩阵行数不足（需要 {hi} 行，只有 {L18_PRECOMPUTED.shape[0]} 行），"
-                       f"本批退回按需前向")
+    if kind == "units" and L18_PRECOMPUTED is not None:
+        idx = _l18_text_index()
+        if idx is not None:
+            rows = [idx.get(str(t)) for t in texts]
+            if all(r is not None for r in rows):
+                return F.normalize(L18_PRECOMPUTED[rows], dim=-1).to("cpu")
+            # 文本索引存在但没全命中：只用位置语义兜底（且必须显式给了 offset）
+            if offset is None:
+                _warn_l18_once(f"预计算矩阵按文本查表未命中 "
+                               f"{sum(r is None for r in rows)}/{len(rows)} 条，"
+                               f"且未给 offset，本批退回按需前向")
+        elif offset is not None:
+            lo = int(offset)
+            hi = lo + len(texts)
+            if hi <= L18_PRECOMPUTED.shape[0]:
+                _warn_l18_once("预计算矩阵未提供 precomputed_texts，正在按 offset 位置切片；"
+                               "若调用方是多池共享同一矩阵，请补 precomputed_texts 以免串行号")
+                return F.normalize(L18_PRECOMPUTED[lo:hi], dim=-1).to("cpu")
+            _warn_l18_once(f"预计算矩阵行数不足（需要 {hi} 行，"
+                           f"只有 {L18_PRECOMPUTED.shape[0]} 行），本批退回按需前向")
     if L18_PROVIDER is None:
         return None
     if kind == "units":
@@ -1850,6 +1933,12 @@ def build_pools_for_context(ctx, block_sents=None):
     units = extract_units(ctx, block_sents=block_sents)
     epi = EpisodicIndex()
     epi.add_units(units)
+    # 复用（t10）：v9 情景索引是全覆盖的，状态单元文本必然与某些 epi 单元重叠，
+    # 因此把 epi 已经算好的第 18 层向量按**文本**登记为预计算矩阵 —— 状态池建池时
+    # 直接查表命中，不再对同一段文本二次前向；查不到的文本仍走 provider（正确性优先）。
+    # V9_L18_REUSE_EPI=0 可关闭，用于"有没有省这次前向"的消融对照。
+    if L18_REUSE_EPI and epi.l18 is not None and L18_PRECOMPUTED is None:
+        set_layer18_precomputed(epi.l18, texts=epi.index_texts)
     st = StatePool()
     st.add_batch([(u["text"], u) for u in units
                   if (not u["is_event"]) and (not u["ts_explicit"])])

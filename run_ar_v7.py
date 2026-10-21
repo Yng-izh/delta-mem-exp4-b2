@@ -248,6 +248,10 @@ def _manifest_params():
             "eqa_back": EQA_BACK, "eqa_ahead": EQA_AHEAD,
             "temporal_tau": sp.TEMPORAL_TAU, "temporal_bonus": sp.TEMPORAL_BONUS,
             "l18": V9_L18, "l18_layer": V9_L18_LAYER, "l18_alpha": sp.L18_ALPHA,
+            # 池内 whitening 会改变稠密通道的余弦口径（默认开），必须进指纹：
+            # 否则 WHITEN=0/1 两次跑会拿到同一个 config_id，续跑时把不同口径混进一个文件。
+            "l18_whiten": sp.L18_WHITEN, "l18_whiten_eps": sp.L18_WHITEN_EPS,
+            "l18_reuse_epi": sp.L18_REUSE_EPI,
             "topk_state": V9_TOPK_STATE, "ctx_units": V9_CTX_UNITS,
             # token 级证据预算（t6）：2500 是拼块大小的实际决定因素，必须进指纹
             "ctx_token_budget": V9_TOKEN_BUDGET,

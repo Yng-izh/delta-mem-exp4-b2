@@ -905,6 +905,210 @@ def test_lme_turn_window_expands_within_session():
     ok("lme window 0 fewer units", len(idxs0) < len(idxs))
 
 
+# ---------------- 池内 whitening（t10） ----------------
+def _offdiag_cos(Z):
+    S = Z @ Z.t()
+    m = ~torch.eye(len(Z), dtype=torch.bool)
+    return S[m]
+
+
+def test_l18_whitening_cosine_spread():
+    """whitening 前后池内余弦分布变化：共同方向被压掉、分布变分散（排序才有区分度）。"""
+    torch.manual_seed(7)
+    N, d = 60, 16
+    H = torch.randn(N, d)
+    H[:, :4] += 5.0                       # 模拟"共同方向"（真实 L18 里的各向异性）
+    saved_env = v9.L18_WHITEN
+    v9.L18_WHITEN = True                  # 不受外部 V9_L18_WHITEN 环境影响
+    Z_l2 = v9.l18_whiten_apply(H, None, None)
+    mean, W, info = v9.l18_whiten_fit(H)
+    Z_w = v9.l18_whiten_apply(H, mean, W)
+    c_l2, c_w = _offdiag_cos(Z_l2), _offdiag_cos(Z_w)
+    ok("whiten_fit 走白化分支", info["mode"] == "whiten" and W is not None)
+    ok("L2-only 池内余弦被共同方向抬高（均值>0.5）", float(c_l2.mean()) > 0.5)
+    ok("whitening 后池内余弦均值≈0（去中心化生效）", abs(float(c_w.mean())) < 0.05)
+    ok("whitening 后余弦分布更分散（std 上升）", float(c_w.std()) > float(c_l2.std()))
+    ok("whitening 后仍是单位向量", torch.allclose(Z_w.norm(dim=1),
+                                                  torch.ones(len(Z_w)), atol=1e-5))
+    ok("白化矩阵对称", torch.allclose(W, W.t(), atol=1e-6))
+    ok("whitening 确定性（同输入同输出）",
+       torch.allclose(W, v9.l18_whiten_fit(H)[1]) and
+       torch.allclose(mean, v9.l18_whiten_fit(H)[0]))
+
+    # V9_L18_WHITEN=0 -> 与旧的纯 L2 行为逐位一致（消融对照必须严格等价）
+    saved = v9.L18_WHITEN
+    try:
+        v9.L18_WHITEN = False
+        m0, W0, i0 = v9.l18_whiten_fit(H)
+        ok("V9_L18_WHITEN=0 走 l2_only 且不出变换", i0["mode"] == "l2_only"
+           and m0 is None and W0 is None)
+        ok("WHITEN=0 与旧纯 L2 逐位一致",
+           torch.equal(v9.l18_whiten_apply(H, m0, W0), Z_l2))
+    finally:
+        v9.L18_WHITEN = saved_env
+
+
+def test_l18_whiten_rank_deficient_fallback():
+    """d>N / N<=1：协方差秩不足 -> 退化为中心化-only（白化会放大噪声，不硬算）。"""
+    torch.manual_seed(11)
+    H = torch.randn(5, 16)                # d=16 > N=5
+    saved_env = v9.L18_WHITEN
+    v9.L18_WHITEN = True
+    try:
+        mean, W, info = v9.l18_whiten_fit(H)
+        ok("d>N 退化为 center_only", info["mode"] == "center_only" and W is None)
+        ok("d>N 仍给中心（mean 形状 [d]）",
+           mean is not None and tuple(mean.shape) == (16,))
+        Hc = H - mean
+        ok("center_only 确实做了中心化（列均值≈0）", float(Hc.mean(dim=0).abs().max()) < 1e-5)
+        Z = v9.l18_whiten_apply(H, mean, None)
+        ok("center_only 后仍是单位向量", torch.allclose(Z.norm(dim=1), torch.ones(5), atol=1e-5))
+    # N<=1：连协方差都估不出来，同样只中心化（N=1 时中心化后为零向量）
+        m1, W1, i1 = v9.l18_whiten_fit(torch.randn(1, 16))
+        ok("N<=1 退化为 center_only", i1["mode"] == "center_only" and W1 is None)
+    # d==N 的边界也算秩不足（n 个样本最多 n-1 维）
+        _, W2, i2 = v9.l18_whiten_fit(torch.randn(8, 8))
+        ok("d==N 边界退化为 center_only", i2["mode"] == "center_only" and W2 is None)
+    # 正常情形（N>d）不退化，且 eps 保证特征值下限 -> 条件数有限
+        _, W3, i3 = v9.l18_whiten_fit(torch.randn(40, 8))
+        ok("N>d 走白化且条件数有限", i3["mode"] == "whiten" and i3["cond"] < 1e6)
+    finally:
+        v9.L18_WHITEN = saved_env
+
+
+def test_l18_precomputed_skips_forward():
+    """给预计算矩阵后建索引不再调 provider（计数器断言：省掉二次前向）。"""
+    units = [mk_unit("zebra likes grass", 0), mk_unit("quokka eats leaves", 1)]
+    calls = []
+
+    def prov(texts, kind):
+        calls.append((kind, len(texts)))
+        return torch.eye(len(texts), 8)
+
+    v9.set_layer18_provider(prov)
+    try:
+        epi0 = v9.EpisodicIndex()
+        epi0.add_units(list(units))
+        idx_texts = list(epi0.index_texts)
+        ok("无预计算时单元侧会前向一次", [k for k, _ in calls].count("units") == 1)
+
+        vecs = torch.eye(len(idx_texts), 8)
+        calls.clear()
+        v9.set_layer18_provider(prov, precomputed=vecs, precomputed_texts=idx_texts)
+        epi1 = v9.EpisodicIndex()
+        epi1.add_units(list(units))
+        ok("给预计算矩阵后建索引不再前向", [k for k, _ in calls].count("units") == 0)
+        ok("预计算向量直接进 l18",
+           epi1.l18 is not None and epi1.l18.shape[0] == len(units))
+        epi1.retrieve("zebra", top_k=2, alpha=1.0, temporal=False)
+        ok("query 侧仍只前向一次（不可避免的那次）",
+           [k for k, _ in calls].count("query") == 1)
+        spec = v9.layer18_spec()
+        ok("spec 反映预计算文本索引",
+           spec["precomputed"] and spec["precomputed_texts"]
+           and spec["precomputed_text_rows"] == len(idx_texts))
+        # 预计算矩阵行数不足 -> 告警并退回 provider（不静默返回空）
+        calls.clear()
+        v9.set_layer18_provider(prov, precomputed=vecs[:1], precomputed_texts=idx_texts[:1])
+        epi2 = v9.EpisodicIndex()
+        epi2.add_units(list(units))
+        ok("预计算行数不足时退回 provider",
+           [k for k, _ in calls].count("units") >= 1 and epi2.l18 is not None)
+    finally:
+        v9.set_layer18_provider(None)
+
+
+def test_l18_precomputed_text_keyed_no_crosstalk():
+    """回归：预计算矩阵按**文本**查表，offset 不得串行号（state 池共享 epi 矩阵的场景）。"""
+    t0, t1 = "In 2021: alpha fact.", "In 2021: beta fact."
+    vecs = torch.tensor([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+    v9.set_layer18_provider(lambda ts, k: torch.full((len(ts), 4), 0.5),
+                            precomputed=vecs, precomputed_texts=[t0, t1])
+    try:
+        got = v9._call_l18([t1], "units", offset=0)      # offset 指向第 0 行，文本是第 1 行
+        ok("按文本查表优先于 offset（不串行号）",
+           torch.allclose(got[0], F.normalize(vecs[1], dim=0)))
+        got2 = v9._call_l18([t0, t1], "units", offset=0)
+        ok("批量查表按请求顺序返回",
+           torch.allclose(got2, F.normalize(vecs, dim=-1)))
+        # 文本不在矩阵里 -> 不能用 offset 硬切，必须退回 provider（0.5 常数向量）
+        got3 = v9._call_l18(["In 2021: gamma fact."], "units", offset=0)
+        ok("查不到文本时不静默套用别人那一行",
+           torch.allclose(got3[0], F.normalize(torch.full((4,), 0.5), dim=0)))
+        # 未给 texts 时退回位置语义（旧行为），仅按 offset 切片
+        v9.set_layer18_precomputed(vecs)
+        got4 = v9._call_l18([t1], "units", offset=1)
+        ok("未给 texts 时退回 offset 位置语义",
+           torch.allclose(got4[0], F.normalize(vecs[1], dim=0)))
+    finally:
+        v9.set_layer18_provider(None)
+
+
+def test_l18_state_pool_reuses_epi_vectors():
+    """复用：状态池与情景池文本重叠，状态池建池不再二次前向（V9_L18_REUSE_EPI 对照）。"""
+    ctx = ("Alice works at Acme. Bob likes tea. The cat sat on the mat. "
+           "Carol moved to Paris.")
+    calls = []
+
+    def prov(texts, kind):
+        calls.append((kind, len(texts)))
+        return torch.randn(len(texts), 8)
+
+    saved = v9.L18_REUSE_EPI
+    v9.set_layer18_provider(prov)
+    try:
+        v9.L18_REUSE_EPI = True
+        calls.clear()
+        epi, st = v9.build_pools_for_context(ctx)
+        ok("状态池非空（确实有可复用的重叠文本）", len(st) > 0)
+        ok("开启复用：单元侧只前向一次（epi 那一次）",
+           [k for k, _ in calls].count("units") == 1)
+        ok("状态池拿到了稠密向量", st.l18 is not None and st.l18.shape[0] == len(st))
+
+        v9.L18_REUSE_EPI = False
+        v9.clear_layer18_precomputed()
+        calls.clear()
+        epi2, st2 = v9.build_pools_for_context(ctx)
+        ok("关闭复用：状态池会额外前向（对照组）",
+           [k for k, _ in calls].count("units") >= 2)
+        ok("两种模式下状态池单元数一致", len(st2) == len(st))
+    finally:
+        v9.L18_REUSE_EPI = saved
+        v9.set_layer18_provider(None)
+
+
+def test_l18_whitening_in_dense_scores():
+    """端到端：whitening 真的作用在 dense_scores 上（query 与单元过同一变换）。"""
+    torch.manual_seed(3)
+    epi = v9.EpisodicIndex()
+    epi.add_units([mk_unit(f"filler token{i} here", i) for i in range(40)])
+    # 40 个单元 × d=8：N>d，走白化分支
+    H = torch.randn(40, 8)
+    H[:, 0] += 6.0
+    epi.attach_layer18(H)
+    q = torch.randn(8)
+    q[0] += 6.0
+    saved = v9.L18_WHITEN
+    try:
+        v9.L18_WHITEN = True
+        d_on = epi.dense_scores(query="filler", q_hidden=q)
+        Z, mean, W, info = epi.l18_transform()
+        ok("池内变换为白化", info["mode"] == "whiten")
+        ok("dense_scores 与手算白化余弦一致",
+           torch.allclose(d_on, Z @ v9.l18_whiten_apply(q, mean, W)[0], atol=1e-5))
+        v9.L18_WHITEN = False
+        epi._l18_cache = None
+        d_off = epi.dense_scores(query="filler", q_hidden=q)
+        ok("WHITEN=0 时 dense_scores 退化为纯 L2 余弦",
+           torch.allclose(d_off, v9.l18_whiten_apply(H, None, None)
+                          @ F.normalize(q, dim=0), atol=1e-5))
+        ok("开关确实改变了稠密分（默认行为变化可观测）",
+           not torch.allclose(d_on, d_off, atol=1e-3))
+    finally:
+        v9.L18_WHITEN = saved
+        epi._l18_cache = None
+
+
 if __name__ == "__main__":
     test_non_overlapping_index()
     test_ts_inheritance_v9()
@@ -942,4 +1146,10 @@ if __name__ == "__main__":
     test_split_newline_chat()
     test_hybrid_device_consistency()
     test_layer18_strict_mode()
+    test_l18_whitening_cosine_spread()
+    test_l18_whiten_rank_deficient_fallback()
+    test_l18_precomputed_skips_forward()
+    test_l18_precomputed_text_keyed_no_crosstalk()
+    test_l18_state_pool_reuses_epi_vectors()
+    test_l18_whitening_in_dense_scores()
     print("ALL V9 CPU TESTS PASSED")
