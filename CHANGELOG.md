@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## [v9-validate] — 2026-10-21 — 首次真实评测：窗口扫描中止 + 两个口径问题 + 潜层读出立项
+
+**一句话**：10 项修复全部落地并双环境验证；首次跑真实评测（EventQA_65536）暴露出
+"指标口径失效"与"服务器环境跑不起来"两个必须先解决的问题；窗口方向实验中止，潜层读出立项。
+
+### 新增文档
+
+| 文件 | 内容 |
+|---|---|
+| `experiments/eventqa_window_sweep.md` | 窗口扫描设计、指标口径失效的实测证据、四组 + 两个对照的真实数字、中止决策 |
+| `experiments/run_eventqa_window_sweep.sh` | 四组顺序扫描脚本（内置 overlay `PYTHONPATH`，每组独立结果文件 + manifest） |
+| `tools/summarize_sweep.py` | 扫描结果汇总（window/n/SF/anchor/in_ctx/AR@1/3/10/run_id） |
+| `README.md` | 新增"v9 验证轮"条目：修复清单、首次评测数字、口径/环境问题、P4 计划 |
+| `ARCHITECTURE.md` | 状态矩阵补 4 行（潜层读出未实现 / 窗口验证不成立 / 证据级召回缺失）、风险补 7–8 条、P4 拆成 A/B/C |
+| `test_v9_cr.py` | 新增 `test_subject_index_survives_eviction`：淘汰/覆写后主语索引必须指向活槽 |
+
+### 实测数字（EventQA_65536，单卡 V100，ctx0 各 100 题）
+
+| 窗口 | n=100 SF | n=144（ctx0+1） |
+|---|---|---|
+| b0_a20 | 0.810 | 0.826 |
+| b4_a16 | 0.810 | 0.819 |
+| b10_a10 | 0.800 | 0.806 |
+| b16_a4（默认） | 0.730 | 0.750 |
+
+对照：1 句窗口 0.635（n=52）、~350 句宽窗 0.783（n=23）、默认 21 句 0.810（n=100）。
+
+### 关键发现（必须披露）
+
+1. **EventQA 金标不在原文中**：`gold in context`（原文 / 归一化）均 False → 选项是生成式改写。
+   `answer_in_context` / `anchor_answer_hit` 750 条命中 0/750，**口径失效**，不是检索失败。
+2. **端到端 SF 是有效探针但粗**：1 句窗口掉 17.5pp，说明依赖检索；但 6 选 1 任务分混着生成能力。
+3. **窗口方向差异不显著**（7.6pp / 1.7σ）→ 不作为结论，默认值保留，实验中止。
+4. **服务器环境原本跑不起来**：transformers 4.51.3 缺 `smollm3`（`import deltamem` 失败）+ 缺
+   `nltk/rouge_score/editdistance/tiktoken`；用 overlay `/share/exp4group/pylib_tf57` 解决，跨版本数字不可比。
+5. **宿主机负载**：四进程并行时 load 180，每题 5s → 200s，9 小时只推进到第 2 个 context。
+
+### 未做 / 未验证
+
+- 窗口扫描未跑满 5 个 context（中止，见上）。
+- `evidence_recall_at_k` 仍无数据源（EventQA 无 span，LongMemEval 未接）。
+- **潜层读出（P4-A/B/C）未开工**：`AR_READOUT_MODE=latent` 仍直接 exit 2，所有数字都是明文 prompt 读出。
+- 第 18 层稠密通道的真实效果、Delta 写入的真实效果，仍无证据。
+
 本仓库的实验记录按版本追加。指标一律注明"由哪一版代码产出"，避免把重构前数字误当重构后结果。
 
 ## [v9-fix] — 2026-10-20 — 设备不一致 / 覆写丢槽 / 结果文件复用（P0）+ 诊断诚实化 + CR 性能与路径读出

@@ -5,7 +5,78 @@
 > **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
-## 最新进展（v9，2026-10-20）——确定性 Bug 修复 + 逐题诊断 + AR 检索重写 + CR 强化 + Delta 对齐
+## 最新进展（v9 验证轮，2026-10-21）——正确性修复落地 + 首次真实评测 + 两个口径问题
+
+**结论先行**：
+
+1. 报告里的 10 项 P0/P1/P2 问题**全部修复并推送**，单测 413 项在本机（py3.9）与服务器（py3.12）双绿。
+2. 本轮**首次跑真实评测**（EventQA_65536，单卡 V100），暴露出两个必须先解决的问题，见 §2 / §3。
+3. **窗口方向（back/ahead）扫描不构成结论**：用来衡量的指标在 EventQA 上结构性失效，且四组差异不显著。
+   该实验已中止，默认值 `back=16 / ahead=4` 保留，结论与验证方法见
+   [experiments/eventqa_window_sweep.md](experiments/eventqa_window_sweep.md)。
+4. **v9 仍然没有任何可用于论文的指标**：所有修复都是正确性 / 可复现性，不是性能提升。
+
+### 1. 修复清单（10 项）
+
+| 编号 | 问题 | 修复位置 | 证据 |
+|---|---|---|---|
+| P0 | 第 18 层混合检索 CPU/GPU 设备不一致 | `v9_slotpool.py:543/559`：dense 恒返回 CPU fp32，相加前对齐 device/dtype + 形状校验 | `test_hybrid_device_consistency` |
+| P0 | 稠密通道失败静默退化为纯词面 | `set_layer18_provider(fn, strict=True)` + `_l18_fail` | `test_layer18_strict_mode` |
+| P0 | CR 覆写可能找不到正确的旧槽 | `v9_slotpool.py:843`：主语倒排定位同主语槽，再按关系谓词双阈值判定 | `test_cr_overwrite_finds_same_subject_slot`（旧实现必失败） |
+| P0 | 不同实验配置复用同一个结果文件 | `run_manifest.py`：配置指纹进文件名 + sidecar manifest + 续跑三级校验（配置/参数/commit） | `test_run_manifest.py` 27 断言 |
+| P1 | `inputs_embeds` 读出被当成潜层读出 | `AR_READOUT_MODE=prompt\|text_embeds\|latent`，`latent` 显式报错退出；记录内写 `readout.mode` / `latent_slots=false` | `test_ar_delta_alignment.py` |
+| P1 | 时间戳跨 Session 继承（违反 I3） | `split_sessions` + 每 Session 重置 `last_ts` | `test_session_boundary_ts` |
+| P1 | CR 覆写是 drop+append（槽 id 漂移） | `_replace` 原位更新，CR 图键与主语索引同步 | `test_inplace_replace_keeps_graph_keys` |
+| P1 | StatePool O(N²) 建池 | 主语倒排 + 批内 pending 合并，单条事实只碰同主语槽 | `test_cr_pending_merge_and_stable_ids`、`test_subject_index_survives_eviction` |
+| P2 | `Recall@K` 名不副实 | 更名 `answer_recall_at_k`（旧键留别名）+ 新增 `evidence_recall_at_k`（无金标恒 None，不伪造） | `ar_diag --selftest` 57 项 |
+| P2 | Delta 快照为空仍继续实验 | 直接 `RuntimeError`，`AR_ALLOW_EMPTY_DELTA_SNAP=1` 才放行 | `test_empty_delta_snapshot_raises` |
+
+附带（用户额外要求）：CR Hop1 全池 Python MaxSim 循环 → 主语均值向量矩阵初筛（1 万槽 → 96 候选，`test_hop1_matrix_prefilter`）；
+CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` + 每条边关系分（`V9_CR_PATH_VIEW=1`，`=0` 回到平铺）。
+
+### 2. 首次真实评测：EventQA 窗口扫描（已中止，不构成结论）
+
+四组窗口总宽都是 20 句、只改方向，同 ctx 各 100 题：
+
+| 窗口 | n=100（ctx0）SF | n=144（ctx0+1 交集） | 平均块句数 |
+|---|---|---|---|
+| b0_a20（纯前视） | 0.810 | 0.826 | 21.0 |
+| b4_a16（弱后视） | 0.810 | 0.819 | 21.0 |
+| b10_a10（对称） | 0.800 | 0.806 | 20.9 |
+| b16_a4（当前默认） | 0.730 | 0.750 | 20.7 |
+
+- 差异 7.6pp（n=144 约 1.7σ）**不显著**；四组块句数几乎相同，只是窗口成分不同。
+- 探针有效性对照（部分完成，已中止）：1 句窗口 SF=0.635（n=52）、350 句宽窗 0.783（n=23）、默认 21 句 0.810（n=100）。
+  说明端到端 SF **确实依赖检索内容**（有效探针），但两头都更差 → 默认窗口合理。
+
+### 3. 两个口径 / 环境问题（必须先解决）
+
+1. **EventQA 的金标答案句不在原文里**。实测：`gold in 285,324 字符上下文`（原文与归一化后）均为 False ——
+   选项是 LLM 按原文风格**改写**的句子，`metadata` 也没有答案 span。因此 `answer_in_context` / `anchor_answer_hit`
+   在 750 条记录里命中 **0/750**，是口径失效而非检索失败。**事件级召回在这套数据上算不出来。**
+2. **服务器环境本身跑不起来**：`latent2` 的 transformers 4.51.3 缺 `models/smollm3`，而 `/share/delta-Mem`
+   无条件 import 它 → `import deltamem` 直接失败；还缺 `nltk/rouge_score/editdistance/tiktoken`。
+   用 overlay 目录 `/share/exp4group/pylib_tf57`（transformers 4.57.1）通过 `PYTHONPATH` 覆盖，不动共享 conda。
+   副作用：**跨 transformers 版本的数字不可直接比较**。
+3. **宿主机负载**：四进程并行时 load average 180（他人 CPU 作业），每题 5s → 200s，9 小时只推进到第 2 个 context。
+
+### 4. 下一步：P4 潜层读出（让论文立起来的唯一一条路）
+
+现状：所有跑出来的数字都是 `AR_READOUT_MODE=prompt`——检索明文拼进 prompt，**就是普通 RAG**。
+`StatePool` 里每个槽的向量（`mean` / `tokv` / 可选 `l18`）只用于检索打分，**从未进入模型输入**。
+
+三档实现（成本递增），设计细节见 [ARCHITECTURE.md](ARCHITECTURE.md) §10：
+
+| 档 | 做法 | 目的 | 成本 |
+|---|---|---|---|
+| A | 线性 probe：top-k 槽向量池化后与候选答案 embedding 比相似度 | 最快回答"槽向量里有没有答案信息" | 几小时 |
+| B | soft prefix：top-k 槽向量经 MLP 投影成 8 个软 token，前置到 `inputs_embeds` | 生成式潜层读出，输入 1500 → ~8 token | 1–2 天 |
+| C | cross-attention：问题向量当 query attend 全部槽向量 | 按需寻址的记忆读取 | 需改 attention + KV cache |
+
+对比口径固定为三臂：`prompt`（基线）/ `text_embeds`（明文嵌入对照）/ `latent`，同检索结果、同解码参数，
+记录准确率 + 输入 token 数 + 延迟。
+
+## 上一版进展（v9 重构轮，2026-10-20）——确定性 Bug 修复 + 逐题诊断 + AR 检索重写 + CR 强化 + Delta 对齐
 
 **结论先行**：v9 是**代码 / 可诊断性重构**。本轮按硬约束只做 dry-run（`py_compile` / CPU 单测 / `--dry-run`），
 **未跑任何真实评测、未加载模型权重、未初始化 CUDA、未占用 GPU**，因此**没有任何新指标数字**。

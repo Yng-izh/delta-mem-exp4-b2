@@ -159,6 +159,9 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | Delta 写入顺序 / 快照恢复 | 已接线·未验证 | `test_ar_delta_alignment.py` 27 断言 |
 | `inputs_embeds` 读出通路 | 已接线·未验证 | 明文嵌入，**不是**潜槽位 |
 | **槽位存潜向量（替换明文）** | **规划中** | 无实现 |
+| **潜层读出（latent readout）** | **未实现** | `AR_READOUT_MODE=latent` 直接 exit 2；槽向量从未进入模型输入 |
+| EventQA 窗口方向验证（back/ahead） | 不成立（指标失效） | 金标为改写句、不在原文中，见 `experiments/eventqa_window_sweep.md` |
+| 证据级召回指标 | **缺失** | 无金标 span，`evidence_recall_at_k` 恒 None；EventQA 无法算 |
 | 可学习门控（何时写/何时读） | 规划中 | 无实现 |
 
 ## 9. 已知风险（必须在论文中披露）
@@ -172,6 +175,11 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 5. `ruler_qa1_197K` / `ruler_qa2_421K` 需要 choice 专用指标，runner 显式拒绝，覆盖不全。
 6. `answer_recall_at_k` 是**答案字符串命中代理**（gold answer 是否出现在第 k 个槽位），
    **不是**证据级召回；本管线没有金标证据 span，`evidence_recall_at_k` 恒为 None。
+7. **EventQA 的 `answer_in_context` / `anchor_answer_hit` 口径失效**（2026-10-21 实测）：
+   金标答案句在 285K 字符原文中**不存在**（选项是生成式改写），750 条记录命中 0/750。
+   任何基于"答案是否落在证据窗口"的结论都不可用；事件级召回必须换数据或换探针。
+8. **端到端 SF 是 6 选 1 任务分**，混着生成能力与选项风格；对照测得 1 句窗口 SF=0.635、
+   350 句宽窗 0.783、21 句默认 0.810，说明它对检索内容敏感，但不能区分"检索好"与"生成蒙对"。
 
 ## 10. 演进路线
 
@@ -181,7 +189,10 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | P1（待跑分） | v9 检索在 EventQA 全切片与 LongMemEval 上对照 v7 | 四切片 + 召回归因表 |
 | P2（待跑分） | CR `CR_MODE=v9` 对照 262K 多跳 | sh/mh 不掉点，mh_262k 提升 |
 | P3 | 路径 A 消融：`AR_DELTA_WRITE=1` vs 0 | 同切片 A/B |
-| P4 | 路径 B：槽位改存潜向量 + `inputs_embeds` 读出 | 摆脱"明文 RAG"质疑 |
+| P4 | **潜层读出**：槽位向量接读出头（A/B/C 三档） | 摆脱"明文 RAG"质疑 |
+| P4-A | 线性 probe：top-k 槽向量池化 → 与候选答案 embedding 比相似度（零生成） | 回答"槽向量里有没有答案信息"；若 <0.5 则表征层需重做，B 不必做 |
+| P4-B | soft prefix：top-k 槽向量经 MLP → 8 个软 token 前置到 `inputs_embeds` | 生成式潜层读出，输入 token 数降 1–2 个数量级且精度接近 prompt |
+| P4-C | cross-attention：问题向量当 query attend 全部槽向量 | 按需寻址；需改 attention + KV cache，最后做 |
 | P5 | 可学习写入/读出策略（替代手工阈值 0.80 / 0.92） | 与手工阈值对照 |
 
 ## 11. 与旧版本的关系
