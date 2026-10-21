@@ -1,0 +1,34 @@
+# tools/demo_facts.txt — 演示用事实文本（虚构实体，与任何评测集无关）
+# 一行一条。这些句子故意写成"自然陈述句"而不是模板填空，
+# 以便验证 parse_fact_triple 在真实句式上的抽取质量。
+Alice Moreau works at Raytheon Systems.
+Bob Iversen works at Contoso Labs.
+Cara Delgado works at Initech Data.
+Dana Whitfield works at Nordvind Energy.
+Hana Sato works at Orion Robotics.
+Raytheon Systems is located in the country of the United States.
+Contoso Labs is located in the country of Norway.
+Initech Data is located in the country of Brazil.
+Nordvind Energy is located in the country of Sweden.
+Orion Robotics is located in the country of Japan.
+Alice Moreau was born in Lisbon.
+Bob Iversen was born in Bergen.
+Cara Delgado was born in Recife.
+Ingrid Holm was born in Aarhus.
+Dana Whitfield was educated at Uppsala University.
+Erik Sandell is married to Dana Whitfield.
+Nordvind Energy was founded by Ingrid Holm.
+Farid Nasser founded Cedar Analytics.
+Cedar Analytics is located in the country of Lebanon.
+Farid Nasser is a citizen of Lebanon.
+Greta Lindqvist wrote The Silent Fjord.
+Hana Sato holds the position of chief engineer.
+Ilya Petrov is famous for the Kola Expedition.
+Lisbon is the capital of Portugal.
+Recife is the capital of Pernambuco.
+Bergen is located in the country of Norway.
+Aarhus is located in the country of Denmark.
+Uppsala University is located in the country of Sweden.
+# 下面几条是**故意**的噪声，用来验证过滤器会把它们拒掉而不是生成畸形问答
+The partners of Nicolae Ceaușescu were Elena and Marin.
+Elena was educated at the university.

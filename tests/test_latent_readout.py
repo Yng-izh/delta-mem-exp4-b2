@@ -140,6 +140,10 @@ class StubModel(nn.Module):
                 output_hidden_states=False, use_cache=False, **kw):
         self.forward_calls += 1
         x = inputs_embeds if inputs_embeds is not None else self.emb(input_ids)
+        # 跨位置混合：纯点式 head 会让"前面的软 token 影响答案位置"的梯度**恒为 0**，
+        # C 组（梯度是否到得了 Compressor/Bridge）就变成恒假式、测不出真问题。
+        # 这里加一个跨位置均值项，模拟真实 attention 的信息混合（不改变形状与 mask 语义）。
+        x = x + 0.1 * x.mean(dim=1, keepdim=True)
         hs = [x] * (self.config.num_hidden_layers + 1) if output_hidden_states else None
         return _Out(self.head(x), hs)
 
@@ -266,8 +270,11 @@ def test_gradients():
     ok("C2 grad=False 的存储路径输出不带梯度（特征在 no_grad 下取得）",
        not payloads_s[0].requires_grad)
 
+    # 训练必须过 bridge：推理期 generate_latent_answer 内部就是 soft = bridge(payloads)。
+    # 曾经训练时直接把 z 当 soft token，bridge 不在计算图里 —— 训完是随机投影。
+    soft = bridge(z)
     embeds, labels, n_ans = T.build_student_inputs(
-        model, tok, z, "Be brief.", "Where does Alice work?", "Raytheon")
+        model, tok, soft, "Be brief.", "Where does Alice work?", "Raytheon")
     ok("C3 labels 只标注答案 token",
        int((labels != -100).sum()) == n_ans and n_ans > 0)
     logits = model(inputs_embeds=embeds,
@@ -275,10 +282,13 @@ def test_gradients():
                    use_cache=False).logits
     loss = T.qa_loss(logits, labels)
     loss.backward()
-    ok("C4 compressor.queries 拿到梯度", comp.queries.grad is not None
+    # 注意断言的是**梯度非零**，不是 is not None：全零梯度同样说明这条路没通
+    ok("C4 compressor.queries 拿到非零梯度", comp.queries.grad is not None
        and float(comp.queries.grad.abs().sum()) > 0)
-    ok("C5 compressor.input_proj 拿到梯度", comp.input_proj.weight.grad is not None)
-    ok("C6 bridge 末层 Linear 拿到梯度", bridge.net[3].weight.grad is not None)
+    ok("C5 compressor.input_proj 拿到非零梯度", comp.input_proj.weight.grad is not None
+       and float(comp.input_proj.weight.grad.abs().sum()) > 0)
+    ok("C6 bridge 末层 Linear 拿到非零梯度", bridge.net[3].weight.grad is not None
+       and float(bridge.net[3].weight.grad.abs().sum()) > 0)
     ok("C7 冻结的模型权重没有梯度",
        all(p.grad is None for p in model.parameters()))
 
@@ -295,6 +305,20 @@ def test_gradients():
        bank.payload("fact:2").requires_grad is True)
     ok("C10 存储后 dtype 归一（bf16/fp32 由库决定）",
        bank.payload("fact:2").dtype == torch.float32)
+
+    # 回归守卫：把 z 直接当 soft token（绕过 bridge）时，bridge 必须拿不到梯度。
+    # 这条正是上面那个 bug 的判据 —— 一旦有人改回直连，这里会立刻失败。
+    comp.zero_grad(set_to_none=True)
+    bridge.zero_grad(set_to_none=True)
+    payloads4, _ = enc.encode(["Dan works at Umbra."], parent_ids=["fact:3"], grad=True)
+    emb4, lab4, _ = T.build_student_inputs(
+        model, tok, payloads4[0], "Be brief.", "Where does Dan work?", "Umbra")
+    logits4 = model(inputs_embeds=emb4,
+                    attention_mask=torch.ones(emb4.shape[:2], dtype=torch.long),
+                    use_cache=False).logits
+    T.qa_loss(logits4, lab4).backward()
+    ok("C11 绕过 bridge 时 bridge 拿不到梯度（训练必须过 bridge）",
+       all(p.grad is None for p in bridge.parameters()))
 
 
 # =====================================================================

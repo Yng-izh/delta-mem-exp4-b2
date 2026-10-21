@@ -5,6 +5,88 @@
 > **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
+## 最新进展（v9.4-synth-data 轮，2026-10-21）——训练语料生成器 + 训练脚本 `--data` 接入
+
+**结论先行**：
+
+1. 有了**独立于评测集**的训练语料通路：虚构事实宇宙 → 自然陈述句 → `parse_fact_triple` 抽取 →
+   单跳/多跳问答，v100-2 上 **32 进程并发**生成 **15,000 训练 + 2,000 验证**（15k 用时 **14.7s**，
+   CPU 3m3s，加速 12.5×）。
+2. `train_latent_memory.py` 新增 `--data / --val-data`，**每条事实一个记忆槽位**（与推理期 bank 布局一致）。
+   纯 CPU 自检通过（4 项梯度检查全 true），阶段 A / 阶段 B 两条路径都跑通。
+3. **修掉 2 个真实 Bug**（都不是本轮引入的，是上轮"只改不跑"遗留）：
+   - 训练时**没走 bridge**：`build_student_inputs` 直接吃 `z`，bridge 不在计算图里 —— 训练完是随机投影，
+     而推理期 `generate_latent_answer` 用的正是 bridge。梯度检查 `bridge_last_linear=false` 暴露了它。
+   - `SmokeModel.forward` 两处错误：`self.emb(x)` 引用未赋值变量；`output_hidden_states` 恒为 `None`。
+     两处都只在 `--smoke-model` 路径上触发，所以"从未执行过"= 从未暴露。
+4. **仍然没有跑任何 GPU 训练**。本文所有数字都是**数据与通路的**数字，不是效果数字。
+5. **上轮从未执行的 `tests/test_latent_readout.py` 本轮首次执行**：初跑 **80/82**，
+   2 条失败分别指向"训练绕过 bridge"（真 Bug）与"测试桩是点式 head 导致梯度恒为 0"（测试缺陷）。
+   修复后 **83/83 全通过**，并新增 `C11` 反向守卫（绕过 bridge 时 bridge 必须拿不到梯度）。
+   详见 [CHANGELOG.md](CHANGELOG.md) `[v9.4-synth-data]`。
+
+### 1. 为什么不用现成数据集
+
+训练事实必须独立于最终评测集。服务器上唯一的本地数据集是 `Conflict_Resolution-*.parquet` ——
+那正是评测集本身，拿它训练等于背答案。所以造**虚构事实宇宙**（实体名由音节表合成）：
+与真实世界知识不冲突（模型无法凭先验作答，强制它必须读记忆），且零泄漏。
+
+### 2. 新增文件
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `tools/gen_fact_universe.py` | ~175 | 虚构事实宇宙：1 个"簇"= 1 人 + 雇主/出生地/母校/配偶/著作/职位…（16 条事实），簇内天然形成多跳链 |
+| `tools/gen_synth_qa.py` | ~560 | 事实 → 三元组 → 单跳/多跳问答；关系模板 29 条 + 同义问法池；按连通分量并发；答案唯一性/泄漏审计 |
+| `tools/demo_facts.txt` | 30 | 手写演示语料（28 条可解析 + 2 条故意噪声） |
+| `tests/test_synth_data.py` | ~185 | 32 条断言：加载 / 记忆单元 / 切分泄漏 / 编码拼接 / CLI 契约 |
+
+### 3. 生成命令（已在 v100-2 执行）
+
+```bash
+cd /share/exp4group && P=/share/conda/envs/latent2/bin/python
+$P tools/gen_fact_universe.py --clusters 2000 --jsonl --out synth/facts_2000.jsonl --stats
+$P tools/gen_synth_qa.py --facts synth/facts_2000.jsonl --cluster-range 0:1800 \
+   --parallel 32 --total 15000 --multi-ratio 0.2 --variants 2 --out synth/train_15k.jsonl
+$P tools/gen_synth_qa.py --facts synth/facts_2000.jsonl --cluster-range 1800:2000 \
+   --parallel 32 --total 2000 --multi-ratio 0.2 --out synth/val_2k.jsonl
+```
+
+实测产出（`/share/exp4group/synth/`）：
+
+| 文件 | 条数 | 构成 |
+|---|---|---|
+| `train_15k.jsonl` | 15,000 | 12,002 单跳 + 2,998 多跳；10.2 MB |
+| `val_2k.jsonl` | 2,000 | 1,680 单跳 + 320 多跳 |
+| `facts_2000.jsonl` | 32,000 条事实 | 2,000 簇 × 16 条 |
+
+审计：唯一 (问,答) **15000/15000**；答案出现在 ≠1 条记忆 **1 条（0.01%）**；答案泄漏进问句 **0**；
+答案不在证据行 **0**；train/val **实体交集 0 / 簇交集 0**；覆盖 27 种关系；记忆行数 4（单跳）/ 5（多跳）。
+
+### 4. 训练怎么用
+
+```bash
+# 纯 CPU 自检（不加载 Qwen）：验证数据/梯度通路，不写 checkpoint
+$P train_latent_memory.py --dry-run --smoke-model --device cpu \
+   --data synth/train_15k.jsonl --val-data synth/val_2k.jsonl \
+   --max-steps 2 --accum 2 --m 4 --inner-dim 32 --bottleneck 32 --heads 2
+
+# 阶段 A（真实训练；本轮未执行）
+$P train_latent_memory.py --stage a --data synth/train_15k.jsonl \
+   --val-data synth/val_2k.jsonl --out ckpt/latent_a.pt
+```
+
+- `--n-train 0`（默认）= `--data` 时全量；不给 `--data` 时仍用内部模板 `make_dataset`（2000 条）。
+- 加载时会自动查 train/val 的**簇重叠**与**重复问句**并打印 `[data][warn]`。
+- 未给 `--val-data` 时只做通路检查，日志明确写"该数字不是验证指标"。
+
+### 5. 未验证清单（引用任何数字前必读）
+
+1. **没有跑 GPU 训练**：`--data` 通路只在 `--smoke-model`（随机小模型，CPU）上验证过。
+2. **没有 latent 效果数字**：15k 是数据量，不是准确率。
+3. **语料是虚构的**：关系种类（27 种）与用词分布窄于真实文本，泛化到真实评测集的表现未测。
+4. **`--variants 2` 只覆盖 2 种问法**：同一三元组的其余问法未进入训练集。
+5. **多跳只有 2 跳**：3 跳及以上未生成。
+
 ## 最新进展（v9.3-latent 轮，2026-10-21）——潜层读出（路径 B）代码落地，未训练未跑分
 
 **结论先行**：
@@ -275,6 +357,11 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 > **v9.3-latent 轮（同日稍后）新增 3 个 `.py`**：`latent_memory.py` / `train_latent_memory.py` /
 > `tests/test_latent_readout.py`，git 跟踪的 `.py` 总数变为 **34**。该轮**只对受影响的 8 个文件**
 > 做了 `py_compile` 静态检查，**没有重跑**上表的全仓编译与全部单测（约束：本轮不允许运行）。
+>
+> **v9.4-synth-data 轮（再稍后）新增 3 个 `.py` + 1 个 `.txt`**：`tools/gen_fact_universe.py` /
+> `tools/gen_synth_qa.py` / `tests/test_synth_data.py` / `tools/demo_facts.txt`，总数变为 **37**。
+> 该轮在 v100-2 上**真实执行**了数据生成（15,000 + 2,000 条）与 `--smoke-model` 通路自检
+> （`tests/test_synth_data.py` **32/32** PASS），但仍**未跑** GPU 训练，也未重跑上表全部单测。
 
 环境事实：本机 Python 3.9.6 + torch 2.8.0（CPU，`device_count=0`），`transformers` / `pyarrow` / `deltamem` **缺失**——真实跑分路径本机不可执行，dry-run 已证明不依赖它们。
 

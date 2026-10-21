@@ -57,9 +57,11 @@
 import argparse
 import json
 import os
+import json
 import random
 import sys
 import time
+from collections import Counter
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("DELTA_MEM_SCAN_IMPL", "torch")
@@ -170,6 +172,92 @@ def split_entities(seed=0):
 
 
 # =====================================================================
+# 1.5) 外部语料：tools/gen_synth_qa.py 产出的 jsonl
+# =====================================================================
+def load_synth_jsonl(path, limit=0, seed=0):
+    """读 `tools/gen_synth_qa.py` 产出的 jsonl，转成训练用的 item。
+
+    每条记录：memory(事实列表) / question / answer / evidence / meta.cluster。
+    转换后的 item 同时保留两种粒度：
+      - `units`：**每条事实一个记忆单元**（一个事实一个槽位，与推理期 bank 的布局一致）；
+      - `memory`：事实拼接成的单串（teacher 明文输入、事实重建任务用）。
+    没有 `units` 的 item（内部 make_dataset）走单单元路径，行为不变。
+
+    为什么按事实切槽而不是整段压成一个槽：推理期每个槽位就是一条事实，
+    整段压缩会让"检索到某一条事实"在训练里根本不存在，训练/推理布局不一致。
+    """
+    items = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            rec = json.loads(line)
+            mem = rec.get("memory") or rec.get("evidence") or []
+            if isinstance(mem, str):
+                mem = [mem]
+            mem = [str(m).strip() for m in mem if str(m).strip()]
+            if not mem or rec.get("question") in (None, "") or rec.get("answer") in (None, ""):
+                continue
+            meta = rec.get("meta") or {}
+            items.append({
+                "memory": " ".join(mem),
+                "units": mem,
+                "question": str(rec["question"]).strip(),
+                "answer": str(rec["answer"]).strip(),
+                "cf": bool(rec.get("cf", False)),
+                "hops": int(rec.get("hops") or 1),
+                "cluster": meta.get("cluster", (meta.get("clusters") or [None])[0]),
+            })
+    if limit and len(items) > limit:
+        rng = random.Random(seed)
+        idx = list(range(len(items)))
+        rng.shuffle(idx)
+        keep = sorted(idx[:limit])
+        items = [items[i] for i in keep]
+    return items
+
+
+def check_split_leakage(train_items, val_items):
+    """训练/验证切分必须干净，否则验证指标没有意义。返回问题列表（空=通过）。"""
+    probs = []
+    tc = {it["cluster"] for it in train_items if it.get("cluster") is not None}
+    vc = {it["cluster"] for it in val_items if it.get("cluster") is not None}
+    if tc and vc:
+        inter = tc & vc
+        if inter:
+            probs.append(f"实体簇重叠 {len(inter)} 个（如 {sorted(inter)[:3]}）")
+    same_q = ({it["question"].lower() for it in train_items} &
+              {it["question"].lower() for it in val_items})
+    if same_q:
+        probs.append(f"问句完全相同 {len(same_q)} 条（如 {sorted(same_q)[:2]}）")
+    return probs
+
+
+def item_units(item):
+    """取一条样本的记忆单元：外部数据按事实切槽，内部数据整段一槽。"""
+    units = item.get("units")
+    if units:
+        return [str(u) for u in units]
+    return [str(item.get("memory") or "")]
+
+
+def encode_item(encoder, item, tag="fact", grad=False):
+    """编码一条样本的全部记忆单元，拼成一段 soft token 序列。
+
+    多单元时沿**块轴**拼接：每个 payload 是 [k, m, d]，cat 后仍是 [Σk, m, d]，
+    正好等价于"把多条事实的软 token 接在同一个位置上"。
+    """
+    units = item_units(item)
+    payloads, info = encoder.encode(units, parent_ids=[f"{tag}:{k}" for k in range(len(units))],
+                                    grad=grad)
+    if not payloads:
+        raise RuntimeError("encode 未返回任何 payload")
+    z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
+    return z, info
+
+
+# =====================================================================
 # 2) 序列构造：soft tokens + 答案 token 的标签
 # =====================================================================
 def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer):
@@ -265,9 +353,9 @@ class SmokeModel(nn.Module):
         vocab_size = 512
 
     class _Out:
-        def __init__(self, logits):
+        def __init__(self, logits, hidden_states=None):
             self.logits = logits
-            self.hidden_states = None
+            self.hidden_states = hidden_states
 
     def __init__(self, vocab_size=512, hidden_size=64, n_layers=2, n_heads=4):
         super().__init__()
@@ -286,12 +374,17 @@ class SmokeModel(nn.Module):
 
     def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None,
                 output_hidden_states=False, use_cache=False, **kw):
-        x = inputs_embeds if inputs_embeds is not None else self.emb(x)
+        # 原来写成 self.emb(x)：input_ids 路径必然 UnboundLocalError。
+        # 这条路径只在 --smoke-model 自检里走，之前从未执行过，所以没暴露。
+        x = inputs_embeds if inputs_embeds is not None else self.emb(input_ids)
         if attention_mask is not None and attention_mask.shape[1] == x.shape[1]:
             pad = (1.0 - attention_mask.to(x.dtype)).unsqueeze(-1)
             x = x * (1.0 - pad)
         h = self.body(x)
-        return SmokeModel._Out(self.head(h))
+        # 潜层压缩要读 token 级隐藏状态：hs[0]=embedding，hs[-1]=末层。
+        # 之前恒为 None，--smoke-model 一进编码就报 "没有返回 hidden_states"。
+        hs = (x, h) if output_hidden_states else None
+        return SmokeModel._Out(self.head(h), hs)
 
 
 class StubTok:
@@ -375,8 +468,7 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
     hit = 0
     n = 0
     for item in data[:limit]:
-        payloads, _info = enc.encode([item["memory"]], parent_ids=["val:0"])
-        z = payloads[0]
+        z, _info = encode_item(enc, item, tag="val")
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16)
@@ -401,6 +493,12 @@ def train(args):
         hidden = model.config.hidden_size
         print(f"[smoke] 使用极小随机模型（hidden={hidden}, vocab={model.config.vocab_size}）："
               f"只验证通路，不代表 Qwen 行为", flush=True)
+        if args.layer >= model.config.num_hidden_layers:
+            # smoke 模型只有 2 层（hs=(embedding, 末层)），--layer 18 会直接越界。
+            # 这里显式降级并说明，不做"重复末层"之类的假包装。
+            print(f"[smoke] --layer {args.layer} 超出 smoke 模型层数，"
+                  f"降到 {model.config.num_hidden_layers - 1}（只影响自检）", flush=True)
+            args.layer = model.config.num_hidden_layers - 1
     else:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(args.base)
@@ -434,15 +532,40 @@ def train(args):
           f"bridge={sum(p.numel() for p in bridge.parameters())/1e6:.3f}M)", flush=True)
 
     # ---- 数据 ----
-    ent_train, ent_val = split_entities(args.seed)
-    train_data = make_dataset(args.n_train, random.Random(args.seed + 1), ent_train,
-                              value_shift=0, counterfactual=args.counterfactual)
-    val_data = make_dataset(args.n_val, random.Random(args.seed + 2), ent_val,
-                            value_shift=3, counterfactual=False)
-    print(f"[data] train={len(train_data)} val={len(val_data)} "
-          f"entities(train/val)={len(ent_train)}/{len(ent_val)}（不相交）", flush=True)
-    print(f"[data] 例：memory={train_data[0]['memory']!r} "
-          f"q={train_data[0]['question']!r} a={train_data[0]['answer']!r}", flush=True)
+    if args.data:
+        # 外部语料（tools/gen_synth_qa.py 产出）：与最终评测集无关的独立事实文本
+        n_train = args.n_train or 0
+        train_data = load_synth_jsonl(args.data, limit=n_train, seed=args.seed)
+        if not train_data:
+            raise SystemExit(f"--data 读不到任何样本：{args.data}")
+        if args.val_data:
+            val_data = load_synth_jsonl(args.val_data, limit=(args.n_val or 0),
+                                        seed=args.seed + 1)
+        else:
+            # 没有验证文件时只做通路检查，**不能**当验证指标（同实体同分布）
+            val_data = train_data[:max(1, min(len(train_data), args.n_val or 32))]
+            print("[data][warn] 未给 --val-data，用训练集前若干条做通路检查，"
+                  "该数字不是验证指标", flush=True)
+        for prob in check_split_leakage(train_data, val_data):
+            print(f"[data][warn] 切分不干净：{prob}", flush=True)
+        hops = Counter(it["hops"] for it in train_data)
+        n_units = sum(len(item_units(it)) for it in train_data) / max(1, len(train_data))
+        print(f"[data] {args.data}: train={len(train_data)} val={len(val_data)} "
+              f"hops={dict(sorted(hops.items()))} 平均记忆单元={n_units:.1f}", flush=True)
+        print(f"[data] 例：units={item_units(train_data[0])[:3]} "
+              f"q={train_data[0]['question']!r} a={train_data[0]['answer']!r}", flush=True)
+    else:
+        ent_train, ent_val = split_entities(args.seed)
+        n_train = args.n_train or 2000
+        n_val = args.n_val or 100
+        train_data = make_dataset(n_train, random.Random(args.seed + 1), ent_train,
+                                  value_shift=0, counterfactual=args.counterfactual)
+        val_data = make_dataset(n_val, random.Random(args.seed + 2), ent_val,
+                                value_shift=3, counterfactual=False)
+        print(f"[data] train={len(train_data)} val={len(val_data)} "
+              f"entities(train/val)={len(ent_train)}/{len(ent_val)}（不相交）", flush=True)
+        print(f"[data] 例：memory={train_data[0]['memory']!r} "
+              f"q={train_data[0]['question']!r} a={train_data[0]['answer']!r}", flush=True)
 
     if args.dry_run:
         print("[dry-run] 数据/模型/参数已就绪，开始一次前向+反向自检（不写 checkpoint）",
@@ -467,12 +590,16 @@ def train(args):
         for i in order:
             item = train_data[i]
             # ① 压缩（grad=True：保留到压缩器输出的梯度路径）
-            payloads, enc_info = encoder.encode([item["memory"]], parent_ids=["fact:0"],
-                                                 grad=True)
-            z = payloads[0]
-            # ② student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
+            #    一条样本有几条事实就编几个槽位（与推理期 bank 布局一致）
+            z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
+            # ② Z -> soft tokens（**必须过 bridge**）
+            #    推理期 generate_latent_answer 内部就是 soft = bridge(payloads)；
+            #    训练时若直接把 z 当 soft token 喂进去，bridge 不在计算图里、
+            #    梯度检查会报 bridge_last_linear=false，且推理期用的是随机投影。
+            soft = bridge(z)
+            # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
             embeds, labels, n_ans = build_student_inputs(
-                model, tokenizer, z, system_prompt, item["question"], item["answer"])
+                model, tokenizer, soft, system_prompt, item["question"], item["answer"])
             with LM.delta_write_disabled(model):
                 s_logits = model(inputs_embeds=embeds,
                                  attention_mask=torch.ones(embeds.shape[:2],
@@ -482,7 +609,7 @@ def train(args):
             loss = loss_qa
             loss_kl = None
             if args.stage == "b" and args.kl_weight > 0:
-                # ③ teacher：明文证据，只提供目标分布
+                # ④ teacher：明文证据，只提供目标分布
                 t_embeds, t_n = build_teacher_inputs(
                     model, tokenizer, item["memory"], system_prompt,
                     item["question"], item["answer"])
@@ -495,9 +622,9 @@ def train(args):
                 if loss_kl is not None:
                     loss = loss_qa + args.kl_weight * loss_kl
             if args.recon_weight > 0:
-                # 事实重建辅助任务：只给 Z，重建原事实（检查专有名词符号保真）
+                # ⑤ 事实重建辅助任务：只给 soft tokens，重建原事实（检查符号保真）
                 r_embeds, r_labels, _ = build_student_inputs(
-                    model, tokenizer, z, system_prompt,
+                    model, tokenizer, soft, system_prompt,
                     "Repeat the memory verbatim.", item["memory"])
                 with LM.delta_write_disabled(model):
                     r_logits = model(inputs_embeds=r_embeds,
@@ -506,7 +633,8 @@ def train(args):
                                      use_cache=False).logits
                 loss = loss + args.recon_weight * qa_loss(r_logits, r_labels)
             (loss / args.accum).backward()
-            acc_items.append((float(loss_qa), None if loss_kl is None else float(loss_kl)))
+            acc_items.append((float(loss_qa.detach()),
+                               None if loss_kl is None else float(loss_kl.detach())))
             micro += 1
             if micro % args.accum == 0:
                 if grad_seen is None:
@@ -619,8 +747,14 @@ def parse_args(argv=None):
     ap.add_argument("--recon-weight", type=float, default=0.0)
     ap.add_argument("--counterfactual", action="store_true",
                     help="训练集加入『同主语同属性冲突，只记新值』样本")
-    ap.add_argument("--n-train", type=int, default=2000)
-    ap.add_argument("--n-val", type=int, default=100)
+    ap.add_argument("--data", default="",
+                    help="外部训练语料 jsonl（tools/gen_synth_qa.py 产出）；"
+                         "给了就用它，否则用内部模板 make_dataset")
+    ap.add_argument("--val-data", default="", help="外部验证语料 jsonl（与 --data 实体簇不重叠）")
+    ap.add_argument("--n-train", type=int, default=0,
+                    help="训练条数；0=内部默认 2000 / --data 时全量")
+    ap.add_argument("--n-val", type=int, default=0,
+                    help="验证条数；0=内部默认 100 / --data 时全量")
     ap.add_argument("--eval-limit", type=int, default=32)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--system-prompt",

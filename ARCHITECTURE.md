@@ -63,6 +63,7 @@
 | I3 | **时间是数据不是装饰**：每个单元绑定"该位置之前最近一次显式时间戳"，**不跨 Session 继承**，不得用全篇末尾时间回填 | v8 `cur_ts` 跨 Session 污染 |
 | I4 | **读出必须走潜层**（目标态）：明文证据块只是给人看的视图 | 早期 `AR_DELTA_WRITE` 写在回答之后、读出前又 `reset` |
 | I5 | **结果是配置的函数**：不同配置不得共用结果文件，续跑必须校验配置与代码版本 | 旧版固定 `ar_{MODE}_{SRC}.jsonl` + `AR_RESUME=1`，消融互相污染 |
+| I6 | **训练事实必须独立于评测集**：不得用 MemoryAgentBench / LongMemEval / EventQA 的任何切片训练；训练样本按事实切槽（一事实一槽位），与推理期 bank 布局一致 | 服务器上唯一的本地数据集就是 `Conflict_Resolution-*.parquet`（即评测集），用它训练等于背答案；训练时若整段压成一个槽，"检索到某一条事实"在训练里根本不存在 |
 
 I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 强制。
 
@@ -198,6 +199,8 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | 逐题诊断字段（used_texts / 跨池统一 ID `epi:/state:/cr:`） | 已实现 | `ar_diag --selftest` 121 项 |
 | 四格联合归因（Reader Acc \| Recall=1 等） | 已实现·**仅合成验证** | `ar_diag --selftest` 121 项；仓库内无带 `diag` 字段的真实 jsonl |
 | 配置指纹 / 结果文件隔离 / 续跑校验 | 已实现 | `test_run_manifest.py` 27 断言 |
+| 训练语料生成（虚构事实宇宙 → 三元组 → 单跳/多跳，32 进程并发） | 已实现·**真实执行** | 15,000 训练 + 2,000 验证；唯一 (问,答) 15000/15000，train/val 实体交集 0 |
+| 训练脚本消费外部语料（`--data/--val-data`，一事实一槽位） | 已实现·**仅 CPU 通路验证** | `tests/test_synth_data.py` 32 断言；`--smoke-model` 阶段 A/B 均 OK；**GPU 训练未跑** |
 | Delta 空快照必须报错 | 已实现 | `test_run_manifest.py::test_empty_delta_snapshot_raises` |
 | Delta 有效写入策略（`all` / `filtered` / `topk_refresh`） | 部分实现 | `test_ar_delta_write_strategy.py` 47 断言；`topk_refresh` 是词面 IDF 近似 |
 | Delta 写入**效果** | 未验证 | 默认仍 `AR_DELTA_WRITE=0`，三档策略无对照 |
