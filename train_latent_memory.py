@@ -478,6 +478,39 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
     return (hit / n if n else None), n
 
 
+def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
+                   layer=LM.LATENT_LAYER, max_unit_tokens=LM.LATENT_MAX_UNIT_TOKENS):
+    """从软 token 重建记忆原文的 **token 级准确率**（衡量压缩器保不保真）。
+
+    这是 recon 辅助任务真正要回答的问题：z 里还剩多少原文的符号信息。
+    exact-match 太严（一条 65 token 的句子差一个 token 就全错），所以报 token 级。
+    位置对齐：causal LM 的 logits[t] 预测 token t+1，因此第 i 个答案 token 的预测
+    取自它**前一个**位置的 logits（写错会整体错一位，看起来像"永远差一点"）。
+    """
+    comp, bridge = reader_like
+    comp.eval()
+    bridge.eval()
+    enc = LM.LatentEncoder(model, tokenizer, comp, layer=layer,
+                           max_unit_tokens=max_unit_tokens)
+    hit = tot = 0
+    for item in data[:limit]:
+        z, _info = encode_item(enc, item, tag="recon")
+        with torch.no_grad():
+            soft = bridge(z)
+            embeds, labels, n_ans = build_student_inputs(
+                model, tokenizer, soft, system_prompt,
+                "Repeat the memory verbatim.", item["memory"])
+            with LM.delta_write_disabled(model):
+                logits = model(inputs_embeds=embeds,
+                               attention_mask=torch.ones(embeds.shape[:2], dtype=torch.long),
+                               use_cache=False).logits
+        pred = logits[0, -n_ans - 1:-1].argmax(-1)
+        gold = labels[0, -n_ans:]
+        hit += int((pred == gold).sum().item())
+        tot += int(n_ans)
+    return (hit / tot if tot else None), tot
+
+
 def train(args):
     t0 = time.time()
     torch.manual_seed(args.seed)
@@ -522,7 +555,16 @@ def train(args):
     # ---- 可训练模块 ----
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
                                num_heads=args.heads).to(dev)
-    bridge = LM.LatentBridge(hidden, bottleneck=args.bottleneck).to(dev)
+    # 软 token 的范数必须对齐真实 token embedding 的尺度，否则会变成 attention sink
+    # 把真实 token 淹没（实测未约束时软 token 范数 96~159，而真实 embedding 约 1.05，
+    # 结果：loss 降到 2.8 但同一批样本 200 条只答对 1~3 条，加宽 m 完全无效）。
+    with torch.no_grad():
+        _emb_w = model.get_input_embeddings().weight
+        target_norm = float(_emb_w.float().norm(dim=-1).mean())
+    bridge = LM.LatentBridge(hidden, bottleneck=args.bottleneck,
+                             target_norm=target_norm).to(dev)
+    print(f"[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 {target_norm:.4f}"
+          f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）", flush=True)
     if args.init:
         blob = LM._safe_torch_load(args.init)
         comp.load_state_dict(blob["compressor"])
@@ -586,6 +628,7 @@ def train(args):
         return {"schema": LM.LATENT_SCHEMA, "n_slots": args.m, "layer": args.layer,
                 "inner_dim": args.inner_dim, "num_heads": args.heads,
                 "bottleneck": args.bottleneck, "max_unit_tokens": args.max_unit_tokens,
+                "target_norm": round(float(target_norm), 6),
                 "read_budget": LM.LATENT_READ_BUDGET, "dtype": LM.LATENT_DTYPE,
                 "stage": args.stage, "kl_weight": args.kl_weight, "kl_tau": args.kl_tau,
                 "recon_weight": args.recon_weight, "lr": args.lr,
@@ -716,6 +759,15 @@ def train(args):
             "git": _git_commit(), "n_train": len(train_data), "n_val": len(val_data),
             "val_exact_match": em, "n_trainable_params": n_train,
             "grad_check": grad_ok, "elapsed_sec": round(time.time() - t0, 1)}
+    if args.recon_weight > 0:
+        rec_acc, rec_tok = evaluate_recon(
+            (comp, bridge), model, tokenizer, val_data, system_prompt,
+            limit=min(16, len(val_data)), layer=args.layer,
+            max_unit_tokens=args.max_unit_tokens)
+        print(f"[eval] recon token-acc={rec_acc:.3f}（n_tok={rec_tok}）—— "
+              f"z 里还留了多少原文符号信息", flush=True)
+        meta["recon_token_acc"] = rec_acc
+
     out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta)
     print(f"[save] {out} config={json.dumps(cfg, ensure_ascii=False)}", flush=True)
     return 0

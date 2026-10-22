@@ -64,6 +64,7 @@
 | I4 | **读出必须走潜层**（目标态）：明文证据块只是给人看的视图 | 早期 `AR_DELTA_WRITE` 写在回答之后、读出前又 `reset` |
 | I5 | **结果是配置的函数**：不同配置不得共用结果文件，续跑必须校验配置与代码版本 | 旧版固定 `ar_{MODE}_{SRC}.jsonl` + `AR_RESUME=1`，消融互相污染 |
 | I6 | **训练事实必须独立于评测集**：不得用 MemoryAgentBench / LongMemEval / EventQA 的任何切片训练；训练样本按事实切槽（一事实一槽位），与推理期 bank 布局一致 | 服务器上唯一的本地数据集就是 `Conflict_Resolution-*.parquet`（即评测集），用它训练等于背答案；训练时若整段压成一个槽，"检索到某一条事实"在训练里根本不存在 |
+| I7 | **软 token 必须与真实 token embedding 同尺度**：`bridge` 输出要做范数对齐（实测未约束时范数 96–159，真实 embedding 1.05，差两个量级会让软 token 变成 attention sink 把真实 token 淹没） | 首轮真机训练 loss 12.6→3.87 但验证 0/32，200 条过拟合 1/200；加宽 m 4→16 无改善 |
 
 I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 强制。
 
@@ -196,6 +197,8 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | CR Hop1 矩阵初筛（P1 性能） | 已实现 | `test_hop1_matrix_prefilter`（120 槽 → 96 候选，gold 不丢） |
 | CR 路径式读出（seed→mid→target + 其余事实） | 已实现·未跑分 | `test_path_view_and_flat_fallback` |
 | CR Delta 参与查询（`CR_DELTA_MODE=off\|context\|refresh`） | 已实现·**效果未验证** | `test_cr_delta_log.py` 84 断言；三档指纹互异 |
+| 潜层读出：软 token 注入通路（位置/mask/拼接/位置编码） | 已实现·**真机验证通过** | `tools/diag_latent_capacity.py --sub oracle` 4/4（记忆原文 embedding 直接当软 token） |
+| 潜层读出：压缩器**能否编码内容** | **未达成**（真实负结果） | 重建 token-acc 22.8% vs 平凡基线 top10 19.8%；QA 0/32、200 条过拟合 1/200；加宽 m 无改善。见 `results/latent_stage_a_2026-10-21/` |
 | 逐题诊断字段（used_texts / 跨池统一 ID `epi:/state:/cr:`） | 已实现 | `ar_diag --selftest` 121 项 |
 | 四格联合归因（Reader Acc \| Recall=1 等） | 已实现·**仅合成验证** | `ar_diag --selftest` 121 项；仓库内无带 `diag` 字段的真实 jsonl |
 | 配置指纹 / 结果文件隔离 / 续跑校验 | 已实现 | `test_run_manifest.py` 27 断言 |

@@ -320,6 +320,22 @@ def test_gradients():
     ok("C11 绕过 bridge 时 bridge 拿不到梯度（训练必须过 bridge）",
        all(p.grad is None for p in bridge.parameters()))
 
+    # C12-C14：软 token 的范数必须对齐真实 token embedding 的尺度。
+    # 未约束时末层 Linear 输出范数实测 96~159，而 Qwen3-4B 真实 embedding 是 1.05 ——
+    # 软 token 会变成 attention sink 把真实 token 淹没（loss 能降到 2.8，但 200 条只答对 1~3 条）。
+    br2 = LM.LatentBridge(32, bottleneck=16, target_norm=1.05)
+    zz = torch.randn(1, 4, 32) * 50.0          # 故意给一个很大的输入
+    out2 = br2(zz)
+    norms = out2.norm(dim=-1)
+    ok("C12 bridge 输出范数对齐 target_norm",
+       bool((norms - 1.05).abs().max() < 1e-3), extra=str(norms.tolist()))
+    ok("C13 输入整体放大不改变输出范数（只保留方向）",
+       bool((br2(zz * 10).norm(dim=-1) - norms).abs().max() < 1e-3))
+    with torch.no_grad():
+        br2.out_norm.fill_(1e6)                # 模拟训练把尺度推到爆炸
+    ok("C14 尺度参数被夹住，不会失控",
+       bool(br2(zz).norm(dim=-1).max() <= LM.LatentBridge.NORM_MAX + 1e-3))
+
 
 # =====================================================================
 # D. 长单元再分块而不截断

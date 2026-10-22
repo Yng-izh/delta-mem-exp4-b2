@@ -49,6 +49,13 @@ def _env_int(name: str, default: int) -> int:
         return int(default)
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _env_str(name: str, default: str) -> str:
     v = os.environ.get(name)
     return default if v is None else str(v).strip()
@@ -62,6 +69,9 @@ LATENT_N_HEADS         = _env_int("LATENT_N_HEADS", 8)          # cross-attentio
 LATENT_BOTTLENECK      = _env_int("LATENT_BOTTLENECK", 512)     # Bridge 瓶颈宽度
 LATENT_MAX_UNIT_TOKENS = _env_int("LATENT_MAX_UNIT_TOKENS", 64) # 单块最多 token 数（超出要再分块，不截断）
 LATENT_READ_BUDGET     = _env_int("LATENT_READ_BUDGET", 32)     # 读出预算（软 token 数，= K × m）
+# 软 token 的每向量范数目标：必须对齐真实 token embedding 的尺度，否则软 token 会变成
+# attention sink 把真实 token 淹没（实测未约束时到 96~159，而 Qwen3-4B embedding 是 1.05）。
+LATENT_TARGET_NORM     = _env_float("LATENT_TARGET_NORM", 1.0)
 LATENT_CKPT            = _env_str("LATENT_CKPT", "")            # 压缩器+桥接器 checkpoint
 # >0 时只编码前 N 个槽位（smoke / 大池调试用）；0 = 不限制。
 LATENT_BANK_MAX = int(os.environ.get("LATENT_BANK_MAX", "0"))
@@ -282,12 +292,33 @@ def _as_3d(t: torch.Tensor, name: str) -> torch.Tensor:
 
 # ----------------------------- 2) 桥接器 -----------------------------
 class LatentBridge(nn.Module):
-    """Z -> soft tokens：LayerNorm -> Linear -> SiLU -> Linear（输入层注入，不改 Qwen 内部 attention）。"""
+    """Z -> soft tokens：LayerNorm -> Linear -> SiLU -> Linear -> **范数对齐**（输入层注入，不改 Qwen attention）。
 
-    def __init__(self, hidden_size: int, bottleneck: int = LATENT_BOTTLENECK):
+    为什么要显式对齐范数（这是实测踩到的坑，不是洁癖）
+    ---------------------------------------------------
+    soft token 是直接拼进 `inputs_embeds` 的，模型对它的唯一"合法感"来自它和真实 token
+    embedding 处在同一个尺度上。Qwen3-4B 真实 token embedding 每向量范数约 **1.05**；
+    而上面这条未约束的 Linear 输出范数实测到了 **96~159**（差两个量级）。
+
+    后果不是"略微不准"，而是**软 token 变成 attention sink**：它抢走几乎全部注意力权重，
+    真实 token 被淹没。实测反事实很干净 —— 训练 200 条、8 epoch、loss 从 12.6 降到 2.8，
+    但同一批 200 条只答对 1~3 条；把 m 从 4 加到 16（软 token 16→64 个）**毫无改善**；
+    而把记忆原文的 embedding 直接当软 token 注入（oracle）则 4/4 全对。
+
+    所以这里把输出方向归一化、范数交给一个受限的可学习标量（初值=真实 embedding 范数，
+    夹在 [0.25, 4] 倍以内，防止训练把尺度重新推到爆炸区）。
+    """
+
+    NORM_MIN = 0.25
+    NORM_MAX = 4.0
+
+    def __init__(self, hidden_size: int, bottleneck: int = LATENT_BOTTLENECK,
+                 target_norm: float = LATENT_TARGET_NORM):
         super().__init__()
         if int(hidden_size) <= 0 or int(bottleneck) <= 0:
             raise ValueError(f"hidden_size/bottleneck 必须为正：{hidden_size}/{bottleneck}")
+        if not (float(target_norm) > 0):
+            raise ValueError(f"target_norm 必须为正，得到 {target_norm}")
         self.hidden_size = int(hidden_size)
         self.bottleneck = int(bottleneck)
         self.net = nn.Sequential(
@@ -296,6 +327,12 @@ class LatentBridge(nn.Module):
             nn.SiLU(),
             nn.Linear(self.bottleneck, self.hidden_size),
         )
+        # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
+        self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
+
+    def scale(self) -> torch.Tensor:
+        """当前生效的范数（已夹在 [NORM_MIN, NORM_MAX] 内）。"""
+        return self.out_norm.clamp(self.NORM_MIN, self.NORM_MAX)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         z = _as_3d(z, "z")
@@ -303,7 +340,11 @@ class LatentBridge(nn.Module):
             raise ValueError(f"z 的最后一维 {z.shape[-1]} != hidden_size={self.hidden_size}")
         p = next(self.parameters())
         out = self.net(z.to(device=p.device, dtype=p.dtype))
-        return torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        # 方向保留、范数对齐到真实 embedding 尺度（见类文档里的实测数据）
+        n = out.norm(dim=-1, keepdim=True)
+        unit = out / n.clamp_min(1e-6)
+        return unit * self.scale().to(device=out.device, dtype=out.dtype)
 
 
 # ----------------------------- 3) 槽位载荷库 -----------------------------
@@ -760,7 +801,8 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
     comp = LatentCompressor(hs, n_slots=int(cfg["n_slots"]),
                             inner_dim=int(cfg["inner_dim"]),
                             num_heads=int(cfg.get("num_heads", LATENT_N_HEADS)))
-    bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]))
+    bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]),
+                          target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)))
     comp.load_state_dict(blob["compressor"], strict=strict)
     bridge.load_state_dict(blob["bridge"], strict=strict)
     comp.to(dev).eval()

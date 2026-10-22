@@ -1,0 +1,34 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0001 accum=8 kl=0.0 recon=0.0 smoke=False dry_run=False
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Traceback (most recent call last):
+  File "/share/exp4group/train_latent_memory.py", line 793, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/share/exp4group/train_latent_memory.py", line 789, in main
+    return train(args)
+           ^^^^^^^^^^^
+  File "/share/exp4group/train_latent_memory.py", line 505, in train
+    model = AutoModelForCausalLM.from_pretrained(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/transformers/models/auto/auto_factory.py", line 571, in from_pretrained
+    return model_class.from_pretrained(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/transformers/modeling_utils.py", line 279, in _wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/transformers/modeling_utils.py", line 4399, in from_pretrained
+    ) = cls._load_pretrained_model(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/transformers/modeling_utils.py", line 4793, in _load_pretrained_model
+    caching_allocator_warmup(model_to_load, expanded_device_map, factor=2 if hf_quantizer is None else 4)
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/transformers/modeling_utils.py", line 5799, in caching_allocator_warmup
+    device_memory = torch.cuda.mem_get_info(index)[0]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/conda/envs/latent2/lib/python3.12/site-packages/torch/cuda/memory.py", line 838, in mem_get_info
+    return torch.cuda.cudart().cudaMemGetInfo(device)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+Loading checkpoint shards:   0%|          | 0/3 [00:03<?, ?it/s]

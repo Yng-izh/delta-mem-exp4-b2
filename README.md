@@ -5,7 +5,103 @@
 > **架构说明**：系统目标形态、设计不变量与各组件实现状态见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
-## 最新进展（v9.4-synth-data 轮，2026-10-21）——训练语料生成器 + 训练脚本 `--data` 接入
+## 最新进展（v9.4-latent-gpu-run 轮，2026-10-22）——阶段 A 首次真机训练：**跑完但没学会（0/32）**
+
+**结论先行**：
+
+1. 在 v100-2 上用 15,000 条合成语料跑完 **1,875 步 / 3.7 小时**，loss_qa **12.6 → 3.87**，
+   但**验证 exact-match = 0/32**。
+2. **不是通路坏了**：同一批记忆用**明文**喂进去 **6/6** 全对；把记忆原文的 embedding
+   直接当软 token 注入（跳过压缩器）**4/4** 全对。
+3. **是压缩器学不会编码**：强制它从软 token 重建记忆原文，token 准确率 **22.8%**，
+   而"永远只吐最高频 10 个 token"的平凡基线是 **19.8%** —— 只高 3 个点，等于没编码。
+   加宽 m（4→16，软 token 16→64 个）**毫无改善**，所以也不是容量宽度问题。
+4. 顺带修掉 3 个只有真机才暴露的问题（软 token 尺度差两个量级、掩码设备错配、
+   `deltamem.core` 在 transformers 4.51 上 import 不了）。
+5. **"没训够"与"结构学不出"尚未区分** —— 只跑了 400 步（过拟合）和 1,875 步（全量），
+   而 soft-prompt 类方法通常要几千步、lr 大一个量级。这是下一步实验。
+
+完整日志与数字：[`results/latent_stage_a_2026-10-21/`](results/latent_stage_a_2026-10-21/README.md)；
+细节见 [CHANGELOG.md](CHANGELOG.md) `[v9.4-latent-gpu-run]`。
+
+### 1. 训练结果
+
+| 项 | 值 |
+|---|---|
+| 数据 / 超参 | 15,000 条（12,002 单跳 + 2,998 多跳）；stage a，m=4，layer=18，accum=8，lr=1e-4，1 epoch |
+| 步数 / 耗时 | 1,875 步 / 13,454 s（3.7 h），V100-32G，显存 9.8 GB |
+| 可训练参数 | 7.62 M（compressor 4.99 M + bridge 2.63 M），冻结 4,027.9 M |
+| loss_qa | 12.59 → 8.73 → 7.73（分段均值）→ **3.87**（末步） |
+| **验证 exact-match** | **0.0（n=32）** |
+
+生成不是乱码，是**格式对、名字错**：
+
+```
+Q: What did Stelsal Trurkdest found?
+A: Ironwood Energy Nilork
+生成: Kestrel Analytics Vrindkraulmiothd, a
+```
+
+所以不是读出端崩了，是**记忆没被编码进去**。
+
+### 2. 瓶颈定位（本轮真正有价值的产出）
+
+同一批 200 条样本、8 epoch、400 步，**全部在训练集上评**（最宽松判据）：
+
+| 条件 | QA exact-match | 结论 |
+|---|---|---|
+| m=4（16 软 token） | 1/200 | 连 200 条都记不住 |
+| m=16（64 软 token，加宽 4×） | 3/200 | **不是容量宽度问题** |
+| m=4 + 软 token 范数对齐 | 0/200 | 尺度是真问题，但事后修不够 |
+| m=4 + `--recon-weight 1.0`（强制重建原文） | 0/200，重建 token-acc **22.8%** | **逼不出来** |
+
+真模型上的三条对照（新工具 `tools/diag_latent_capacity.py`）：
+
+| 子命令 | 结果 | 排除了什么 |
+|---|---|---|
+| `--sub text`（明文记忆） | **6/6** | 数据、模型、任务、评测口径 |
+| `--sub oracle`（原文 embedding 当软 token，跳过压缩器） | **4/4** | 软 token 注入通路（位置/mask/拼接） |
+| `--sub scale` | 软 token 范数 **96–159** vs 真实 **1.05** | 尺度（已修） |
+| `--sub probe` | 重建 token-acc 22.8% vs 平凡基线 top10 **19.8%** | **压缩器几乎没编码进内容** |
+
+判据链：明文 6/6 排除数据/模型/任务 → oracle 4/4 排除注入通路 → 4 项 grad-check 全 true
+排除梯度断路 → 200 条过拟合 1/200 排除数据量/epoch → m 加宽无改善排除宽度 →
+recon ≈ 平凡基线 **锁定压缩器没编码**。
+
+### 3. 三个只有真机才暴露的问题（已修）
+
+1. **软 token 尺度差两个量级**：实测 `bridge` 输出每向量范数 **96–159**，而 Qwen3-4B 真实 token
+   embedding 只有 **1.05**。软 token 直接拼进 `inputs_embeds`，尺度差两个量级就成了
+   **attention sink**，把真实 token 淹没。修法：`LatentBridge` 输出**方向归一化 + 受限可学习尺度**
+   （初值取真实 embedding 范数，夹在 [0.25, 4] 倍）。新增 C12–C14 三条断言（单测 86 条全通过）。
+2. **掩码设备错配**：`encode_latent_units` 为省显存把 `h0/h18` 留在 CPU 返回，压缩器里才搬到
+   `p.device`；但 `key_padding_mask` 跟的是 `h0.device`（CPU），GPU 上 SDPA 直接报
+   `attn_bias is on cpu, different from other tensors on cuda`。修法：掩码锚定**参数设备**。
+   CPU 单测里两者都是 CPU，这个 bug 恒不触发。
+3. **`deltamem.core` 在 transformers 4.51 上 import 不了**：`backbone_compat.py` 顶层无条件 import
+   `transformers.models.smollm3`（5.x 才有），`HFDeltaMemConfig` 等入口全部拿不到 —— 尽管本实验
+   只用 Qwen3。新增 `deltamem_compat.py` 注入最小占位（3 个名字），真实模块存在时完全不介入。
+
+另：长跑原先只在结束时落盘（3+ 小时一次，中途崩掉全丢），新增 `--save-every`（默认 500 步）。
+
+### 4. 两次外部事故（不是代码问题）
+
+- 卡 1 上跑到 step 532 被**外部杀掉**（无 traceback，同刻全机 10 张卡任务全被清空，机器没重启），
+  从 step 400 的 checkpoint 续训救回 45 分钟；换回卡 1 重试时 OOM（该卡被另一任务占满），改跑卡 5。
+- 2026-10-21 21:25 env 的 `transformers` 被**别人改坏**（editable 指向不存在的
+  `/root/transformers-main`），全环境 `import transformers` 失败；训练已在 20:46 结束不受影响，
+  后续全部改用 vendored 5.19.0（`PYTHONPATH=/share/exp4group/shim19:...`）。
+
+### 5. 未验证（必读）
+
+- **没有跑更长训练**：只跑了 400 步（过拟合）与 1,875 步（全量）。soft-prompt 类方法通常要
+  几千步、lr 大一个量级。**"没训够"与"结构学不出"尚未区分**。
+- **没有跑 stage B（KL 蒸馏）**：所有数字都来自 stage a 的纯 QA 交叉熵。
+- **没有在评测集上跑过**：0/32 是训练期验证观察值，不是 MemoryAgentBench / LongMemEval 指标。
+- **探针的对照组失效**：200 样本 × 4 万维输入，线性层怎么都能硬背（随机输入也 100%），
+  所以探针数字只能当"有信号"的弱证据；真正的判据是重建准确率对平凡基线。
+
+## 上一轮进展（v9.4-synth-data 轮，2026-10-21）——训练语料生成器 + 训练脚本 `--data` 接入
 
 **结论先行**：
 
@@ -87,7 +183,7 @@ $P train_latent_memory.py --stage a --data synth/train_15k.jsonl \
 4. **`--variants 2` 只覆盖 2 种问法**：同一三元组的其余问法未进入训练集。
 5. **多跳只有 2 跳**：3 跳及以上未生成。
 
-## 最新进展（v9.3-latent 轮，2026-10-21）——潜层读出（路径 B）代码落地，未训练未跑分
+## 更早进展（v9.3-latent 轮，2026-10-21）——潜层读出（路径 B）代码落地，未训练未跑分
 
 **结论先行**：
 
@@ -163,7 +259,7 @@ AR_MODE=v9 AR_READOUT_MODE=latent LATENT_CKPT=ckpt/latent_b.pt ... python run_ar
 5. **P4-A（线性 probe）仍建议先做**：如果探针都读不出答案信息，B 的软 token 也读不出，
    能省掉一次训练。见 §"下一步"。
 
-## 最新进展（v9 收口轮，2026-10-21）——20 项审计落地 + 能力矩阵更新
+## 更早进展（v9 收口轮，2026-10-21）——20 项审计落地 + 能力矩阵更新
 
 > 逐条核验表（每项带 `文件:行` 与测试名）：[experiments/audit_2026-10-21.md](experiments/audit_2026-10-21.md)
 
@@ -362,6 +458,12 @@ CR 读出改为完整路径 `种子 --[关系]--> 中间 --[关系]--> 目标` +
 > `tools/gen_synth_qa.py` / `tests/test_synth_data.py` / `tools/demo_facts.txt`，总数变为 **37**。
 > 该轮在 v100-2 上**真实执行**了数据生成（15,000 + 2,000 条）与 `--smoke-model` 通路自检
 > （`tests/test_synth_data.py` **32/32** PASS），但仍**未跑** GPU 训练，也未重跑上表全部单测。
+>
+> **v9.4-latent-gpu-run 轮（2026-10-22）新增 1 个 `.py`**：`tools/diag_latent_capacity.py`
+> （瓶颈定位工具，四个子命令 text / oracle / scale / probe），总数变为 **38**。
+> 该轮**首次真机跑通 GPU 训练**（1,875 步 / 3.7 h），并在 v100-2 上真实执行了
+> `tests/test_latent_readout.py`（**86/86**）与 `tests/test_synth_data.py`（**32/32**），
+> 但上表的历史单测仍未全量重跑。
 
 环境事实：本机 Python 3.9.6 + torch 2.8.0（CPU，`device_count=0`），`transformers` / `pyarrow` / `deltamem` **缺失**——真实跑分路径本机不可执行，dry-run 已证明不依赖它们。
 
