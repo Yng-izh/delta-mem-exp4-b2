@@ -1,0 +1,924 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0005 accum=4 kl=0.0 recon=1.0 smoke=False dry_run=False
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:02<14:09,  2.14s/it]Loading weights:   1%|          | 3/398 [00:02<04:05,  1.61it/s]Loading weights:   2%|▏         | 6/398 [00:02<01:56,  3.36it/s]Loading weights:   4%|▍         | 15/398 [00:02<00:35, 10.89it/s]Loading weights:   5%|▍         | 19/398 [00:02<00:28, 13.53it/s]Loading weights:   6%|▋         | 25/398 [00:03<00:36, 10.14it/s]Loading weights:   7%|▋         | 28/398 [00:03<00:36, 10.21it/s]Loading weights:   9%|▉         | 36/398 [00:04<00:23, 15.42it/s]Loading weights:  10%|▉         | 39/398 [00:04<00:29, 12.16it/s]Loading weights:  11%|█         | 42/398 [00:04<00:26, 13.45it/s]Loading weights:  12%|█▏        | 47/398 [00:05<00:24, 14.10it/s]Loading weights:  12%|█▏        | 49/398 [00:05<00:29, 11.69it/s]Loading weights:  15%|█▍        | 58/398 [00:05<00:17, 19.59it/s]Loading weights:  15%|█▌        | 61/398 [00:05<00:17, 19.14it/s]Loading weights:  17%|█▋        | 66/398 [00:05<00:14, 22.36it/s]Loading weights:  18%|█▊        | 70/398 [00:06<00:14, 22.11it/s]Loading weights:  18%|█▊        | 73/398 [00:06<00:16, 19.22it/s]Loading weights:  20%|█▉        | 78/398 [00:06<00:17, 18.01it/s]Loading weights:  23%|██▎       | 91/398 [00:06<00:09, 31.99it/s]Loading weights:  24%|██▍       | 95/398 [00:07<00:16, 18.40it/s]Loading weights:  25%|██▌       | 100/398 [00:07<00:14, 20.36it/s]Loading weights:  26%|██▌       | 103/398 [00:07<00:15, 18.59it/s]Loading weights:  27%|██▋       | 106/398 [00:07<00:15, 19.05it/s]Loading weights:  28%|██▊       | 113/398 [00:08<00:12, 22.96it/s]Loading weights:  29%|██▉       | 116/398 [00:08<00:16, 17.20it/s]Loading weights:  30%|██▉       | 119/398 [00:08<00:23, 11.96it/s]Loading weights:  31%|███▏      | 125/398 [00:09<00:15, 17.15it/s]Loading weights:  32%|███▏      | 128/398 [00:09<00:15, 17.29it/s]Loading weights:  34%|███▎      | 134/398 [00:09<00:12, 20.37it/s]Loading weights:  34%|███▍      | 137/398 [00:09<00:13, 19.19it/s]Loading weights:  35%|███▌      | 140/398 [00:10<00:17, 15.01it/s]Loading weights:  36%|███▌      | 144/398 [00:10<00:13, 18.31it/s]Loading weights:  37%|███▋      | 148/398 [00:10<00:12, 20.57it/s]Loading weights:  38%|███▊      | 153/398 [00:10<00:20, 12.04it/s]Loading weights:  40%|███▉      | 159/398 [00:11<00:14, 16.56it/s]Loading weights:  41%|████      | 164/398 [00:11<00:13, 17.82it/s]Loading weights:  42%|████▏     | 167/398 [00:11<00:19, 12.14it/s]Loading weights:  44%|████▍     | 175/398 [00:12<00:11, 18.80it/s]Loading weights:  45%|████▌     | 180/398 [00:12<00:09, 22.79it/s]Loading weights:  46%|████▌     | 184/398 [00:12<00:18, 11.67it/s]Loading weights:  47%|████▋     | 189/398 [00:13<00:15, 13.38it/s]Loading weights:  49%|████▉     | 195/398 [00:13<00:11, 17.67it/s]Loading weights:  51%|█████     | 201/398 [00:13<00:08, 22.51it/s]Loading weights:  52%|█████▏    | 205/398 [00:13<00:10, 19.23it/s]Loading weights:  52%|█████▏    | 208/398 [00:13<00:09, 19.51it/s]Loading weights:  54%|█████▍    | 214/398 [00:14<00:07, 24.16it/s]Loading weights:  55%|█████▌    | 219/398 [00:14<00:06, 27.97it/s]Loading weights:  56%|█████▋    | 224/398 [00:14<00:12, 13.90it/s]Loading weights:  59%|█████▉    | 235/398 [00:15<00:07, 21.97it/s]Loading weights:  60%|██████    | 239/398 [00:15<00:06, 24.17it/s]Loading weights:  62%|██████▏   | 245/398 [00:15<00:05, 26.61it/s]Loading weights:  63%|██████▎   | 249/398 [00:15<00:06, 22.36it/s]Loading weights:  63%|██████▎   | 252/398 [00:16<00:09, 15.24it/s]Loading weights:  66%|██████▌   | 263/398 [00:16<00:05, 24.74it/s]Loading weights:  67%|██████▋   | 268/398 [00:16<00:04, 27.41it/s]Loading weights:  68%|██████▊   | 272/398 [00:16<00:05, 23.50it/s]Loading weights:  70%|██████▉   | 277/398 [00:16<00:04, 27.41it/s]Loading weights:  71%|███████   | 281/398 [00:16<00:04, 27.38it/s]Loading weights:  72%|███████▏  | 287/398 [00:17<00:03, 32.83it/s]Loading weights:  73%|███████▎  | 291/398 [00:17<00:04, 26.54it/s]Loading weights:  74%|███████▍  | 295/398 [00:17<00:03, 26.86it/s]Loading weights:  76%|███████▌  | 301/398 [00:17<00:04, 20.55it/s]Loading weights:  78%|███████▊  | 311/398 [00:17<00:02, 32.38it/s]Loading weights:  79%|███████▉  | 316/398 [00:18<00:03, 22.01it/s]Loading weights:  80%|████████  | 320/398 [00:18<00:04, 15.80it/s]Loading weights:  83%|████████▎ | 331/398 [00:19<00:02, 26.15it/s]Loading weights:  85%|████████▍ | 337/398 [00:19<00:02, 22.34it/s]Loading weights:  86%|████████▌ | 342/398 [00:19<00:02, 24.96it/s]Loading weights:  87%|████████▋ | 347/398 [00:20<00:03, 13.57it/s]Loading weights:  89%|████████▊ | 353/398 [00:20<00:03, 13.69it/s]Loading weights:  89%|████████▉ | 356/398 [00:21<00:03, 13.46it/s]Loading weights:  92%|█████████▏| 367/398 [00:21<00:01, 22.13it/s]Loading weights:  93%|█████████▎| 371/398 [00:21<00:01, 18.01it/s]Loading weights:  94%|█████████▍| 374/398 [00:22<00:01, 13.34it/s]Loading weights:  95%|█████████▌| 379/398 [00:22<00:01, 16.47it/s]Loading weights:  97%|█████████▋| 385/398 [00:22<00:00, 15.89it/s]Loading weights:  97%|█████████▋| 388/398 [00:22<00:00, 15.91it/s]Loading weights:  98%|█████████▊| 391/398 [00:23<00:00, 14.50it/s]Loading weights: 100%|██████████| 398/398 [00:23<00:00, 17.16it/s]
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+[params] 可训练 7.623M (compressor=4.994M, bridge=2.630M)
+[data][warn] 切分不干净：问句完全相同 8 条（如 ['what did ravik tolmstead found?', 'what does isla norvund work as?']）
+[data] synth/latent_min16.jsonl: train=16 val=16 hops={1: 16} 平均记忆单元=1.0
+[data] 例：units=['Taron Velstrik works at Velcor.'] q='Where does Taron Velstrik work?' a='Velcor'
+  [eval@0] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Taron Velstrik works at the University of California, Los An'
+  [eval@0] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Taron Velstrik works at the University of California, Los An'
+  [eval@0] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Mira Quevald was not born. She is a fictional character.'
+  [eval@0] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Mira Quevald was not born; she is a fictional character. The'
+  [eval@0] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Dov Krasilnik studied at the Hebrew University of Jerusalem.'
+  [eval@0] ✗ q='Where did Dov Krasilm study?' gold='Perthia' pred='Dov Krasilnik studied at the Hebrew University of Jerusalem.'
+  [eval@0] ✗ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Yuna Frolmist is not a real person, so she is not married'
+  [eval@0] ✗ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Yuna Frolmist is not a real person, so she is not married'
+  [eval@0] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ravik Tolmstead founded the company **Tolmstead**.'
+  [eval@0] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ravik Tolmstead founded the company **Tolmstead**.'
+  [eval@0] ✗ q='What does Isla Norvund work as?' gold='geologist' pred='Isla Norvund does not exist. There is no known entity or per'
+  [eval@0] ✗ q='What does Isla Norvund work as?' gold='archivist' pred='Isla Norvund does not exist. There is no known entity by tha'
+  [eval@0] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Unknown'
+  [eval@0] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Unknown'
+  [eval@0] ✗ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Unknown'
+  [eval@0] ✗ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Unknown'
+[eval@0] pair-acc=0/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.0 (n=16)
+[ckpt] step 0 已保存 -> ckpt/latent_min16_recon.pt
+  [eval@0] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Taron Velstrik works at the University of California, Los An'
+  [eval@0] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Taron Velstrik works at the University of California, Los An'
+  [eval@0] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Mira Quevald was not born; she is a fictional character. The'
+  [eval@0] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Mira Quevald was not born; she is a fictional character. The'
+  [eval@0] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Dov Krasilnikov studied at the Hebrew University of Jerusale'
+  [eval@0] ✗ q='Where did Dov Krasilm study?' gold='Perthia' pred='Dov Krasilnikov studied at the Hebrew University of Jerusale'
+  [eval@0] ✗ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Yuna Frolmist is not a real person, and there is no public'
+  [eval@0] ✗ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Yuna Frolmist is not a real person, and there is no public'
+  [eval@0] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ravik Tolmstead founded the company **Tolmstead Technologies'
+  [eval@0] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ravik Tolmstead founded Nothing.'
+  [eval@0] ✗ q='What does Isla Norvund work as?' gold='geologist' pred='Isla Norvund is not a known entity in any recognized databas'
+  [eval@0] ✗ q='What does Isla Norvund work as?' gold='archivist' pred='Isla Norvund is not a known entity in any recognized databas'
+  [eval@0] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Unknown'
+  [eval@0] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Unknown'
+  [eval@0] ✗ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Sela Vriqtash is employed by the United Nations.'
+  [eval@0] ✗ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Unknown'
+[eval@0] pair-acc=0/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.0 (n=16) gnorm_comp=7.903e+02 gnorm_bridge=5.976e+02
+[step 1] loss_qa=15.5781 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.903e+02 gnorm_bridge=5.976e+02 (67s)
+[step 2] loss_qa=11.5625 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.674e+01 gnorm_bridge=4.495e+01 (73s)
+[step 3] loss_qa=12.7969 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.880e+01 gnorm_bridge=1.097e+01 (79s)
+[step 4] loss_qa=12.7656 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.081e+01 gnorm_bridge=5.966e+01 (85s)
+[step 5] loss_qa=11.7734 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.476e+01 gnorm_bridge=8.663e+00 (90s)
+[step 6] loss_qa=13.1250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.254e+00 gnorm_bridge=3.406e+00 (96s)
+[step 7] loss_qa=13.5156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.712e+00 gnorm_bridge=6.656e+00 (102s)
+[step 8] loss_qa=12.0078 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.472e+00 gnorm_bridge=1.299e+01 (108s)
+[step 9] loss_qa=12.3594 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.330e+00 gnorm_bridge=7.459e+00 (114s)
+[step 10] loss_qa=9.2812 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.232e+00 gnorm_bridge=7.930e+00 (120s)
+[step 11] loss_qa=13.6719 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.553e+00 gnorm_bridge=6.722e+00 (126s)
+[step 12] loss_qa=11.8750 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.959e+01 gnorm_bridge=2.279e+01 (132s)
+[step 13] loss_qa=13.3125 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.912e+01 gnorm_bridge=4.748e+01 (138s)
+[step 14] loss_qa=12.1250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.458e+01 gnorm_bridge=5.234e+01 (144s)
+[step 15] loss_qa=13.1875 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.639e+00 gnorm_bridge=3.770e+01 (150s)
+[step 16] loss_qa=10.0312 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.537e+01 gnorm_bridge=4.589e+01 (156s)
+[step 17] loss_qa=12.4844 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.251e+01 gnorm_bridge=1.141e+02 (162s)
+[step 18] loss_qa=12.2344 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.116e+00 gnorm_bridge=2.561e+01 (168s)
+[step 19] loss_qa=9.1016 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.830e+01 gnorm_bridge=1.002e+02 (174s)
+[step 20] loss_qa=12.3750 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.902e+01 gnorm_bridge=4.645e+01 (181s)
+[step 21] loss_qa=9.8203 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.347e+00 gnorm_bridge=1.434e+01 (187s)
+[step 22] loss_qa=10.6250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.312e+01 gnorm_bridge=1.432e+02 (193s)
+[step 23] loss_qa=13.4688 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.652e+01 gnorm_bridge=3.423e+01 (199s)
+[step 24] loss_qa=11.0312 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.062e+00 gnorm_bridge=2.296e+01 (204s)
+[step 25] loss_qa=11.4219 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.329e+00 gnorm_bridge=2.911e+01 (210s)
+[step 26] loss_qa=11.3281 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.186e+01 gnorm_bridge=9.920e+01 (215s)
+[step 27] loss_qa=9.4453 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.506e+01 gnorm_bridge=3.623e+01 (222s)
+[step 28] loss_qa=12.0312 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.552e+01 gnorm_bridge=8.007e+01 (228s)
+[step 29] loss_qa=10.6875 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=7.087e+01 gnorm_bridge=2.512e+02 (234s)
+[step 30] loss_qa=11.0234 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.425e+01 gnorm_bridge=1.410e+02 (240s)
+[step 31] loss_qa=8.6953 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.988e+00 gnorm_bridge=2.692e+01 (246s)
+[step 32] loss_qa=10.5078 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.002e+01 gnorm_bridge=5.823e+01 (252s)
+[step 33] loss_qa=12.9688 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.748e+01 gnorm_bridge=9.922e+01 (258s)
+[step 34] loss_qa=10.2344 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.346e+00 gnorm_bridge=2.319e+01 (264s)
+[step 35] loss_qa=7.9922 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.692e+00 gnorm_bridge=3.148e+01 (270s)
+[step 36] loss_qa=9.4219 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.035e+01 gnorm_bridge=2.814e+01 (276s)
+[step 37] loss_qa=9.7344 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.687e+01 gnorm_bridge=3.499e+01 (282s)
+[step 38] loss_qa=10.9297 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.539e+00 gnorm_bridge=2.012e+01 (289s)
+[step 39] loss_qa=8.3438 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.574e+01 gnorm_bridge=8.706e+01 (295s)
+[step 40] loss_qa=10.6406 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.467e+00 gnorm_bridge=2.942e+01 (301s)
+[step 41] loss_qa=9.0000 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.082e+00 gnorm_bridge=1.418e+01 (307s)
+[step 42] loss_qa=9.9141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.813e+00 gnorm_bridge=2.043e+01 (313s)
+[step 43] loss_qa=8.9062 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.051e+01 gnorm_bridge=4.017e+01 (319s)
+[step 44] loss_qa=9.6641 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.196e+00 gnorm_bridge=1.975e+01 (325s)
+[step 45] loss_qa=11.8750 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.328e+01 gnorm_bridge=4.961e+01 (331s)
+[step 46] loss_qa=11.1250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.553e+01 gnorm_bridge=1.665e+02 (336s)
+[step 47] loss_qa=8.9609 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.483e+01 gnorm_bridge=1.383e+02 (342s)
+[step 48] loss_qa=8.7031 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.161e+01 gnorm_bridge=6.219e+01 (348s)
+[step 49] loss_qa=10.6875 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.756e+00 gnorm_bridge=3.013e+01 (354s)
+[step 50] loss_qa=6.8125 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.295e+01 gnorm_bridge=6.373e+01 (360s)
+[step 51] loss_qa=9.8125 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.872e+00 gnorm_bridge=5.611e+01 (367s)
+[step 52] loss_qa=8.7188 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.376e+00 gnorm_bridge=2.541e+01 (372s)
+[step 53] loss_qa=7.4219 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.421e+00 gnorm_bridge=1.487e+01 (378s)
+[step 54] loss_qa=8.7812 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.214e+00 gnorm_bridge=1.617e+01 (384s)
+[step 55] loss_qa=8.2969 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.416e+00 gnorm_bridge=2.080e+01 (390s)
+[step 56] loss_qa=8.8516 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.565e+00 gnorm_bridge=3.087e+01 (396s)
+[step 57] loss_qa=8.3281 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.457e+00 gnorm_bridge=3.871e+01 (403s)
+[step 58] loss_qa=7.0156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.920e+00 gnorm_bridge=2.911e+01 (409s)
+[step 59] loss_qa=7.5156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.899e+00 gnorm_bridge=2.253e+01 (415s)
+[step 60] loss_qa=7.8984 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.524e+00 gnorm_bridge=2.248e+01 (421s)
+[step 61] loss_qa=7.1875 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.203e+00 gnorm_bridge=1.967e+01 (427s)
+[step 62] loss_qa=6.2812 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.952e+00 gnorm_bridge=2.631e+01 (433s)
+[step 63] loss_qa=6.7734 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.830e+00 gnorm_bridge=4.828e+01 (439s)
+[step 64] loss_qa=7.3281 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.254e+00 gnorm_bridge=2.268e+01 (444s)
+[step 65] loss_qa=4.8359 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.260e+00 gnorm_bridge=3.849e+01 (450s)
+[step 66] loss_qa=6.8750 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.985e-01 gnorm_bridge=1.415e+01 (456s)
+[step 67] loss_qa=5.8867 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.408e+00 gnorm_bridge=1.806e+01 (461s)
+[step 68] loss_qa=6.5469 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.280e+00 gnorm_bridge=1.638e+01 (467s)
+[step 69] loss_qa=6.0469 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.384e+00 gnorm_bridge=2.180e+01 (474s)
+[step 70] loss_qa=6.4141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.574e+00 gnorm_bridge=1.124e+02 (480s)
+[step 71] loss_qa=5.4102 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.041e+00 gnorm_bridge=5.434e+01 (486s)
+[step 72] loss_qa=5.1055 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.571e-01 gnorm_bridge=1.024e+01 (492s)
+[step 73] loss_qa=5.0742 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.893e-01 gnorm_bridge=5.261e+00 (498s)
+[step 74] loss_qa=6.7734 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.328e+00 gnorm_bridge=1.938e+01 (504s)
+[step 75] loss_qa=5.7891 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.760e+00 gnorm_bridge=3.368e+01 (510s)
+[step 76] loss_qa=5.3203 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.184e+00 gnorm_bridge=2.037e+01 (516s)
+[step 77] loss_qa=5.2422 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.381e+00 gnorm_bridge=5.749e+01 (522s)
+[step 78] loss_qa=6.2031 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.934e-01 gnorm_bridge=1.376e+01 (528s)
+[step 79] loss_qa=5.3203 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.317e-01 gnorm_bridge=1.648e+01 (534s)
+[step 80] loss_qa=4.7031 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.500e+00 gnorm_bridge=1.892e+01 (541s)
+[step 81] loss_qa=5.1758 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.237e-01 gnorm_bridge=9.700e+00 (547s)
+[step 82] loss_qa=5.6250 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=7.614e-01 gnorm_bridge=1.957e+01 (553s)
+[step 83] loss_qa=5.3828 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.105e-01 gnorm_bridge=1.055e+01 (559s)
+[step 84] loss_qa=4.5898 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.021e-01 gnorm_bridge=6.874e+00 (565s)
+[step 85] loss_qa=5.1289 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.266e-01 gnorm_bridge=8.590e+00 (570s)
+[step 86] loss_qa=4.9961 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.116e-01 gnorm_bridge=9.675e+00 (576s)
+[step 87] loss_qa=5.2305 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.068e-01 gnorm_bridge=9.479e+00 (581s)
+[step 88] loss_qa=4.7109 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.838e-01 gnorm_bridge=8.139e+00 (588s)
+[step 89] loss_qa=4.0859 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.977e-01 gnorm_bridge=9.412e+00 (594s)
+[step 90] loss_qa=5.0938 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.258e-01 gnorm_bridge=2.009e+01 (599s)
+[step 91] loss_qa=5.3516 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.771e-01 gnorm_bridge=6.502e+00 (605s)
+[step 92] loss_qa=5.3672 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.286e-01 gnorm_bridge=5.335e+00 (611s)
+[step 93] loss_qa=5.2188 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.762e-01 gnorm_bridge=1.100e+01 (617s)
+[step 94] loss_qa=3.8125 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.992e-01 gnorm_bridge=7.771e+00 (623s)
+[step 95] loss_qa=4.7734 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.104e-01 gnorm_bridge=8.911e+00 (629s)
+[step 96] loss_qa=5.2891 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.348e-01 gnorm_bridge=7.397e+00 (635s)
+[step 97] loss_qa=4.7461 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.934e-01 gnorm_bridge=1.106e+01 (641s)
+[step 98] loss_qa=4.3008 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.382e-01 gnorm_bridge=8.048e+00 (647s)
+[step 99] loss_qa=4.6602 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.559e-01 gnorm_bridge=1.686e+01 (653s)
+[step 100] loss_qa=5.0391 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.184e-01 gnorm_bridge=1.455e+01 (660s)
+[step 101] loss_qa=4.4336 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.720e-01 gnorm_bridge=1.389e+01 (666s)
+[step 102] loss_qa=4.5156 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.302e-01 gnorm_bridge=1.699e+01 (672s)
+[step 103] loss_qa=3.9766 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.970e-01 gnorm_bridge=2.011e+01 (678s)
+[step 104] loss_qa=5.6875 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.556e-01 gnorm_bridge=9.632e+00 (684s)
+[step 105] loss_qa=4.5156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.413e-01 gnorm_bridge=1.240e+01 (690s)
+[step 106] loss_qa=4.6250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.171e+00 gnorm_bridge=2.916e+01 (696s)
+[step 107] loss_qa=4.2266 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.359e-01 gnorm_bridge=7.962e+00 (702s)
+[step 108] loss_qa=5.0547 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.649e-01 gnorm_bridge=1.241e+01 (707s)
+[step 109] loss_qa=5.0117 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.126e-01 gnorm_bridge=9.560e+00 (713s)
+[step 110] loss_qa=4.2500 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.556e-01 gnorm_bridge=8.214e+00 (719s)
+[step 111] loss_qa=4.3633 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.624e-01 gnorm_bridge=1.013e+01 (725s)
+[step 112] loss_qa=4.9297 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.835e+00 gnorm_bridge=3.490e+01 (731s)
+[step 113] loss_qa=4.7656 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.566e+00 gnorm_bridge=2.846e+01 (737s)
+[step 114] loss_qa=4.6758 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.505e-01 gnorm_bridge=8.284e+00 (743s)
+[step 115] loss_qa=3.8477 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.742e-01 gnorm_bridge=2.088e+01 (749s)
+[step 116] loss_qa=4.8672 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.982e-01 gnorm_bridge=1.016e+01 (755s)
+[step 117] loss_qa=4.2578 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.447e-01 gnorm_bridge=1.322e+01 (761s)
+[step 118] loss_qa=5.3359 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.316e-01 gnorm_bridge=1.112e+01 (767s)
+[step 119] loss_qa=4.0938 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.328e-01 gnorm_bridge=1.521e+01 (774s)
+[step 120] loss_qa=4.0391 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.006e+00 gnorm_bridge=2.867e+01 (780s)
+[step 121] loss_qa=4.8750 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.729e+00 gnorm_bridge=3.504e+01 (786s)
+[step 122] loss_qa=3.7969 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.059e-01 gnorm_bridge=1.411e+01 (792s)
+[step 123] loss_qa=4.6250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.279e-01 gnorm_bridge=1.570e+01 (798s)
+[step 124] loss_qa=4.2715 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.736e-01 gnorm_bridge=1.201e+01 (804s)
+[step 125] loss_qa=3.6963 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.770e-01 gnorm_bridge=1.808e+01 (810s)
+[step 126] loss_qa=5.1094 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.828e-01 gnorm_bridge=1.525e+01 (816s)
+[step 127] loss_qa=4.4766 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.800e-01 gnorm_bridge=1.726e+01 (821s)
+[step 128] loss_qa=4.3438 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.050e-01 gnorm_bridge=2.106e+01 (827s)
+[step 129] loss_qa=5.1953 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.941e-01 gnorm_bridge=1.573e+01 (833s)
+[step 130] loss_qa=3.2109 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.670e-01 gnorm_bridge=1.604e+01 (839s)
+[step 131] loss_qa=4.4141 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.882e-01 gnorm_bridge=8.315e+00 (845s)
+[step 132] loss_qa=4.4648 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.618e-01 gnorm_bridge=1.546e+01 (851s)
+[step 133] loss_qa=4.1562 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.868e-01 gnorm_bridge=1.210e+01 (857s)
+[step 134] loss_qa=3.3789 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.834e-01 gnorm_bridge=1.696e+01 (863s)
+[step 135] loss_qa=4.9922 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.095e-01 gnorm_bridge=1.703e+01 (869s)
+[step 136] loss_qa=5.2344 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.198e+00 gnorm_bridge=2.411e+01 (875s)
+[step 137] loss_qa=4.3008 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=7.877e-01 gnorm_bridge=1.335e+01 (882s)
+[step 138] loss_qa=5.4922 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.976e-01 gnorm_bridge=1.348e+01 (888s)
+[step 139] loss_qa=3.5586 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.345e+00 gnorm_bridge=3.822e+01 (894s)
+[step 140] loss_qa=4.1602 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.378e-01 gnorm_bridge=1.601e+01 (900s)
+[step 141] loss_qa=4.3359 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.936e-01 gnorm_bridge=1.023e+01 (906s)
+[step 142] loss_qa=4.7891 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.260e-01 gnorm_bridge=1.172e+01 (913s)
+[step 143] loss_qa=5.1602 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.557e-01 gnorm_bridge=9.604e+00 (919s)
+[step 144] loss_qa=3.0078 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.038e+00 gnorm_bridge=3.905e+01 (925s)
+[step 145] loss_qa=3.8906 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.574e-01 gnorm_bridge=1.524e+01 (931s)
+[step 146] loss_qa=3.3027 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.576e-01 gnorm_bridge=2.366e+01 (936s)
+[step 147] loss_qa=5.0703 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.382e-01 gnorm_bridge=1.615e+01 (942s)
+[step 148] loss_qa=4.9297 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.115e-01 gnorm_bridge=1.811e+01 (948s)
+[step 149] loss_qa=4.4297 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.111e-01 gnorm_bridge=1.932e+01 (954s)
+[step 150] loss_qa=4.0371 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.814e-01 gnorm_bridge=1.902e+01 (960s)
+[step 151] loss_qa=4.5684 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.023e+00 gnorm_bridge=2.270e+01 (966s)
+[step 152] loss_qa=3.8281 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.644e-01 gnorm_bridge=1.172e+01 (972s)
+[step 153] loss_qa=4.0000 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.007e-01 gnorm_bridge=1.271e+01 (978s)
+[step 154] loss_qa=3.7422 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.697e-01 gnorm_bridge=1.945e+01 (984s)
+[step 155] loss_qa=5.2266 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.762e-01 gnorm_bridge=1.530e+01 (990s)
+[step 156] loss_qa=3.9805 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.845e-01 gnorm_bridge=1.222e+01 (996s)
+[step 157] loss_qa=4.8438 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.241e-01 gnorm_bridge=1.021e+01 (1002s)
+[step 158] loss_qa=3.3945 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.572e-01 gnorm_bridge=6.890e+00 (1008s)
+[step 159] loss_qa=4.1055 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.097e-01 gnorm_bridge=1.234e+01 (1014s)
+[step 160] loss_qa=4.1387 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.249e+00 gnorm_bridge=3.133e+01 (1020s)
+[step 161] loss_qa=3.5234 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.892e-01 gnorm_bridge=2.312e+01 (1027s)
+[step 162] loss_qa=4.2188 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.088e-01 gnorm_bridge=1.589e+01 (1033s)
+[step 163] loss_qa=4.5508 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.190e-01 gnorm_bridge=1.544e+01 (1039s)
+[step 164] loss_qa=4.6953 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.057e+00 gnorm_bridge=2.039e+01 (1045s)
+[step 165] loss_qa=3.0933 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.824e-01 gnorm_bridge=1.389e+01 (1051s)
+[step 166] loss_qa=3.8496 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.867e+00 gnorm_bridge=2.828e+01 (1056s)
+[step 167] loss_qa=3.8867 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.119e-01 gnorm_bridge=1.025e+01 (1062s)
+[step 168] loss_qa=5.2266 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.381e-01 gnorm_bridge=1.531e+01 (1068s)
+[step 169] loss_qa=3.5859 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.003e+00 gnorm_bridge=2.012e+01 (1074s)
+[step 170] loss_qa=4.0391 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.472e-01 gnorm_bridge=9.995e+00 (1080s)
+[step 171] loss_qa=3.4180 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.148e+00 gnorm_bridge=1.899e+01 (1086s)
+[step 172] loss_qa=4.7695 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.494e-01 gnorm_bridge=1.268e+01 (1092s)
+[step 173] loss_qa=4.3281 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.514e-01 gnorm_bridge=1.527e+01 (1098s)
+[step 174] loss_qa=4.5938 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.294e+00 gnorm_bridge=1.609e+01 (1104s)
+[step 175] loss_qa=3.2500 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.066e+00 gnorm_bridge=1.543e+01 (1110s)
+[step 176] loss_qa=3.9023 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.371e+00 gnorm_bridge=2.185e+01 (1116s)
+[step 177] loss_qa=3.6543 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.402e+00 gnorm_bridge=1.679e+01 (1122s)
+[step 178] loss_qa=5.0312 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.328e+00 gnorm_bridge=1.399e+01 (1128s)
+[step 179] loss_qa=2.9482 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.658e-01 gnorm_bridge=1.702e+01 (1134s)
+[step 180] loss_qa=4.2695 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.195e-01 gnorm_bridge=1.505e+01 (1140s)
+[step 181] loss_qa=4.0820 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.030e-01 gnorm_bridge=1.157e+01 (1146s)
+[step 182] loss_qa=3.1650 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.443e-01 gnorm_bridge=1.012e+01 (1152s)
+[step 183] loss_qa=4.1504 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.639e+00 gnorm_bridge=2.089e+01 (1158s)
+[step 184] loss_qa=4.2266 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.754e-01 gnorm_bridge=1.668e+01 (1164s)
+[step 185] loss_qa=4.5156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.242e-01 gnorm_bridge=1.323e+01 (1171s)
+[step 186] loss_qa=2.7866 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.209e+00 gnorm_bridge=1.348e+01 (1177s)
+[step 187] loss_qa=4.1289 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.079e-01 gnorm_bridge=1.064e+01 (1183s)
+[step 188] loss_qa=3.4414 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.377e-01 gnorm_bridge=1.323e+01 (1188s)
+[step 189] loss_qa=3.0811 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.362e+00 gnorm_bridge=2.018e+01 (1194s)
+[step 190] loss_qa=3.5977 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.805e+00 gnorm_bridge=2.465e+01 (1200s)
+[step 191] loss_qa=4.0000 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.387e-01 gnorm_bridge=1.367e+01 (1206s)
+[step 192] loss_qa=4.3633 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.100e+00 gnorm_bridge=1.988e+01 (1212s)
+[step 193] loss_qa=5.1406 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.754e+00 gnorm_bridge=2.022e+01 (1218s)
+[step 194] loss_qa=3.4648 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.693e-01 gnorm_bridge=1.206e+01 (1224s)
+[step 195] loss_qa=3.4492 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.553e+00 gnorm_bridge=2.285e+01 (1230s)
+[step 196] loss_qa=2.7363 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.058e+00 gnorm_bridge=1.570e+01 (1236s)
+[step 197] loss_qa=4.0781 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.100e+00 gnorm_bridge=1.979e+01 (1243s)
+[step 198] loss_qa=3.9677 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.456e+00 gnorm_bridge=1.060e+01 (1248s)
+[step 199] loss_qa=3.3145 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.709e+00 gnorm_bridge=2.766e+01 (1254s)
+[step 200] loss_qa=3.5273 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.429e-01 gnorm_bridge=1.355e+01 (1260s)
+[ckpt] step 200 已保存 -> ckpt/latent_min16_recon.pt
+  [eval@200] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Velshar Research Center'
+  [eval@200] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Velshar Research Center'
+  [eval@200] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Ostrenia'
+  [eval@200] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Ostrenia'
+  [eval@200] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Dov Krasilm studied at Veldar.'
+  [eval@200] ✗ q='Where did Dov Krasilm study?' gold='Perthia' pred='Dov Krasilm studied at Veldar.'
+  [eval@200] ✗ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Elden Kaelen'
+  [eval@200] ✗ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Elden Voskoff'
+  [eval@200] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ostren Academy'
+  [eval@200] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ostren Academy'
+  [eval@200] ✗ q='What does Isla Norvund work as?' gold='geologist' pred='archivist'
+  [eval@200] ✓ q='What does Isla Norvund work as?' gold='archivist' pred='archivist'
+  [eval@200] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Ostreny'
+  [eval@200] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Dorvendre Nord'
+  [eval@200] ✗ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Talorin Drenn'
+  [eval@200] ✗ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Talorin Corp.'
+[eval@200] pair-acc=0/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=200 full-match=0.0625 (n=16) gnorm_comp=1.691e+00 gnorm_bridge=2.011e+01
+[step 201] loss_qa=3.9727 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.691e+00 gnorm_bridge=2.011e+01 (1286s)
+[step 202] loss_qa=3.1504 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.909e+00 gnorm_bridge=1.625e+01 (1292s)
+[step 203] loss_qa=5.0508 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.272e+00 gnorm_bridge=2.152e+01 (1298s)
+[step 204] loss_qa=2.8809 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.775e+00 gnorm_bridge=2.464e+01 (1303s)
+[step 205] loss_qa=3.9844 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.369e+00 gnorm_bridge=1.528e+01 (1309s)
+[step 206] loss_qa=4.4141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.461e+00 gnorm_bridge=2.752e+01 (1315s)
+[step 207] loss_qa=2.9629 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.976e+00 gnorm_bridge=1.192e+01 (1320s)
+[step 208] loss_qa=3.6953 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.744e+00 gnorm_bridge=1.727e+01 (1326s)
+[step 209] loss_qa=4.2275 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.673e+00 gnorm_bridge=1.627e+01 (1333s)
+[step 210] loss_qa=3.9141 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.350e+00 gnorm_bridge=4.666e+01 (1339s)
+[step 211] loss_qa=4.3281 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.306e+00 gnorm_bridge=3.145e+01 (1345s)
+[step 212] loss_qa=3.0801 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.463e-01 gnorm_bridge=1.566e+01 (1351s)
+[step 213] loss_qa=3.7578 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.351e+00 gnorm_bridge=2.066e+01 (1357s)
+[step 214] loss_qa=4.0781 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.572e+01 gnorm_bridge=4.646e+01 (1363s)
+[step 215] loss_qa=3.5508 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.384e+00 gnorm_bridge=3.147e+01 (1369s)
+[step 216] loss_qa=4.5469 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.710e-01 gnorm_bridge=1.485e+01 (1375s)
+[step 217] loss_qa=3.7734 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.434e+00 gnorm_bridge=1.894e+01 (1381s)
+[step 218] loss_qa=2.5576 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=7.494e-01 gnorm_bridge=2.091e+01 (1387s)
+[step 219] loss_qa=4.4961 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.192e+00 gnorm_bridge=1.559e+01 (1393s)
+[step 220] loss_qa=4.4062 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.044e-01 gnorm_bridge=1.386e+01 (1400s)
+[step 221] loss_qa=4.5039 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.222e-01 gnorm_bridge=1.188e+01 (1406s)
+[step 222] loss_qa=3.2031 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.435e+00 gnorm_bridge=1.700e+01 (1412s)
+[step 223] loss_qa=3.9023 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.844e-01 gnorm_bridge=1.107e+01 (1417s)
+[step 224] loss_qa=3.2422 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.879e-01 gnorm_bridge=2.004e+01 (1423s)
+[step 225] loss_qa=4.0781 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.366e+00 gnorm_bridge=2.295e+01 (1429s)
+[step 226] loss_qa=4.6719 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.807e+00 gnorm_bridge=1.050e+01 (1435s)
+[step 227] loss_qa=2.5776 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.875e+00 gnorm_bridge=1.404e+01 (1441s)
+[step 228] loss_qa=3.2148 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.241e+00 gnorm_bridge=2.576e+01 (1447s)
+[step 229] loss_qa=5.1953 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.917e+00 gnorm_bridge=1.232e+01 (1453s)
+[step 230] loss_qa=2.6987 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.518e+00 gnorm_bridge=1.527e+01 (1459s)
+[step 231] loss_qa=2.7500 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.048e+00 gnorm_bridge=2.092e+01 (1465s)
+[step 232] loss_qa=3.8086 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.632e-01 gnorm_bridge=1.397e+01 (1471s)
+[step 233] loss_qa=4.2109 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.982e-01 gnorm_bridge=1.101e+01 (1478s)
+[step 234] loss_qa=2.7727 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.963e-01 gnorm_bridge=2.112e+01 (1484s)
+[step 235] loss_qa=2.6680 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.902e+00 gnorm_bridge=2.837e+01 (1490s)
+[step 236] loss_qa=4.8828 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.888e+00 gnorm_bridge=2.306e+01 (1496s)
+[step 237] loss_qa=3.9766 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.870e-01 gnorm_bridge=1.062e+01 (1502s)
+[step 238] loss_qa=2.9395 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.059e+00 gnorm_bridge=2.200e+01 (1508s)
+[step 239] loss_qa=3.6445 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.092e+00 gnorm_bridge=1.677e+01 (1514s)
+[step 240] loss_qa=3.6230 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.013e+00 gnorm_bridge=2.932e+01 (1520s)
+[step 241] loss_qa=2.1660 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.542e-01 gnorm_bridge=2.111e+01 (1526s)
+[step 242] loss_qa=4.7188 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.464e+00 gnorm_bridge=1.416e+01 (1532s)
+[step 243] loss_qa=3.6406 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.313e+00 gnorm_bridge=1.909e+01 (1537s)
+[step 244] loss_qa=3.4961 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.253e+00 gnorm_bridge=1.637e+01 (1543s)
+[step 245] loss_qa=4.5000 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.596e+00 gnorm_bridge=1.423e+01 (1549s)
+[step 246] loss_qa=2.0381 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.312e-01 gnorm_bridge=1.312e+01 (1555s)
+[step 247] loss_qa=3.2852 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.529e+00 gnorm_bridge=1.827e+01 (1561s)
+[step 248] loss_qa=3.6719 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.292e+00 gnorm_bridge=2.093e+01 (1566s)
+[step 249] loss_qa=2.3286 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.600e+00 gnorm_bridge=1.812e+01 (1572s)
+[step 250] loss_qa=3.6680 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.534e+00 gnorm_bridge=2.130e+01 (1578s)
+[step 251] loss_qa=4.5781 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.828e+00 gnorm_bridge=1.599e+01 (1584s)
+[step 252] loss_qa=2.7891 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.853e-01 gnorm_bridge=1.425e+01 (1591s)
+[step 253] loss_qa=1.5137 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.833e+00 gnorm_bridge=2.453e+01 (1597s)
+[step 254] loss_qa=4.8750 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.441e-01 gnorm_bridge=1.186e+01 (1603s)
+[step 255] loss_qa=4.0156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.774e+00 gnorm_bridge=1.234e+01 (1609s)
+[step 256] loss_qa=3.4062 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.325e+00 gnorm_bridge=1.048e+01 (1615s)
+[step 257] loss_qa=3.1670 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.880e-01 gnorm_bridge=1.340e+01 (1621s)
+[step 258] loss_qa=3.1348 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.603e+00 gnorm_bridge=2.011e+01 (1627s)
+[step 259] loss_qa=3.4141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.039e+00 gnorm_bridge=2.406e+01 (1633s)
+[step 260] loss_qa=4.4961 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.543e+00 gnorm_bridge=3.405e+01 (1639s)
+[step 261] loss_qa=2.9649 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.397e+00 gnorm_bridge=4.095e+01 (1645s)
+[step 262] loss_qa=3.9883 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.168e+00 gnorm_bridge=2.490e+01 (1652s)
+[step 263] loss_qa=4.4023 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.986e+00 gnorm_bridge=2.813e+01 (1658s)
+[step 264] loss_qa=2.4478 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.366e+00 gnorm_bridge=1.742e+01 (1664s)
+[step 265] loss_qa=3.6724 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.305e+00 gnorm_bridge=1.143e+01 (1670s)
+[step 266] loss_qa=4.2734 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.896e-01 gnorm_bridge=1.682e+01 (1675s)
+[step 267] loss_qa=3.4688 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.948e+00 gnorm_bridge=1.545e+01 (1681s)
+[step 268] loss_qa=2.5059 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.967e+00 gnorm_bridge=2.407e+01 (1687s)
+[step 269] loss_qa=2.7500 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.055e+00 gnorm_bridge=1.713e+01 (1692s)
+[step 270] loss_qa=3.0342 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.699e+00 gnorm_bridge=2.284e+01 (1698s)
+[step 271] loss_qa=3.6562 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.698e+00 gnorm_bridge=1.652e+01 (1705s)
+[step 272] loss_qa=3.9707 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.419e+00 gnorm_bridge=1.579e+01 (1711s)
+[step 273] loss_qa=3.3965 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.801e+00 gnorm_bridge=2.283e+01 (1717s)
+[step 274] loss_qa=4.4766 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.471e+00 gnorm_bridge=1.697e+01 (1723s)
+[step 275] loss_qa=2.3716 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.652e-01 gnorm_bridge=1.477e+01 (1729s)
+[step 276] loss_qa=3.4062 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.048e+00 gnorm_bridge=1.703e+01 (1735s)
+[step 277] loss_qa=4.2852 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.825e-01 gnorm_bridge=1.721e+01 (1741s)
+[step 278] loss_qa=2.7461 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.901e+00 gnorm_bridge=1.489e+01 (1747s)
+[step 279] loss_qa=2.0400 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.713e+00 gnorm_bridge=1.320e+01 (1753s)
+[step 280] loss_qa=3.6562 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.957e+00 gnorm_bridge=1.810e+01 (1760s)
+[step 281] loss_qa=4.1523 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.623e+00 gnorm_bridge=2.424e+01 (1766s)
+[step 282] loss_qa=1.9773 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.112e+00 gnorm_bridge=2.415e+01 (1772s)
+[step 283] loss_qa=3.5479 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.007e+00 gnorm_bridge=1.768e+01 (1778s)
+[step 284] loss_qa=3.0352 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.975e+00 gnorm_bridge=2.179e+01 (1783s)
+[step 285] loss_qa=3.2715 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.798e+00 gnorm_bridge=3.552e+01 (1789s)
+[step 286] loss_qa=3.3623 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.513e+00 gnorm_bridge=1.802e+01 (1795s)
+[step 287] loss_qa=2.7676 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.542e+00 gnorm_bridge=2.021e+01 (1800s)
+[step 288] loss_qa=3.7070 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.700e+00 gnorm_bridge=1.999e+01 (1806s)
+[step 289] loss_qa=3.3379 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.479e+00 gnorm_bridge=1.888e+01 (1811s)
+[step 290] loss_qa=4.2344 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.529e+00 gnorm_bridge=1.334e+01 (1818s)
+[step 291] loss_qa=1.9521 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.537e+00 gnorm_bridge=2.596e+01 (1824s)
+[step 292] loss_qa=3.3359 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.575e+00 gnorm_bridge=2.450e+01 (1830s)
+[step 293] loss_qa=2.9023 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.372e+00 gnorm_bridge=1.431e+01 (1836s)
+[step 294] loss_qa=3.6953 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.129e+00 gnorm_bridge=2.175e+01 (1842s)
+[step 295] loss_qa=2.7559 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.854e+00 gnorm_bridge=2.985e+01 (1848s)
+[step 296] loss_qa=3.3918 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.442e+00 gnorm_bridge=1.671e+01 (1854s)
+[step 297] loss_qa=3.4766 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.846e+00 gnorm_bridge=2.332e+01 (1860s)
+[step 298] loss_qa=2.3628 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.281e+00 gnorm_bridge=2.141e+01 (1866s)
+[step 299] loss_qa=3.2793 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.434e+00 gnorm_bridge=1.735e+01 (1872s)
+[step 300] loss_qa=3.0234 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.380e-01 gnorm_bridge=1.985e+01 (1878s)
+[step 301] loss_qa=2.6797 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.818e+00 gnorm_bridge=3.549e+01 (1885s)
+[step 302] loss_qa=3.0215 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.449e+00 gnorm_bridge=4.978e+01 (1891s)
+[step 303] loss_qa=4.3633 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.137e+00 gnorm_bridge=2.315e+01 (1897s)
+[step 304] loss_qa=2.4546 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.613e+00 gnorm_bridge=4.209e+01 (1902s)
+[step 305] loss_qa=4.3789 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.051e+00 gnorm_bridge=2.883e+01 (1908s)
+[step 306] loss_qa=1.4146 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.731e-01 gnorm_bridge=1.453e+01 (1914s)
+[step 307] loss_qa=2.1484 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.986e+00 gnorm_bridge=2.057e+01 (1919s)
+[step 308] loss_qa=3.4492 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.208e+00 gnorm_bridge=1.872e+01 (1925s)
+[step 309] loss_qa=3.0801 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.791e-01 gnorm_bridge=1.956e+01 (1931s)
+[step 310] loss_qa=2.3096 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.070e+00 gnorm_bridge=2.196e+01 (1937s)
+[step 311] loss_qa=3.0566 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.013e+00 gnorm_bridge=2.257e+01 (1943s)
+[step 312] loss_qa=3.0273 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.098e+00 gnorm_bridge=1.713e+01 (1949s)
+[step 313] loss_qa=2.5430 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.331e+00 gnorm_bridge=2.321e+01 (1955s)
+[step 314] loss_qa=1.7520 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.637e+00 gnorm_bridge=1.618e+01 (1962s)
+[step 315] loss_qa=3.1736 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.665e+00 gnorm_bridge=2.115e+01 (1968s)
+[step 316] loss_qa=3.3789 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.146e+00 gnorm_bridge=2.894e+01 (1974s)
+[step 317] loss_qa=2.5820 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.396e+00 gnorm_bridge=1.977e+01 (1980s)
+[step 318] loss_qa=2.1982 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.921e+00 gnorm_bridge=1.759e+01 (1986s)
+[step 319] loss_qa=2.8027 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.076e+00 gnorm_bridge=3.554e+01 (1992s)
+[step 320] loss_qa=3.2715 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.989e-01 gnorm_bridge=1.233e+01 (1998s)
+[step 321] loss_qa=2.0684 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.892e+00 gnorm_bridge=2.375e+01 (2004s)
+[step 322] loss_qa=2.8418 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.653e+00 gnorm_bridge=2.098e+01 (2010s)
+[step 323] loss_qa=3.4648 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.373e+00 gnorm_bridge=1.936e+01 (2016s)
+[step 324] loss_qa=2.1929 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.304e+00 gnorm_bridge=2.539e+01 (2022s)
+[step 325] loss_qa=1.4619 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.984e+00 gnorm_bridge=2.503e+01 (2028s)
+[step 326] loss_qa=3.4434 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.550e+00 gnorm_bridge=2.355e+01 (2034s)
+[step 327] loss_qa=2.5859 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.101e+00 gnorm_bridge=1.816e+01 (2040s)
+[step 328] loss_qa=3.0840 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.387e+00 gnorm_bridge=1.687e+01 (2046s)
+[step 329] loss_qa=2.5020 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.627e-01 gnorm_bridge=1.447e+01 (2052s)
+[step 330] loss_qa=1.4443 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.123e+00 gnorm_bridge=2.321e+01 (2058s)
+[step 331] loss_qa=2.8428 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.226e+00 gnorm_bridge=2.637e+01 (2063s)
+[step 332] loss_qa=3.5479 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.579e+00 gnorm_bridge=2.767e+01 (2070s)
+[step 333] loss_qa=1.3784 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.573e+00 gnorm_bridge=2.224e+01 (2076s)
+[step 334] loss_qa=3.3271 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.944e+00 gnorm_bridge=1.901e+01 (2082s)
+[step 335] loss_qa=2.5430 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.418e+01 gnorm_bridge=3.887e+01 (2088s)
+[step 336] loss_qa=2.5771 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.014e+00 gnorm_bridge=1.858e+01 (2094s)
+[step 337] loss_qa=2.9746 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.286e+00 gnorm_bridge=1.225e+01 (2100s)
+[step 338] loss_qa=2.7227 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.986e+00 gnorm_bridge=2.634e+01 (2106s)
+[step 339] loss_qa=2.0273 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.356e+00 gnorm_bridge=2.094e+01 (2112s)
+[step 340] loss_qa=3.0210 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.253e+00 gnorm_bridge=2.526e+01 (2118s)
+[step 341] loss_qa=2.5508 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.337e+00 gnorm_bridge=2.384e+01 (2124s)
+[step 342] loss_qa=3.3093 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.014e+00 gnorm_bridge=2.650e+01 (2130s)
+[step 343] loss_qa=1.8101 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.214e+00 gnorm_bridge=4.623e+01 (2136s)
+[step 344] loss_qa=2.9648 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.900e+00 gnorm_bridge=2.639e+01 (2142s)
+[step 345] loss_qa=3.3398 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.165e+00 gnorm_bridge=2.118e+01 (2148s)
+[step 346] loss_qa=1.9961 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.014e+00 gnorm_bridge=2.151e+01 (2154s)
+[step 347] loss_qa=2.4609 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.501e+00 gnorm_bridge=2.333e+01 (2159s)
+[step 348] loss_qa=2.6865 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.511e+00 gnorm_bridge=2.586e+01 (2165s)
+[step 349] loss_qa=2.9185 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.367e+00 gnorm_bridge=1.561e+01 (2171s)
+[step 350] loss_qa=2.4297 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.382e+00 gnorm_bridge=2.081e+01 (2177s)
+[step 351] loss_qa=2.3877 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.498e+00 gnorm_bridge=2.203e+01 (2183s)
+[step 352] loss_qa=3.2344 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.284e+00 gnorm_bridge=2.456e+01 (2189s)
+[step 353] loss_qa=3.2656 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.152e+00 gnorm_bridge=2.216e+01 (2195s)
+[step 354] loss_qa=2.5449 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.908e+00 gnorm_bridge=1.671e+01 (2201s)
+[step 355] loss_qa=2.1394 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.436e-01 gnorm_bridge=2.226e+01 (2207s)
+[step 356] loss_qa=2.4541 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.482e+00 gnorm_bridge=1.813e+01 (2213s)
+[step 357] loss_qa=1.9543 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.972e-01 gnorm_bridge=1.321e+01 (2219s)
+[step 358] loss_qa=1.6079 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.828e+00 gnorm_bridge=4.194e+01 (2225s)
+[step 359] loss_qa=3.4297 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.770e-01 gnorm_bridge=1.944e+01 (2231s)
+[step 360] loss_qa=3.2188 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.234e+00 gnorm_bridge=2.630e+01 (2237s)
+[step 361] loss_qa=1.9141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.231e+00 gnorm_bridge=2.183e+01 (2243s)
+[step 362] loss_qa=2.6084 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.596e+00 gnorm_bridge=1.781e+01 (2250s)
+[step 363] loss_qa=3.4004 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.807e+00 gnorm_bridge=2.290e+01 (2256s)
+[step 364] loss_qa=2.7695 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.282e+00 gnorm_bridge=3.201e+01 (2262s)
+[step 365] loss_qa=2.6787 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.192e+00 gnorm_bridge=2.660e+01 (2267s)
+[step 366] loss_qa=3.5742 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.847e+00 gnorm_bridge=1.726e+01 (2273s)
+[step 367] loss_qa=1.9336 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.707e-01 gnorm_bridge=2.631e+01 (2279s)
+[step 368] loss_qa=2.2266 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.276e+00 gnorm_bridge=2.493e+01 (2284s)
+[step 369] loss_qa=2.4224 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.346e+00 gnorm_bridge=1.684e+01 (2291s)
+[step 370] loss_qa=2.8828 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.416e+00 gnorm_bridge=3.626e+01 (2297s)
+[step 371] loss_qa=1.4326 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.017e+00 gnorm_bridge=3.224e+01 (2302s)
+[step 372] loss_qa=3.3164 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.884e+00 gnorm_bridge=1.775e+01 (2308s)
+[step 373] loss_qa=1.3721 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.884e+00 gnorm_bridge=2.804e+01 (2314s)
+[step 374] loss_qa=3.6279 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.449e+00 gnorm_bridge=3.457e+01 (2320s)
+[step 375] loss_qa=2.0774 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.597e-01 gnorm_bridge=2.143e+01 (2327s)
+[step 376] loss_qa=2.7207 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.889e+00 gnorm_bridge=2.509e+01 (2333s)
+[step 377] loss_qa=2.1611 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.373e+00 gnorm_bridge=3.819e+01 (2339s)
+[step 378] loss_qa=4.0938 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.118e+00 gnorm_bridge=1.829e+01 (2345s)
+[step 379] loss_qa=1.1221 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.600e+00 gnorm_bridge=2.344e+01 (2350s)
+[step 380] loss_qa=2.5938 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.833e+00 gnorm_bridge=2.347e+01 (2356s)
+[step 381] loss_qa=2.1201 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.443e+00 gnorm_bridge=1.748e+01 (2363s)
+[step 382] loss_qa=1.6201 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.050e+00 gnorm_bridge=3.489e+01 (2369s)
+[step 383] loss_qa=3.5781 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.663e-01 gnorm_bridge=1.683e+01 (2375s)
+[step 384] loss_qa=2.4961 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.308e+00 gnorm_bridge=2.323e+01 (2381s)
+[step 385] loss_qa=2.4485 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.182e+00 gnorm_bridge=1.791e+01 (2387s)
+[step 386] loss_qa=2.3398 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.938e+00 gnorm_bridge=2.318e+01 (2393s)
+[step 387] loss_qa=1.8740 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.445e+00 gnorm_bridge=2.203e+01 (2400s)
+[step 388] loss_qa=2.4888 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.547e+00 gnorm_bridge=2.401e+01 (2405s)
+[step 389] loss_qa=2.5332 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.388e+00 gnorm_bridge=2.069e+01 (2411s)
+[step 390] loss_qa=1.4292 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.010e+00 gnorm_bridge=4.345e+01 (2417s)
+[step 391] loss_qa=3.3965 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.111e+01 gnorm_bridge=1.843e+01 (2422s)
+[step 392] loss_qa=1.9375 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.612e+00 gnorm_bridge=2.374e+01 (2428s)
+[step 393] loss_qa=2.4082 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.466e+00 gnorm_bridge=2.360e+01 (2433s)
+[step 394] loss_qa=1.9368 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.960e+00 gnorm_bridge=2.513e+01 (2440s)
+[step 395] loss_qa=2.2197 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.878e+00 gnorm_bridge=2.252e+01 (2446s)
+[step 396] loss_qa=2.2676 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.501e+00 gnorm_bridge=2.270e+01 (2452s)
+[step 397] loss_qa=3.8359 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.085e-01 gnorm_bridge=2.411e+01 (2458s)
+[step 398] loss_qa=1.7881 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.111e+00 gnorm_bridge=1.821e+01 (2464s)
+[step 399] loss_qa=1.0781 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.645e+00 gnorm_bridge=2.712e+01 (2470s)
+[step 400] loss_qa=2.1680 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.673e+01 gnorm_bridge=3.006e+01 (2476s)
+[ckpt] step 400 已保存 -> ckpt/latent_min16_recon.pt
+  [eval@400] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Velcor Inc.'
+  [eval@400] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Velcora'
+  [eval@400] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Ostrenia'
+  [eval@400] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Ostrenia'
+  [eval@400] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Perthia'
+  [eval@400] ✗ q='Where did Dov Krasilm study?' gold='Perthia' pred='Haldenburg'
+  [eval@400] ✓ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Elian'
+  [eval@400] ✗ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Elian'
+  [eval@400] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ondra Research Centre'
+  [eval@400] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ondra Research Centre'
+  [eval@400] ✓ q='What does Isla Norvund work as?' gold='geologist' pred='geologist'
+  [eval@400] ✗ q='What does Isla Norvund work as?' gold='archivist' pred='geologist'
+  [eval@400] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Kestenfeld'
+  [eval@400] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Kestonfeld'
+  [eval@400] ✗ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Sela Vriqtash is employed by Ael.'
+  [eval@400] ✗ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Sela Vriqtash is employed by Ael.'
+[eval@400] pair-acc=0/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=400 full-match=0.125 (n=16) gnorm_comp=2.449e+00 gnorm_bridge=3.599e+01
+[step 401] loss_qa=2.1445 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.449e+00 gnorm_bridge=3.599e+01 (2501s)
+[step 402] loss_qa=2.2478 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.746e+00 gnorm_bridge=2.563e+01 (2507s)
+[step 403] loss_qa=1.0452 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.764e+00 gnorm_bridge=1.553e+01 (2513s)
+[step 404] loss_qa=2.7168 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.516e+00 gnorm_bridge=1.466e+01 (2519s)
+[step 405] loss_qa=2.8945 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.432e+00 gnorm_bridge=2.458e+01 (2525s)
+[step 406] loss_qa=3.1289 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.361e+00 gnorm_bridge=2.840e+01 (2531s)
+[step 407] loss_qa=1.8091 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.054e+00 gnorm_bridge=2.262e+01 (2537s)
+[step 408] loss_qa=1.1069 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.553e+00 gnorm_bridge=2.021e+01 (2543s)
+[step 409] loss_qa=1.8896 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.059e+01 gnorm_bridge=3.045e+01 (2548s)
+[step 410] loss_qa=3.1230 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.412e+00 gnorm_bridge=3.246e+01 (2554s)
+[step 411] loss_qa=2.0105 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.377e+00 gnorm_bridge=1.496e+01 (2560s)
+[step 412] loss_qa=1.5908 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.474e+00 gnorm_bridge=2.364e+01 (2566s)
+[step 413] loss_qa=2.6328 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.413e+01 gnorm_bridge=2.972e+01 (2572s)
+[step 414] loss_qa=1.4668 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.800e+00 gnorm_bridge=2.055e+01 (2578s)
+[step 415] loss_qa=2.7500 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.250e+00 gnorm_bridge=2.530e+01 (2583s)
+[step 416] loss_qa=2.3188 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.864e-01 gnorm_bridge=2.461e+01 (2589s)
+[step 417] loss_qa=1.7035 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=8.449e-01 gnorm_bridge=2.535e+01 (2595s)
+[step 418] loss_qa=2.3442 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.846e+00 gnorm_bridge=2.024e+01 (2601s)
+[step 419] loss_qa=2.1152 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.125e+00 gnorm_bridge=1.895e+01 (2608s)
+[step 420] loss_qa=3.8594 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.688e+00 gnorm_bridge=2.339e+01 (2614s)
+[step 421] loss_qa=2.2002 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.494e+00 gnorm_bridge=2.434e+01 (2620s)
+[step 422] loss_qa=1.4512 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.805e+00 gnorm_bridge=2.809e+01 (2626s)
+[step 423] loss_qa=2.6514 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.575e+00 gnorm_bridge=2.119e+01 (2632s)
+[step 424] loss_qa=3.0488 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.441e+00 gnorm_bridge=2.064e+01 (2639s)
+[step 425] loss_qa=2.6738 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.003e+01 gnorm_bridge=4.029e+01 (2644s)
+[step 426] loss_qa=2.3438 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.532e+00 gnorm_bridge=4.393e+01 (2650s)
+[step 427] loss_qa=3.3730 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.709e+00 gnorm_bridge=2.446e+01 (2656s)
+[step 428] loss_qa=1.3633 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.255e+00 gnorm_bridge=1.575e+01 (2662s)
+[step 429] loss_qa=2.7969 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.613e+00 gnorm_bridge=3.590e+01 (2668s)
+[step 430] loss_qa=2.6250 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.801e-01 gnorm_bridge=1.431e+01 (2674s)
+[step 431] loss_qa=2.7500 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.084e+00 gnorm_bridge=2.201e+01 (2680s)
+[step 432] loss_qa=0.6819 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.068e+00 gnorm_bridge=1.665e+01 (2686s)
+[step 433] loss_qa=1.7539 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.940e+00 gnorm_bridge=1.653e+01 (2691s)
+[step 434] loss_qa=1.8945 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.619e+00 gnorm_bridge=3.031e+01 (2697s)
+[step 435] loss_qa=1.3925 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.312e+00 gnorm_bridge=2.324e+01 (2703s)
+[step 436] loss_qa=3.6680 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.377e+00 gnorm_bridge=2.129e+01 (2709s)
+[step 437] loss_qa=3.6953 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.145e+00 gnorm_bridge=1.623e+01 (2715s)
+[step 438] loss_qa=1.8066 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.396e+00 gnorm_bridge=2.950e+01 (2722s)
+[step 439] loss_qa=1.7443 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.335e+00 gnorm_bridge=2.032e+01 (2728s)
+[step 440] loss_qa=1.4690 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.395e+00 gnorm_bridge=2.246e+01 (2734s)
+[step 441] loss_qa=2.7510 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.155e+00 gnorm_bridge=1.751e+01 (2740s)
+[step 442] loss_qa=3.0117 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.758e+00 gnorm_bridge=1.780e+01 (2746s)
+[step 443] loss_qa=1.8008 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.607e+00 gnorm_bridge=2.997e+01 (2752s)
+[step 444] loss_qa=1.7061 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.745e-01 gnorm_bridge=2.932e+01 (2758s)
+[step 445] loss_qa=2.3027 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.569e+00 gnorm_bridge=3.051e+01 (2764s)
+[step 446] loss_qa=2.3535 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.367e+00 gnorm_bridge=1.673e+01 (2770s)
+[step 447] loss_qa=1.6318 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.501e+00 gnorm_bridge=2.241e+01 (2776s)
+[step 448] loss_qa=1.9863 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.742e+00 gnorm_bridge=2.117e+01 (2782s)
+[step 449] loss_qa=1.8315 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.951e+00 gnorm_bridge=3.022e+01 (2788s)
+[step 450] loss_qa=1.9111 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.393e-01 gnorm_bridge=2.475e+01 (2794s)
+[step 451] loss_qa=2.7305 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.376e+00 gnorm_bridge=2.383e+01 (2800s)
+[step 452] loss_qa=1.4736 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.720e+00 gnorm_bridge=2.228e+01 (2805s)
+[step 453] loss_qa=1.2793 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.831e+00 gnorm_bridge=2.787e+01 (2811s)
+[step 454] loss_qa=1.9023 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.363e+00 gnorm_bridge=2.126e+01 (2817s)
+[step 455] loss_qa=2.0522 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.206e+00 gnorm_bridge=2.000e+01 (2823s)
+[step 456] loss_qa=2.4668 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.178e+00 gnorm_bridge=2.650e+01 (2829s)
+[step 457] loss_qa=2.7266 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.418e+00 gnorm_bridge=1.853e+01 (2835s)
+[step 458] loss_qa=1.5586 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.441e+00 gnorm_bridge=2.024e+01 (2841s)
+[step 459] loss_qa=2.4863 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.230e+00 gnorm_bridge=1.895e+01 (2847s)
+[step 460] loss_qa=1.0156 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.716e+00 gnorm_bridge=1.983e+01 (2853s)
+[step 461] loss_qa=1.5391 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.084e+01 gnorm_bridge=3.676e+01 (2859s)
+[step 462] loss_qa=2.2129 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.242e+00 gnorm_bridge=1.915e+01 (2866s)
+[step 463] loss_qa=1.9597 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.021e+00 gnorm_bridge=1.974e+01 (2872s)
+[step 464] loss_qa=1.7461 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.208e+00 gnorm_bridge=1.825e+01 (2878s)
+[step 465] loss_qa=2.3213 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.412e+00 gnorm_bridge=3.344e+01 (2884s)
+[step 466] loss_qa=2.7207 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.787e+00 gnorm_bridge=2.319e+01 (2890s)
+[step 467] loss_qa=1.0620 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.761e+00 gnorm_bridge=2.638e+01 (2895s)
+[step 468] loss_qa=1.0815 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.328e+00 gnorm_bridge=3.340e+01 (2902s)
+[step 469] loss_qa=0.8154 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.891e+00 gnorm_bridge=3.015e+01 (2907s)
+[step 470] loss_qa=2.3018 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.714e+00 gnorm_bridge=3.506e+01 (2913s)
+[step 471] loss_qa=1.6465 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.259e+00 gnorm_bridge=2.585e+01 (2919s)
+[step 472] loss_qa=2.5479 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.005e+00 gnorm_bridge=2.371e+01 (2925s)
+[step 473] loss_qa=2.9805 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.251e+01 gnorm_bridge=4.462e+01 (2931s)
+[step 474] loss_qa=0.6621 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.464e+00 gnorm_bridge=3.746e+01 (2936s)
+[step 475] loss_qa=2.0220 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.722e+00 gnorm_bridge=2.270e+01 (2943s)
+[step 476] loss_qa=2.3945 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.266e+00 gnorm_bridge=2.051e+01 (2949s)
+[step 477] loss_qa=1.2529 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.103e+00 gnorm_bridge=2.297e+01 (2955s)
+[step 478] loss_qa=2.7109 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.546e+00 gnorm_bridge=1.187e+01 (2960s)
+[step 479] loss_qa=1.6650 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.476e+00 gnorm_bridge=2.425e+01 (2966s)
+[step 480] loss_qa=1.3154 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.351e+00 gnorm_bridge=2.776e+01 (2972s)
+[step 481] loss_qa=1.7598 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.651e+00 gnorm_bridge=2.803e+01 (2979s)
+[step 482] loss_qa=2.2629 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.354e+00 gnorm_bridge=1.960e+01 (2985s)
+[step 483] loss_qa=1.3721 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.708e+00 gnorm_bridge=4.015e+01 (2991s)
+[step 484] loss_qa=1.9395 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.884e+00 gnorm_bridge=2.641e+01 (2997s)
+[step 485] loss_qa=1.5970 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.063e+00 gnorm_bridge=2.155e+01 (3003s)
+[step 486] loss_qa=1.2568 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.481e+00 gnorm_bridge=4.859e+01 (3009s)
+[step 487] loss_qa=2.6367 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.298e+01 gnorm_bridge=3.082e+01 (3015s)
+[step 488] loss_qa=2.0742 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.032e+00 gnorm_bridge=3.541e+01 (3022s)
+[step 489] loss_qa=1.9199 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.451e+00 gnorm_bridge=2.503e+01 (3027s)
+[step 490] loss_qa=1.8994 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.839e+00 gnorm_bridge=5.558e+01 (3033s)
+[step 491] loss_qa=0.4438 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=7.548e+00 gnorm_bridge=2.726e+01 (3039s)
+[step 492] loss_qa=2.5034 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.110e+00 gnorm_bridge=1.979e+01 (3044s)
+[step 493] loss_qa=2.4160 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.330e+00 gnorm_bridge=2.782e+01 (3050s)
+[step 494] loss_qa=0.3582 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.013e+00 gnorm_bridge=1.505e+01 (3056s)
+[step 495] loss_qa=2.2168 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.029e+00 gnorm_bridge=2.419e+01 (3062s)
+[step 496] loss_qa=1.9668 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.808e+00 gnorm_bridge=2.769e+01 (3068s)
+[step 497] loss_qa=1.2991 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.316e+00 gnorm_bridge=3.546e+01 (3074s)
+[step 498] loss_qa=0.7659 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.011e+01 gnorm_bridge=4.746e+01 (3080s)
+[step 499] loss_qa=2.3262 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.881e+00 gnorm_bridge=2.263e+01 (3085s)
+[step 500] loss_qa=2.4521 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.015e+00 gnorm_bridge=1.823e+01 (3092s)
+[step 501] loss_qa=1.2598 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.640e+00 gnorm_bridge=2.090e+01 (3098s)
+[step 502] loss_qa=1.2651 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.177e+00 gnorm_bridge=2.053e+01 (3104s)
+[step 503] loss_qa=1.9775 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.410e+00 gnorm_bridge=2.972e+01 (3110s)
+[step 504] loss_qa=1.4473 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.487e+00 gnorm_bridge=2.293e+01 (3116s)
+[step 505] loss_qa=1.3931 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.330e+00 gnorm_bridge=1.976e+01 (3122s)
+[step 506] loss_qa=1.9521 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.655e+00 gnorm_bridge=2.235e+01 (3128s)
+[step 507] loss_qa=1.6973 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.941e+00 gnorm_bridge=3.680e+01 (3135s)
+[step 508] loss_qa=2.4688 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.890e+00 gnorm_bridge=4.127e+01 (3141s)
+[step 509] loss_qa=1.6016 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.247e+00 gnorm_bridge=2.564e+01 (3147s)
+[step 510] loss_qa=0.8708 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.529e+00 gnorm_bridge=2.166e+01 (3153s)
+[step 511] loss_qa=2.8125 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.324e+00 gnorm_bridge=2.660e+01 (3159s)
+[step 512] loss_qa=1.7705 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.892e+00 gnorm_bridge=2.262e+01 (3165s)
+[step 513] loss_qa=1.8926 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.757e+00 gnorm_bridge=2.375e+01 (3171s)
+[step 514] loss_qa=0.6374 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.855e+00 gnorm_bridge=2.890e+01 (3177s)
+[step 515] loss_qa=0.6978 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.345e+00 gnorm_bridge=2.074e+01 (3182s)
+[step 516] loss_qa=3.7227 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.924e+00 gnorm_bridge=2.905e+01 (3188s)
+[step 517] loss_qa=2.2529 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.485e+00 gnorm_bridge=2.436e+01 (3194s)
+[step 518] loss_qa=1.7227 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.845e+00 gnorm_bridge=2.123e+01 (3200s)
+[step 519] loss_qa=0.7881 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.421e+00 gnorm_bridge=2.182e+01 (3206s)
+[step 520] loss_qa=2.0674 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.044e+00 gnorm_bridge=2.879e+01 (3212s)
+[step 521] loss_qa=1.8906 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.933e+00 gnorm_bridge=3.769e+01 (3218s)
+[step 522] loss_qa=2.5059 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.685e+00 gnorm_bridge=3.166e+01 (3224s)
+[step 523] loss_qa=0.9932 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.622e+00 gnorm_bridge=2.217e+01 (3230s)
+[step 524] loss_qa=1.8672 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.982e+00 gnorm_bridge=5.255e+01 (3237s)
+[step 525] loss_qa=1.4141 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.505e+00 gnorm_bridge=2.085e+01 (3243s)
+[step 526] loss_qa=1.4746 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.588e+00 gnorm_bridge=3.276e+01 (3249s)
+[step 527] loss_qa=2.8120 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.602e+00 gnorm_bridge=2.257e+01 (3255s)
+[step 528] loss_qa=1.8105 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.047e+00 gnorm_bridge=2.768e+01 (3261s)
+[step 529] loss_qa=1.4253 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.979e+00 gnorm_bridge=2.173e+01 (3267s)
+[step 530] loss_qa=0.9028 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.606e+00 gnorm_bridge=1.821e+01 (3273s)
+[step 531] loss_qa=1.4346 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.605e+00 gnorm_bridge=3.164e+01 (3279s)
+[step 532] loss_qa=3.0332 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.197e+00 gnorm_bridge=3.119e+01 (3285s)
+[step 533] loss_qa=0.9043 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.309e+00 gnorm_bridge=2.133e+01 (3291s)
+[step 534] loss_qa=0.4918 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.738e+00 gnorm_bridge=1.939e+01 (3296s)
+[step 535] loss_qa=2.3477 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.439e+00 gnorm_bridge=2.531e+01 (3302s)
+[step 536] loss_qa=2.4336 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.761e+00 gnorm_bridge=2.532e+01 (3308s)
+[step 537] loss_qa=1.8594 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.890e+00 gnorm_bridge=2.940e+01 (3314s)
+[step 538] loss_qa=1.6982 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.830e+00 gnorm_bridge=2.480e+01 (3320s)
+[step 539] loss_qa=1.3906 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.193e+00 gnorm_bridge=2.055e+01 (3325s)
+[step 540] loss_qa=1.5913 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.649e+00 gnorm_bridge=2.728e+01 (3331s)
+[step 541] loss_qa=0.5137 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.846e+00 gnorm_bridge=1.513e+01 (3337s)
+[step 542] loss_qa=1.8574 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.249e+00 gnorm_bridge=3.285e+01 (3343s)
+[step 543] loss_qa=2.8738 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=6.798e+00 gnorm_bridge=1.821e+01 (3350s)
+[step 544] loss_qa=1.4795 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.869e+00 gnorm_bridge=2.837e+01 (3356s)
+[step 545] loss_qa=1.9731 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.154e+00 gnorm_bridge=2.403e+01 (3362s)
+[step 546] loss_qa=2.0107 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.092e+01 gnorm_bridge=4.277e+01 (3368s)
+[step 547] loss_qa=1.5371 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.790e+00 gnorm_bridge=1.960e+01 (3374s)
+[step 548] loss_qa=1.0332 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.926e+00 gnorm_bridge=1.930e+01 (3380s)
+[step 549] loss_qa=2.1113 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.253e+00 gnorm_bridge=2.610e+01 (3386s)
+[step 550] loss_qa=1.3296 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.212e+01 gnorm_bridge=4.303e+01 (3392s)
+[step 551] loss_qa=2.6680 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.247e+01 gnorm_bridge=7.025e+01 (3398s)
+[step 552] loss_qa=1.8740 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.743e+00 gnorm_bridge=1.818e+01 (3404s)
+[step 553] loss_qa=2.6367 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.050e+00 gnorm_bridge=2.455e+01 (3410s)
+[step 554] loss_qa=0.9839 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.356e+00 gnorm_bridge=3.756e+01 (3417s)
+[step 555] loss_qa=1.2578 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.600e+00 gnorm_bridge=2.700e+01 (3423s)
+[step 556] loss_qa=1.6851 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.341e+00 gnorm_bridge=2.473e+01 (3428s)
+[step 557] loss_qa=1.1897 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.962e+01 gnorm_bridge=4.159e+01 (3434s)
+[step 558] loss_qa=0.5715 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.310e+00 gnorm_bridge=1.740e+01 (3440s)
+[step 559] loss_qa=1.8213 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.877e+00 gnorm_bridge=3.444e+01 (3445s)
+[step 560] loss_qa=2.2168 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.889e+00 gnorm_bridge=1.930e+01 (3451s)
+[step 561] loss_qa=1.8154 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.609e+00 gnorm_bridge=1.729e+01 (3457s)
+[step 562] loss_qa=0.8691 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.696e+00 gnorm_bridge=3.111e+01 (3464s)
+[step 563] loss_qa=1.9199 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.781e+00 gnorm_bridge=2.652e+01 (3470s)
+[step 564] loss_qa=1.4325 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.166e+00 gnorm_bridge=1.436e+01 (3475s)
+[step 565] loss_qa=0.4324 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.886e-01 gnorm_bridge=1.656e+01 (3481s)
+[step 566] loss_qa=1.0596 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.070e+00 gnorm_bridge=5.337e+01 (3487s)
+[step 567] loss_qa=2.1523 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.660e+00 gnorm_bridge=2.920e+01 (3494s)
+[step 568] loss_qa=2.7793 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.810e+00 gnorm_bridge=2.867e+01 (3500s)
+[step 569] loss_qa=1.5127 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.533e+00 gnorm_bridge=1.660e+01 (3506s)
+[step 570] loss_qa=1.8594 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.716e+00 gnorm_bridge=2.317e+01 (3512s)
+[step 571] loss_qa=1.8213 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.708e+00 gnorm_bridge=2.525e+01 (3518s)
+[step 572] loss_qa=1.2773 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.661e+00 gnorm_bridge=3.820e+01 (3524s)
+[step 573] loss_qa=1.8477 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.179e+00 gnorm_bridge=2.355e+01 (3531s)
+[step 574] loss_qa=1.5830 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.545e+00 gnorm_bridge=2.336e+01 (3537s)
+[step 575] loss_qa=1.4531 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.892e+00 gnorm_bridge=2.987e+01 (3543s)
+[step 576] loss_qa=0.7881 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.599e+00 gnorm_bridge=1.428e+01 (3548s)
+[step 577] loss_qa=2.0620 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.662e+00 gnorm_bridge=2.947e+01 (3554s)
+[step 578] loss_qa=0.9629 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.248e+00 gnorm_bridge=2.366e+01 (3560s)
+[step 579] loss_qa=1.4160 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.064e+00 gnorm_bridge=1.785e+01 (3565s)
+[step 580] loss_qa=1.8018 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.658e+00 gnorm_bridge=3.707e+01 (3571s)
+[step 581] loss_qa=1.4890 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.704e+00 gnorm_bridge=1.484e+01 (3577s)
+[step 582] loss_qa=0.4497 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.386e+00 gnorm_bridge=2.230e+01 (3582s)
+[step 583] loss_qa=1.1626 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.070e+00 gnorm_bridge=2.395e+01 (3588s)
+[step 584] loss_qa=2.0059 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.695e+00 gnorm_bridge=2.002e+01 (3594s)
+[step 585] loss_qa=1.6714 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.539e+00 gnorm_bridge=1.886e+01 (3600s)
+[step 586] loss_qa=0.6229 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.461e+00 gnorm_bridge=1.712e+01 (3607s)
+[step 587] loss_qa=0.7832 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.930e-01 gnorm_bridge=2.076e+01 (3613s)
+[step 588] loss_qa=2.4961 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.609e+00 gnorm_bridge=2.705e+01 (3619s)
+[step 589] loss_qa=1.0889 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.120e+00 gnorm_bridge=2.212e+01 (3625s)
+[step 590] loss_qa=2.3730 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.471e+00 gnorm_bridge=2.636e+01 (3631s)
+[step 591] loss_qa=2.3691 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.203e+00 gnorm_bridge=5.053e+01 (3637s)
+[step 592] loss_qa=0.5621 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.981e+00 gnorm_bridge=3.398e+01 (3644s)
+[step 593] loss_qa=1.3237 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.698e+00 gnorm_bridge=2.897e+01 (3650s)
+[step 594] loss_qa=0.9814 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.089e-01 gnorm_bridge=2.636e+01 (3656s)
+[step 595] loss_qa=2.4805 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.037e+01 gnorm_bridge=3.258e+01 (3662s)
+[step 596] loss_qa=1.2734 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.751e+00 gnorm_bridge=3.076e+01 (3668s)
+[step 597] loss_qa=1.3267 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.299e+00 gnorm_bridge=1.734e+01 (3673s)
+[step 598] loss_qa=1.2150 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.303e+00 gnorm_bridge=1.030e+01 (3680s)
+[step 599] loss_qa=1.1494 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.356e+00 gnorm_bridge=2.764e+01 (3685s)
+[step 600] loss_qa=2.0010 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.914e+00 gnorm_bridge=2.855e+01 (3691s)
+[ckpt] step 600 已保存 -> ckpt/latent_min16_recon.pt
+  [eval@600] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Velcora'
+  [eval@600] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Vesparian Institute\n'
+  [eval@600] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Veselar.'
+  [eval@600] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Veselar, Veldren.'
+  [eval@600] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Haldwyn学院'
+  [eval@600] ✗ q='Where did Dov Krasilm study?' gold='Perthia' pred='Haldwyn学院'
+  [eval@600] ✗ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Elian Frolmist'
+  [eval@600] ✗ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Elian Frolmist'
+  [eval@600] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ondrean Valley'
+  [eval@600] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ondrean Valley'
+  [eval@600] ✓ q='What does Isla Norvund work as?' gold='geologist' pred='geologist'
+  [eval@600] ✗ q='What does Isla Norvund work as?' gold='archivist' pred='geologist'
+  [eval@600] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Duvhaldy\n'
+  [eval@600] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Duvhaldy\n'
+  [eval@600] ✗ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Talquin Corporation'
+  [eval@600] ✗ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Talquin Corporation'
+[eval@600] pair-acc=0/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=600 full-match=0.0625 (n=16) gnorm_comp=3.265e+00 gnorm_bridge=2.520e+01
+[step 601] loss_qa=1.2954 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.265e+00 gnorm_bridge=2.520e+01 (3714s)
+[step 602] loss_qa=2.0830 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.683e+00 gnorm_bridge=3.045e+01 (3720s)
+[step 603] loss_qa=1.3306 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.144e+01 gnorm_bridge=3.330e+01 (3726s)
+[step 604] loss_qa=1.6562 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.579e+00 gnorm_bridge=3.063e+01 (3732s)
+[step 605] loss_qa=1.4619 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.956e+00 gnorm_bridge=1.688e+01 (3738s)
+[step 606] loss_qa=1.2417 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.198e+00 gnorm_bridge=3.012e+01 (3744s)
+[step 607] loss_qa=1.9082 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.930e+00 gnorm_bridge=2.977e+01 (3751s)
+[step 608] loss_qa=1.0824 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.642e+00 gnorm_bridge=2.302e+01 (3756s)
+[step 609] loss_qa=1.4150 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.606e+00 gnorm_bridge=2.332e+01 (3762s)
+[step 610] loss_qa=0.8140 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.244e+00 gnorm_bridge=2.141e+01 (3768s)
+[step 611] loss_qa=2.1899 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.924e+00 gnorm_bridge=2.150e+01 (3774s)
+[step 612] loss_qa=1.1216 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.776e+00 gnorm_bridge=2.273e+01 (3780s)
+[step 613] loss_qa=0.7925 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.697e+00 gnorm_bridge=2.805e+01 (3786s)
+[step 614] loss_qa=0.8669 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.500e+00 gnorm_bridge=3.142e+01 (3792s)
+[step 615] loss_qa=2.4111 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.256e+00 gnorm_bridge=1.552e+01 (3799s)
+[step 616] loss_qa=1.1963 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.656e+00 gnorm_bridge=2.647e+01 (3805s)
+[step 617] loss_qa=1.4922 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.086e+00 gnorm_bridge=2.038e+01 (3810s)
+[step 618] loss_qa=1.5068 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.322e+00 gnorm_bridge=2.626e+01 (3816s)
+[step 619] loss_qa=1.2028 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.434e+00 gnorm_bridge=2.514e+01 (3822s)
+[step 620] loss_qa=1.0400 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.437e+00 gnorm_bridge=2.261e+01 (3828s)
+[step 621] loss_qa=0.6816 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.169e+00 gnorm_bridge=2.682e+01 (3833s)
+[step 622] loss_qa=1.8955 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.408e+00 gnorm_bridge=2.559e+01 (3839s)
+[step 623] loss_qa=0.8584 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.836e+00 gnorm_bridge=2.616e+01 (3845s)
+[step 624] loss_qa=2.0957 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.579e+00 gnorm_bridge=2.773e+01 (3851s)
+[step 625] loss_qa=1.1963 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.033e+00 gnorm_bridge=3.313e+01 (3857s)
+[step 626] loss_qa=2.3745 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.637e+00 gnorm_bridge=1.667e+01 (3864s)
+[step 627] loss_qa=1.3730 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.997e+00 gnorm_bridge=3.189e+01 (3870s)
+[step 628] loss_qa=1.4480 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.694e+00 gnorm_bridge=3.617e+01 (3876s)
+[step 629] loss_qa=0.7327 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.176e+00 gnorm_bridge=2.610e+01 (3881s)
+[step 630] loss_qa=0.7964 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.724e+00 gnorm_bridge=1.910e+01 (3887s)
+[step 631] loss_qa=1.8767 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.478e+00 gnorm_bridge=2.969e+01 (3894s)
+[step 632] loss_qa=2.0605 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.908e+00 gnorm_bridge=2.618e+01 (3900s)
+[step 633] loss_qa=1.4043 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.315e+00 gnorm_bridge=3.382e+01 (3906s)
+[step 634] loss_qa=1.4316 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.785e+00 gnorm_bridge=2.307e+01 (3912s)
+[step 635] loss_qa=1.4006 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.928e+00 gnorm_bridge=1.447e+01 (3918s)
+[step 636] loss_qa=0.8110 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.755e+00 gnorm_bridge=2.423e+01 (3924s)
+[step 637] loss_qa=0.9409 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.396e+00 gnorm_bridge=2.148e+01 (3930s)
+[step 638] loss_qa=0.3351 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.647e+00 gnorm_bridge=1.420e+01 (3936s)
+[step 639] loss_qa=1.9458 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.969e+00 gnorm_bridge=2.720e+01 (3942s)
+[step 640] loss_qa=1.6475 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.491e+00 gnorm_bridge=2.298e+01 (3947s)
+[step 641] loss_qa=0.5696 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.183e+00 gnorm_bridge=1.786e+01 (3953s)
+[step 642] loss_qa=1.0256 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.237e+00 gnorm_bridge=3.328e+01 (3959s)
+[step 643] loss_qa=1.4199 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.017e+00 gnorm_bridge=1.765e+01 (3964s)
+[step 644] loss_qa=1.5186 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.556e+00 gnorm_bridge=2.249e+01 (3971s)
+[step 645] loss_qa=1.0403 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.057e+00 gnorm_bridge=1.535e+01 (3976s)
+[step 646] loss_qa=1.5547 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.852e+00 gnorm_bridge=2.482e+01 (3982s)
+[step 647] loss_qa=0.8145 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.434e+01 gnorm_bridge=3.669e+01 (3988s)
+[step 648] loss_qa=1.5627 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.994e+01 gnorm_bridge=3.149e+01 (3994s)
+[step 649] loss_qa=1.4717 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.531e+00 gnorm_bridge=2.533e+01 (4000s)
+[step 650] loss_qa=1.8584 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.628e+01 gnorm_bridge=2.847e+01 (4007s)
+[step 651] loss_qa=1.7227 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.273e+01 gnorm_bridge=5.270e+01 (4013s)
+[step 652] loss_qa=1.7949 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.069e+01 gnorm_bridge=5.886e+01 (4019s)
+[step 653] loss_qa=2.6953 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.776e+00 gnorm_bridge=5.574e+01 (4025s)
+[step 654] loss_qa=0.6802 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.276e+00 gnorm_bridge=2.490e+01 (4031s)
+[step 655] loss_qa=0.9448 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.807e+00 gnorm_bridge=3.103e+01 (4037s)
+[step 656] loss_qa=1.8906 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.481e+00 gnorm_bridge=4.581e+01 (4044s)
+[step 657] loss_qa=1.3232 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.482e+00 gnorm_bridge=2.644e+01 (4049s)
+[step 658] loss_qa=0.6826 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.553e+00 gnorm_bridge=1.731e+01 (4055s)
+[step 659] loss_qa=0.9374 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.920e+00 gnorm_bridge=2.303e+01 (4061s)
+[step 660] loss_qa=2.3223 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.073e+01 gnorm_bridge=2.831e+01 (4067s)
+[step 661] loss_qa=0.5337 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.108e+00 gnorm_bridge=2.298e+01 (4072s)
+[step 662] loss_qa=1.3281 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.775e+00 gnorm_bridge=2.381e+01 (4079s)
+[step 663] loss_qa=1.9795 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.132e+00 gnorm_bridge=2.572e+01 (4085s)
+[step 664] loss_qa=1.5547 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.186e+01 gnorm_bridge=3.299e+01 (4090s)
+[step 665] loss_qa=1.0371 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.155e+01 gnorm_bridge=2.957e+01 (4096s)
+[step 666] loss_qa=1.1040 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.390e+00 gnorm_bridge=4.473e+01 (4102s)
+[step 667] loss_qa=1.9844 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.867e+00 gnorm_bridge=1.546e+01 (4108s)
+[step 668] loss_qa=0.8999 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.025e+01 gnorm_bridge=2.966e+01 (4114s)
+[step 669] loss_qa=1.6816 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.254e+00 gnorm_bridge=4.079e+01 (4120s)
+[step 670] loss_qa=0.9392 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.418e+01 gnorm_bridge=3.365e+01 (4126s)
+[step 671] loss_qa=1.5562 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.254e+00 gnorm_bridge=3.121e+01 (4132s)
+[step 672] loss_qa=0.6094 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.084e+00 gnorm_bridge=1.419e+01 (4138s)
+[step 673] loss_qa=0.9746 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.835e+00 gnorm_bridge=3.023e+01 (4144s)
+[step 674] loss_qa=1.6763 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.059e+00 gnorm_bridge=3.056e+01 (4150s)
+[step 675] loss_qa=2.0488 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.751e+00 gnorm_bridge=3.171e+01 (4157s)
+[step 676] loss_qa=0.5510 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.010e+00 gnorm_bridge=1.995e+01 (4163s)
+[step 677] loss_qa=0.6528 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.982e-01 gnorm_bridge=2.572e+01 (4169s)
+[step 678] loss_qa=1.1299 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.613e+00 gnorm_bridge=2.893e+01 (4175s)
+[step 679] loss_qa=1.7080 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.340e+00 gnorm_bridge=2.581e+01 (4180s)
+[step 680] loss_qa=0.9444 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.523e+00 gnorm_bridge=1.786e+01 (4186s)
+[step 681] loss_qa=0.6531 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.553e+00 gnorm_bridge=2.068e+01 (4193s)
+[step 682] loss_qa=1.5083 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.169e-01 gnorm_bridge=2.460e+01 (4199s)
+[step 683] loss_qa=0.7280 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.218e+01 gnorm_bridge=3.785e+01 (4205s)
+[step 684] loss_qa=1.5352 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.350e+00 gnorm_bridge=2.487e+01 (4210s)
+[step 685] loss_qa=2.1016 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.759e+00 gnorm_bridge=1.815e+01 (4216s)
+[step 686] loss_qa=0.8701 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.035e+00 gnorm_bridge=2.506e+01 (4222s)
+[step 687] loss_qa=0.7100 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.787e+00 gnorm_bridge=1.485e+01 (4228s)
+[step 688] loss_qa=0.8992 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.101e+00 gnorm_bridge=2.204e+01 (4234s)
+[step 689] loss_qa=1.5570 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.216e+00 gnorm_bridge=2.401e+01 (4240s)
+[step 690] loss_qa=0.4788 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.328e+00 gnorm_bridge=1.566e+01 (4246s)
+[step 691] loss_qa=0.9033 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.197e+00 gnorm_bridge=3.437e+01 (4252s)
+[step 692] loss_qa=1.3271 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.730e+00 gnorm_bridge=2.472e+01 (4258s)
+[step 693] loss_qa=0.5663 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.050e+00 gnorm_bridge=1.508e+01 (4265s)
+[step 694] loss_qa=0.9976 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.515e+00 gnorm_bridge=2.311e+01 (4271s)
+[step 695] loss_qa=1.8252 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.373e+00 gnorm_bridge=2.159e+01 (4277s)
+[step 696] loss_qa=0.8875 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.792e-01 gnorm_bridge=2.331e+01 (4283s)
+[step 697] loss_qa=0.6069 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.576e+00 gnorm_bridge=2.009e+01 (4289s)
+[step 698] loss_qa=1.2353 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.135e+00 gnorm_bridge=2.634e+01 (4295s)
+[step 699] loss_qa=1.5479 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.612e+00 gnorm_bridge=1.845e+01 (4301s)
+[step 700] loss_qa=0.8350 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.064e+00 gnorm_bridge=3.682e+01 (4307s)
+[step 701] loss_qa=0.6206 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=9.985e+00 gnorm_bridge=3.524e+01 (4313s)
+[step 702] loss_qa=1.1455 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.417e+00 gnorm_bridge=2.352e+01 (4318s)
+[step 703] loss_qa=0.6765 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.192e+00 gnorm_bridge=2.712e+01 (4324s)
+[step 704] loss_qa=1.4641 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.937e+00 gnorm_bridge=3.210e+01 (4330s)
+[step 705] loss_qa=0.9150 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.860e+01 gnorm_bridge=2.965e+01 (4336s)
+[step 706] loss_qa=0.7039 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.885e+00 gnorm_bridge=1.922e+01 (4342s)
+[step 707] loss_qa=0.3303 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.524e+00 gnorm_bridge=1.893e+01 (4348s)
+[step 708] loss_qa=1.6367 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.878e+00 gnorm_bridge=1.276e+01 (4354s)
+[step 709] loss_qa=0.8743 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.366e+00 gnorm_bridge=1.257e+01 (4360s)
+[step 710] loss_qa=0.9302 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.442e+00 gnorm_bridge=2.856e+01 (4366s)
+[step 711] loss_qa=0.7529 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.118e+00 gnorm_bridge=2.468e+01 (4371s)
+[step 712] loss_qa=1.2217 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.448e+00 gnorm_bridge=1.963e+01 (4378s)
+[step 713] loss_qa=0.4193 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.636e+00 gnorm_bridge=1.589e+01 (4384s)
+[step 714] loss_qa=1.8257 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.392e+00 gnorm_bridge=1.948e+01 (4390s)
+[step 715] loss_qa=0.3009 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.507e+00 gnorm_bridge=1.894e+01 (4396s)
+[step 716] loss_qa=1.7207 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.163e+00 gnorm_bridge=3.381e+01 (4401s)
+[step 717] loss_qa=1.2458 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.218e+00 gnorm_bridge=1.897e+01 (4408s)
+[step 718] loss_qa=1.1416 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.352e+00 gnorm_bridge=2.200e+01 (4414s)
+[step 719] loss_qa=1.1174 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.490e+00 gnorm_bridge=3.416e+01 (4420s)
+[step 720] loss_qa=1.0400 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.002e+01 gnorm_bridge=4.196e+01 (4426s)
+[step 721] loss_qa=0.9551 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.840e+00 gnorm_bridge=1.975e+01 (4432s)
+[step 722] loss_qa=1.2523 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.511e+00 gnorm_bridge=1.484e+01 (4438s)
+[step 723] loss_qa=1.1855 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.521e+00 gnorm_bridge=2.745e+01 (4444s)
+[step 724] loss_qa=0.5560 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.047e+00 gnorm_bridge=2.287e+01 (4450s)
+[step 725] loss_qa=0.2915 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.403e+00 gnorm_bridge=2.120e+01 (4456s)
+[step 726] loss_qa=1.0176 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.024e+00 gnorm_bridge=3.023e+01 (4461s)
+[step 727] loss_qa=1.8917 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.609e+00 gnorm_bridge=2.356e+01 (4467s)
+[step 728] loss_qa=1.1519 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=6.692e+00 gnorm_bridge=3.645e+01 (4473s)
+[step 729] loss_qa=1.5640 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.814e+00 gnorm_bridge=3.228e+01 (4478s)
+[step 730] loss_qa=0.6821 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.003e+01 gnorm_bridge=3.222e+01 (4484s)
+[step 731] loss_qa=0.5498 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.278e+00 gnorm_bridge=1.578e+01 (4491s)
+[step 732] loss_qa=0.7225 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.068e+00 gnorm_bridge=2.017e+01 (4497s)
+[step 733] loss_qa=0.3833 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.578e+00 gnorm_bridge=3.158e+01 (4503s)
+[step 734] loss_qa=1.6140 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.360e+00 gnorm_bridge=2.670e+01 (4509s)
+[step 735] loss_qa=0.9707 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.054e+00 gnorm_bridge=3.198e+01 (4515s)
+[step 736] loss_qa=0.6611 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.697e+00 gnorm_bridge=2.953e+01 (4520s)
+[step 737] loss_qa=0.3077 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.918e+00 gnorm_bridge=2.020e+01 (4527s)
+[step 738] loss_qa=1.2703 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.990e+00 gnorm_bridge=1.664e+01 (4533s)
+[step 739] loss_qa=0.7461 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.303e+00 gnorm_bridge=2.613e+01 (4539s)
+[step 740] loss_qa=0.9094 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.181e+00 gnorm_bridge=3.786e+01 (4545s)
+[step 741] loss_qa=0.4319 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.679e+00 gnorm_bridge=1.571e+01 (4551s)
+[step 742] loss_qa=1.2131 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=7.048e+00 gnorm_bridge=3.402e+01 (4557s)
+[step 743] loss_qa=0.9238 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.398e+01 gnorm_bridge=2.522e+01 (4563s)
+[step 744] loss_qa=1.6201 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=8.591e+00 gnorm_bridge=4.247e+01 (4569s)
+[step 745] loss_qa=1.4565 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.021e+00 gnorm_bridge=2.376e+01 (4575s)
+[step 746] loss_qa=0.3646 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.102e+00 gnorm_bridge=1.902e+01 (4581s)
+[step 747] loss_qa=1.1357 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.339e+00 gnorm_bridge=3.680e+01 (4587s)
+[step 748] loss_qa=1.0029 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.676e+00 gnorm_bridge=2.597e+01 (4592s)
+[step 749] loss_qa=0.7495 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.282e+00 gnorm_bridge=2.412e+01 (4598s)
+[step 750] loss_qa=1.2043 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.245e+00 gnorm_bridge=1.136e+01 (4604s)
+[step 751] loss_qa=1.2705 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.929e+00 gnorm_bridge=2.637e+01 (4610s)
+[step 752] loss_qa=1.4229 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=2.782e+01 gnorm_bridge=4.668e+01 (4616s)
+[step 753] loss_qa=2.0693 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.441e+00 gnorm_bridge=2.634e+01 (4622s)
+[step 754] loss_qa=0.7048 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.901e+00 gnorm_bridge=2.895e+01 (4627s)
+[step 755] loss_qa=0.7324 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.231e+00 gnorm_bridge=2.813e+01 (4633s)
+[step 756] loss_qa=0.6813 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=7.517e+00 gnorm_bridge=2.122e+01 (4640s)
+[step 757] loss_qa=0.8326 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=1.208e+00 gnorm_bridge=2.934e+01 (4646s)
+[step 758] loss_qa=1.6382 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.209e+00 gnorm_bridge=2.784e+01 (4652s)
+[step 759] loss_qa=0.8120 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=5.957e+00 gnorm_bridge=2.208e+01 (4658s)
+[step 760] loss_qa=0.3795 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=9.138e+00 gnorm_bridge=1.913e+01 (4664s)
+[step 761] loss_qa=0.8069 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.723e+00 gnorm_bridge=2.739e+01 (4670s)
+[step 762] loss_qa=0.6528 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.018e+00 gnorm_bridge=2.094e+01 (4676s)
+[step 763] loss_qa=1.1621 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=5.396e+00 gnorm_bridge=2.058e+01 (4682s)
+[step 764] loss_qa=1.2158 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.134e+00 gnorm_bridge=3.841e+01 (4688s)
+[step 765] loss_qa=1.5845 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.761e+00 gnorm_bridge=3.276e+01 (4694s)
+[step 766] loss_qa=0.5718 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.283e+00 gnorm_bridge=1.853e+01 (4700s)
+[step 767] loss_qa=0.9116 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.405e+00 gnorm_bridge=2.655e+01 (4706s)
+[step 768] loss_qa=0.8429 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=2.890e+00 gnorm_bridge=2.811e+01 (4712s)
+[step 769] loss_qa=0.6083 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.468e+00 gnorm_bridge=2.407e+01 (4718s)
+[step 770] loss_qa=0.6846 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.130e+00 gnorm_bridge=2.034e+01 (4724s)
+[step 771] loss_qa=1.3854 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.952e+00 gnorm_bridge=1.752e+01 (4730s)
+[step 772] loss_qa=0.6755 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.268e+00 gnorm_bridge=2.192e+01 (4735s)
+[step 773] loss_qa=0.7070 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=8.767e+00 gnorm_bridge=3.411e+01 (4741s)
+[step 774] loss_qa=0.4181 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.596e+00 gnorm_bridge=2.076e+01 (4747s)
+[step 775] loss_qa=0.7046 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.712e+00 gnorm_bridge=2.622e+01 (4753s)
+[step 776] loss_qa=1.7422 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=3.035e+00 gnorm_bridge=2.634e+01 (4759s)
+[step 777] loss_qa=0.2479 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.280e+00 gnorm_bridge=2.269e+01 (4765s)
+[step 778] loss_qa=0.5603 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.727e+00 gnorm_bridge=2.629e+01 (4770s)
+[step 779] loss_qa=0.7271 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.210e+00 gnorm_bridge=1.776e+01 (4776s)
+[step 780] loss_qa=1.6555 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=1.109e+00 gnorm_bridge=1.976e+01 (4782s)
+[step 781] loss_qa=1.1821 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=6.210e-01 gnorm_bridge=1.380e+01 (4788s)
+[step 782] loss_qa=0.6809 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.176e+01 gnorm_bridge=3.429e+01 (4795s)
+[step 783] loss_qa=0.7625 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=4.768e+00 gnorm_bridge=2.960e+01 (4801s)
+[step 784] loss_qa=0.6509 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.644e+00 gnorm_bridge=3.334e+01 (4807s)
+[step 785] loss_qa=1.4260 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.380e+00 gnorm_bridge=2.022e+01 (4813s)
+[step 786] loss_qa=0.1632 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=4.104e+00 gnorm_bridge=1.499e+01 (4819s)
+[step 787] loss_qa=0.7699 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.920e+00 gnorm_bridge=2.537e+01 (4825s)
+[step 788] loss_qa=0.8676 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.760e+00 gnorm_bridge=2.338e+01 (4831s)
+[step 789] loss_qa=0.4841 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.106e+00 gnorm_bridge=1.990e+01 (4837s)
+[step 790] loss_qa=1.3960 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.560e+00 gnorm_bridge=2.346e+01 (4843s)
+[step 791] loss_qa=1.0332 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=6.666e+00 gnorm_bridge=3.208e+01 (4849s)
+[step 792] loss_qa=0.6125 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.652e+00 gnorm_bridge=2.864e+01 (4855s)
+[step 793] loss_qa=0.4893 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=9.958e+00 gnorm_bridge=3.781e+01 (4860s)
+[step 794] loss_qa=1.3472 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=4.487e+00 gnorm_bridge=1.434e+01 (4867s)
+[step 795] loss_qa=0.8848 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=1.356e+00 gnorm_bridge=2.506e+01 (4873s)
+[step 796] loss_qa=0.4924 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=3.503e+00 gnorm_bridge=1.998e+01 (4878s)
+[step 797] loss_qa=0.3894 loss_kl=n/a soft_tokens=4 compress=0.333333 gnorm_comp=5.676e+00 gnorm_bridge=1.875e+01 (4884s)
+[step 798] loss_qa=0.4806 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=3.874e+00 gnorm_bridge=1.735e+01 (4890s)
+[step 799] loss_qa=0.5903 loss_kl=n/a soft_tokens=4 compress=0.4 gnorm_comp=6.175e+00 gnorm_bridge=3.339e+01 (4895s)
+[step 800] loss_qa=1.4268 loss_kl=n/a soft_tokens=4 compress=0.363636 gnorm_comp=2.401e+00 gnorm_bridge=2.476e+01 (4901s)
+[grad-check] {"model_has_no_grad": true, "compressor_queries": true, "compressor_input_proj": true, "bridge_last_linear": true}
+  [eval-final] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Velcora'
+  [eval-final] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Nivora Corp.'
+  [eval-final] ✗ q='Where was Mira Quevald born?' gold='Ostrel' pred='Ostreliaendonendonendonendonendonendonendonendonendonendonen'
+  [eval-final] ✗ q='Where was Mira Quevald born?' gold='Vandhe' pred='Veselisendon\n'
+  [eval-final] ✗ q='Where did Dov Krasilm study?' gold='Haldwyn' pred='Perthia'
+  [eval-final] ✓ q='Where did Dov Krasilm study?' gold='Perthia' pred='Perthia'
+  [eval-final] ✗ q='Who is Yuna Frolmist married to?' gold='Elian' pred='Elian Cantonendonendonendonendonendonendonendonendonendonend'
+  [eval-final] ✓ q='Who is Yuna Frolmist married to?' gold='Sachen' pred='Sachen'
+  [eval-final] ✗ q='What did Ravik Tolmstead found?' gold='Brackline' pred='Ondreyndrud'
+  [eval-final] ✗ q='What did Ravik Tolmstead found?' gold='Ondrey' pred='Ondreyndrud'
+  [eval-final] ✓ q='What does Isla Norvund work as?' gold='geologist' pred='geologist'
+  [eval-final] ✓ q='What does Isla Norvund work as?' gold='archivist' pred='archivist'
+  [eval-final] ✗ q='Where does Piet Arlensk live?' gold='Kestmor' pred='Kestmorville'
+  [eval-final] ✗ q='Where does Piet Arlensk live?' gold='Duvhal' pred='Duvhalnd\n'
+  [eval-final] ✓ q='Who is Sela Vriqtash employed by?' gold='Fenwick' pred='Fenwick'
+  [eval-final] ✓ q='Who is Sela Vriqtash employed by?' gold='Talquin' pred='Talquin'
+[eval-final] pair-acc=2/8 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] val full-match=0.375 (n=16) —— 规范化完整答案匹配（不再是子串匹配）
+[eval] recon token-acc=0.618（n_tok=178）—— z 里还留了多少原文符号信息
+[save] ckpt/latent_min16_recon.pt config={"schema": 1, "n_slots": 4, "layer": 18, "inner_dim": 512, "num_heads": 8, "bottleneck": 512, "max_unit_tokens": 64, "target_norm": 1.087283, "read_budget": 32, "dtype": "bf16", "stage": "a", "kl_weight": 0.0, "kl_tau": 1.0, "recon_weight": 1.0, "lr": 0.0005, "steps": 800, "epochs": 200, "seed": 0, "smoke_model": false}

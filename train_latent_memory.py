@@ -282,6 +282,14 @@ def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer
     pre = emb_layer(ids_full[:, :n_sys])
     post = emb_layer(ids_full[:, n_sys:])
     ans_emb = emb_layer(ans_ids)
+    # 答案末尾必须监督 EOS：否则模型从没被教过"答完就停"，推理时贪心解码会继续编
+    # （实测失败模式：Velcor->Velcora、Kestmor->Kestmorville、Elian->Elian Cantonendon...，
+    # 实体都对但拖尾巴，严格匹配全错）。重建任务同样受益（教它在记忆末尾停）。
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is not None:
+        eos_t = torch.tensor([[eos_id]], device=dev)
+        ans_ids = torch.cat([ans_ids, eos_t], dim=1)
+        ans_emb = torch.cat([ans_emb, emb_layer(eos_t)], dim=1)
     parts = [pre]
     if soft is not None and soft.numel():
         s = soft
@@ -455,27 +463,87 @@ def kl_loss(student_logits, teacher_logits, n_ans, tau=1.0):
     return torch.stack(losses).mean()
 
 
+def _norm_ans(t: str) -> str:
+    """答案规范化：小写、去标点、压空白。配对判定和 exact-match 都用同一个口径。"""
+    t = str(t).strip().lower()
+    for ch in ".,!?;:\"'()[]{}":
+        t = t.replace(ch, " ")
+    return " ".join(t.split())
+
+
 def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
-             layer=LM.LATENT_LAYER, max_unit_tokens=LM.LATENT_MAX_UNIT_TOKENS):
-    """用潜层读出（generate_latent_answer）在验证集上算 exact-match，仅供训练期观察。"""
+             layer=LM.LATENT_LAYER, max_unit_tokens=LM.LATENT_MAX_UNIT_TOKENS,
+             verbose=False, label="eval", bridge_only=False):
+    """潜层读出生成评估：**规范化后的完整答案匹配**（不再是子串匹配）。
+
+    为什么改成完整匹配：子串匹配会把 "Ironwood Energy Nilork, a" 判成对
+    （正确答案 "Ironwood Energy Nilork" 是它的子串），系统性高估。
+    规范化 = 小写 + 去标点 + 压空白，且要求整段生成与答案一致。
+
+    反事实配对：按规范化问题分组（同问题不同记忆值），一组内**全部**答对才算
+    配对正确 —— 这是"模型确实在读记忆"的判据，纯背 Question→Answer 永远做不到。
+    """
     if not hasattr(model, "generate"):
         return None, 0
     comp, bridge = reader_like
     comp.eval()
     bridge.eval()
-    enc = LM.LatentEncoder(model, tokenizer, comp, layer=layer,
-                           max_unit_tokens=max_unit_tokens)
+    enc = None if bridge_only else LM.LatentEncoder(
+        model, tokenizer, comp, layer=layer, max_unit_tokens=max_unit_tokens)
     hit = 0
     n = 0
+    groups = {}                     # 规范化问题 -> [该组各条是否全对]
     for item in data[:limit]:
-        z, _info = encode_item(enc, item, tag="val")
+        if bridge_only:
+            z, _info = encode_item_raw_embed(model, tokenizer, item)
+        else:
+            z, _info = encode_item(enc, item, tag="val")
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16)
         n += 1
-        if str(item["answer"]).strip().lower() in str(pred).strip().lower():
-            hit += 1
+        gold = item["answer"]
+        if isinstance(gold, list):
+            gold = " ".join(str(g) for g in gold)
+        ok = _norm_ans(pred) == _norm_ans(gold)
+        hit += ok
+        key = _norm_ans(item["question"])
+        groups.setdefault(key, []).append(ok)
+        if verbose:
+            print(f"  [{label}] {'✓' if ok else '✗'} q={item['question']!r} "
+                  f"gold={gold!r} pred={str(pred)[:60]!r}", flush=True)
+    # 反事实配对：一组（同问题）内全部正确才算
+    n_pairs = len(groups)
+    n_pairs_ok = sum(1 for v in groups.values() if all(v))
+    if n_pairs:
+        print(f"[{label}] pair-acc={n_pairs_ok}/{n_pairs} "
+              f"（同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）", flush=True)
     return (hit / n if n else None), n
+
+
+def _grad_norm(params) -> float:
+    """参数组的全局梯度范数（L2）。None 梯度跳过；全 None 返回 0.0。"""
+    total = 0.0
+    seen = False
+    for p in params:
+        if p.grad is not None:
+            seen = True
+            total += float(p.grad.norm().item()) ** 2
+    return (total ** 0.5) if seen else 0.0
+
+
+def encode_item_raw_embed(model, tokenizer, item):
+    """--bridge-only 消融：跳过压缩器，记忆原文 token embedding 直接当 z（压缩率 1:1）。
+
+    用途：区分"bridge 学不会映射"还是"compressor 丢了信息"。z 形状 [1, T, d]，
+    token 数与原文一致（不是等压缩率对照，是通路消融）。
+    """
+    dev = LM._model_device(model)
+    text = " ".join(item_units(item))
+    ids = tokenizer(text, return_tensors="pt",
+                    add_special_tokens=False)["input_ids"].to(dev)
+    z = model.get_input_embeddings()(ids)          # 冻结权重，无梯度流入
+    return z, {"n_soft_tokens": int(z.shape[1]), "compression_ratio": 1.0}
 
 
 def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
@@ -499,7 +567,7 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
             soft = bridge(z)
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt,
-                "Repeat the memory verbatim.", item["memory"])
+                "Repeat the memory verbatim.", " ".join(item_units(item)))
             with LM.delta_write_disabled(model):
                 logits = model(inputs_embeds=embeds,
                                attention_mask=torch.ones(embeds.shape[:2], dtype=torch.long),
@@ -640,6 +708,18 @@ def train(args):
     acc_items = []
     grad_seen = None        # 必须在 opt.zero_grad() 之前取样，否则永远是 None -> 误报失败
     t_start = time.time()
+    if args.eval_every > 0 and not args.dry_run:
+        # step=0 基线：随机初始化的压缩器/桥接器在这批样本上的表现（对照起点）
+        comp.eval()
+        bridge.eval()
+        em0, n0 = evaluate((comp, bridge), model, tokenizer, val_data, system_prompt,
+                           limit=args.eval_limit, layer=args.layer,
+                           max_unit_tokens=args.max_unit_tokens, verbose=True,
+                           label="eval@0", bridge_only=args.bridge_only)
+        print(f"[eval] step=0 full-match={em0 if em0 is None else round(em0, 4)} (n={n0})",
+              flush=True)
+        comp.train()
+        bridge.train()
     for epoch in range(args.epochs):
         order = list(range(len(train_data)))
         random.Random(args.seed + 100 + epoch).shuffle(order)
@@ -647,7 +727,11 @@ def train(args):
             item = train_data[i]
             # ① 压缩（grad=True：保留到压缩器输出的梯度路径）
             #    一条样本有几条事实就编几个槽位（与推理期 bank 布局一致）
-            z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
+            #    --bridge-only：跳过压缩器，原文 token embedding 直接进 bridge（消融用）
+            if args.bridge_only:
+                z, enc_info = encode_item_raw_embed(model, tokenizer, item)
+            else:
+                z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
             # ② Z -> soft tokens（**必须过 bridge**）
             #    推理期 generate_latent_answer 内部就是 soft = bridge(payloads)；
             #    训练时若直接把 z 当 soft token 喂进去，bridge 不在计算图里、
@@ -677,30 +761,46 @@ def train(args):
                 loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)], tau=args.kl_tau)
                 if loss_kl is not None:
                     loss = loss_qa + args.kl_weight * loss_kl
-            if args.recon_weight > 0:
+            recon_stage = args.recon_only_steps > 0 and step < args.recon_only_steps
+            if args.recon_weight > 0 or recon_stage:
                 # ⑤ 事实重建辅助任务：只给 soft tokens，重建原事实（检查符号保真）
+                #    memory 字段是列表，必须先 join 成句 —— str(list) 会得到
+                #    "['Taron works at Velcor.']" 这种 Python repr（实测踩过：
+                #    recon token-acc 被这个 bug 压低了 ~39%）。
                 r_embeds, r_labels, _ = build_student_inputs(
                     model, tokenizer, soft, system_prompt,
-                    "Repeat the memory verbatim.", item["memory"])
+                    "Repeat the memory verbatim.", " ".join(item_units(item)))
                 with LM.delta_write_disabled(model):
                     r_logits = model(inputs_embeds=r_embeds,
                                      attention_mask=torch.ones(r_embeds.shape[:2],
                                                                dtype=torch.long, device=dev),
                                      use_cache=False).logits
-                loss = loss + args.recon_weight * qa_loss(r_logits, r_labels)
+                loss_r = qa_loss(r_logits, r_labels)
+                # 两阶段（--recon-only-steps N）：前 N 步只训重建 —— 先逼压缩器把内容
+                # 保住，再引入 QA 学读出。两个目标在同一组软 token 上会争预算，同时开
+                # 会震荡（实测 200/400/600 步准确率 0.0625->0.125->0.0625 非单调）。
+                if recon_stage:
+                    loss = loss_r
+                else:
+                    loss = loss + args.recon_weight * loss_r
             (loss / args.accum).backward()
             acc_items.append((float(loss_qa.detach()),
                                None if loss_kl is None else float(loss_kl.detach())))
             micro += 1
             if micro % args.accum == 0:
+                # 梯度范数（step 前）：.grad is not null 只说明"有梯度"，不说明"梯度可用"；
+                # 范数才知道是不是在有效学习（太小=没信号，爆炸=不稳）
+                gnorm_comp = 0.0 if args.bridge_only else _grad_norm(comp.parameters())
+                gnorm_bridge = _grad_norm(bridge.parameters())
                 if grad_seen is None:
                     # 第一个梯度累积边界处取样：此时 .grad 已填充、尚未 step/zero_grad
-                    grad_seen = {
-                        "compressor_queries": comp.queries.grad is not None,
-                        "compressor_input_proj": comp.input_proj.weight.grad is not None,
-                        "bridge_last_linear": bridge.net[3].weight.grad is not None,
-                        "model_has_no_grad": all(p.grad is None for p in model.parameters()),
-                    }
+                    grad_seen = {"model_has_no_grad":
+                                     all(p.grad is None for p in model.parameters())}
+                    if not args.bridge_only:
+                        grad_seen["compressor_queries"] = comp.queries.grad is not None
+                        grad_seen["compressor_input_proj"] = \
+                            comp.input_proj.weight.grad is not None
+                    grad_seen["bridge_last_linear"] = bridge.net[3].weight.grad is not None
                 if args.save_every > 0 and step % args.save_every == 0 and not args.dry_run:
                     # 长跑（数小时）必须周期落盘：只在最后保存的话，中途崩掉全丢。
                     # 直接覆盖同一个文件，不做 step 编号副本，避免 ckpt 目录膨胀。
@@ -714,6 +814,18 @@ def train(args):
                     torch.nn.utils.clip_grad_norm_(
                         list(comp.parameters()) + list(bridge.parameters()), args.grad_clip)
                 opt.step()
+                if args.eval_every > 0 and step % args.eval_every == 0:
+                    # 训练中周期评估（用户要求的 0/200/400/800 节点；step=0 在循环前跑）
+                    em_i, n_i = evaluate(
+                        (comp, bridge), model, tokenizer, val_data, system_prompt,
+                        limit=args.eval_limit, layer=args.layer,
+                        max_unit_tokens=args.max_unit_tokens, verbose=True,
+                        label=f"eval@{step}", bridge_only=args.bridge_only)
+                    print(f"[eval] step={step} full-match={em_i if em_i is None else round(em_i, 4)}"
+                          f" (n={n_i}) gnorm_comp={gnorm_comp:.3e}"
+                          f" gnorm_bridge={gnorm_bridge:.3e}", flush=True)
+                    comp.train()
+                    bridge.train()
                 opt.zero_grad(set_to_none=True)
                 step += 1
                 qa_avg = sum(x[0] for x in acc_items) / len(acc_items)
@@ -723,6 +835,7 @@ def train(args):
                       f"loss_kl={'n/a' if kl_avg is None else f'{kl_avg:.4f}'} "
                       f"soft_tokens={enc_info['n_soft_tokens']} "
                       f"compress={enc_info['compression_ratio']} "
+                      f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
                       f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
                 if args.max_steps > 0 and step >= max_steps:
@@ -745,9 +858,10 @@ def train(args):
 
     em, n_eval = evaluate((comp, bridge), model, tokenizer, val_data, system_prompt,
                           limit=args.eval_limit, layer=args.layer,
-                          max_unit_tokens=args.max_unit_tokens)
-    print(f"[eval] val exact-match={em if em is None else round(em, 4)} (n={n_eval}) "
-          f"—— 训练期观察值，不是论文指标", flush=True)
+                          max_unit_tokens=args.max_unit_tokens, verbose=True,
+                          label="eval-final", bridge_only=args.bridge_only)
+    print(f"[eval] val full-match={em if em is None else round(em, 4)} (n={n_eval}) "
+          f"—— 规范化完整答案匹配（不再是子串匹配）", flush=True)
 
     if args.dry_run:
         print(f"[dry-run] OK：通路验证完成（{time.time()-t0:.1f}s），未写 checkpoint",
@@ -808,6 +922,15 @@ def parse_args(argv=None):
                     default=int(os.environ.get("LATENT_GRAD_ACCUM", "16")))
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--max-steps", type=int, default=0)
+    ap.add_argument("--recon-only-steps", type=int, default=0,
+                    help="前 N 个优化步只训重建（QA 关闭），之后切 QA+recon。"
+                         "用途：先保真再学读出，避免两个目标同时争软 token 预算")
+    ap.add_argument("--eval-every", type=int, default=0,
+                    help="每 N 个优化步做一次生成评估（0=只在结束后评）。"
+                         "实验 1 用 200：节点 0/200/400/800")
+    ap.add_argument("--bridge-only", action="store_true",
+                    help="条件消融 A：跳过压缩器，记忆原文 token embedding 直接进 bridge"
+                         "（压缩率 1:1，保留全部 token 信息；区分 bridge vs compressor 瓶颈）")
     ap.add_argument("--grad-clip", type=float, default=1.0)
     ap.add_argument("--save-every", type=int, default=500,
                     help="每 N 个优化步落盘一次（0=只在结束时保存）")
