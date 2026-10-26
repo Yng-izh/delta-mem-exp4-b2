@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -345,6 +346,175 @@ class LatentBridge(nn.Module):
         n = out.norm(dim=-1, keepdim=True)
         unit = out / n.clamp_min(1e-6)
         return unit * self.scale().to(device=out.device, dtype=out.dtype)
+
+
+# ----------------------------- 2.5) 潜空间内容寻址（Router） -----------------------------
+LATENT_D_KEY = _env_int("LATENT_D_KEY", 256)
+
+
+def stack_payloads(payloads: Sequence[torch.Tensor]) -> torch.Tensor:
+    """把 encode() 返回的 per-slot payload 列表堆成 [K, m, d]。
+
+    每个 payload 形状 [k, m, d]（k = 该单元被切成几块）。块轴取均值：一个槽位被切成
+    多块时，它的"寻址特征"是这几块的平均，而不是其中某一块 —— 否则同一个槽位在
+    "是否超长"两种情况下会得到不同的键，路由结果随无关因素抖动。
+    """
+    if not payloads:
+        raise ValueError("stack_payloads 收到空列表")
+    zs = [p if p.dim() == 3 else p.unsqueeze(0) for p in payloads]
+    m_set = {int(z.shape[1]) for z in zs}
+    if len(m_set) != 1:
+        raise ValueError(f"payload 的 m 不一致：{sorted(m_set)}，无法堆叠成 [K,m,d]")
+    return torch.stack([z.mean(dim=0) for z in zs], dim=0)
+
+
+class LatentRouter(nn.Module):
+    """无位置偏置的潜空间内容寻址：query 与槽位键内积 -> 选槽 -> 只送出那一个槽。
+
+    要解决的问题（实测证据，干净进程重载 ckpt、训练同款 prompt、Delta 写入关闭）：
+        同一条事实 "Taron Velstrik works at Velcor."
+            单槽输入            -> 15/16
+            4 槽 target_only    -> 15/16   （内容完全相同，只是外面套了 4 槽的壳）
+            4 槽 full（目标首位）->  1/16
+            4 槽 target_end     ->  0/16
+    即：读出完全由"槽位排在软 token 序列的第几位"决定，与内容无关。把 K 个槽位的
+    K*m 个软 token 裸拼进 inputs_embeds，Qwen 只能按位置去注意，于是把"第 1 个槽"
+    当成答案源。槽数变、顺序变，结论就崩。
+
+    Router 把"选哪个槽"从"软 token 排第几"里解耦：
+        s_k = <q, k_in_k> / tau              # 集合打分，与 K 和顺序无关
+        Z_read = softmax(s)·Z   (训练，可导)
+        Z_read = Z_{argmax_k s_k} (推理，只送 1 个槽 = m 个软 token)
+    这样无论外面给 1 个还是 4 个槽、目标在第 1 位还是最后一位，bridge 看到的
+    永远是它最熟悉的"单槽 m 个软 token"，位置先验被彻底去掉。
+
+    两个键分工（对应单跳 / 多跳）：
+        k_in  ：主语 + 关系  -> 与问题匹配（本类的主用途）
+        k_out ：客体值       -> 多跳时用 q' = norm(q + k_out) 接力找下一跳
+    """
+
+    def __init__(self, d_model: int, n_slots: int = LATENT_M, d_key: int = LATENT_D_KEY,
+                 init_temp: float = 0.07):
+        super().__init__()
+        if int(d_model) <= 0 or int(n_slots) <= 0 or int(d_key) <= 0:
+            raise ValueError(f"d_model/n_slots/d_key 必须为正：{d_model}/{n_slots}/{d_key}")
+        self.d_model = int(d_model)
+        self.n_slots = int(n_slots)          # m：单个槽位的潜向量个数
+        self.d_key = int(d_key)
+        self.slot_flat = self.n_slots * self.d_model
+        # 问题特征 = L0 平均嵌入 ‖ L18 平均隐状态（拼接，共 2*d_model）
+        self.q_net = nn.Sequential(
+            nn.Linear(self.d_model * 2, self.d_key), nn.SiLU(),
+            nn.Linear(self.d_key, self.d_key))
+        self.k_in_net = nn.Sequential(
+            nn.Linear(self.slot_flat, self.d_key), nn.SiLU(),
+            nn.Linear(self.d_key, self.d_key))
+        self.k_out_net = nn.Sequential(
+            nn.Linear(self.slot_flat, self.d_key), nn.SiLU(),
+            nn.Linear(self.d_key, self.d_key))
+        self.log_temp = nn.Parameter(torch.tensor(float(math.log(init_temp))))
+
+    def encode_query(self, q_feat: torch.Tensor) -> torch.Tensor:
+        """q_feat: [B, 2*d_model]（L0 mean ‖ L18 mean）-> 归一化查询向量 [B, d_key]。"""
+        q_feat = torch.as_tensor(q_feat)
+        if q_feat.dim() == 1:
+            q_feat = q_feat.unsqueeze(0)
+        if int(q_feat.shape[-1]) != self.d_model * 2:
+            raise ValueError(f"q_feat 最后一维 {q_feat.shape[-1]} != {self.d_model * 2}")
+        p = next(self.parameters())
+        return torch.nn.functional.normalize(
+            self.q_net(q_feat.to(device=p.device, dtype=p.dtype)), dim=-1)
+
+    def encode_keys(self, slot_z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """slot_z: [B, K, m, d] -> (k_in [B,K,d_key], k_out [B,K,d_key])，均已归一化。"""
+        slot_z = torch.as_tensor(slot_z)
+        if slot_z.dim() == 3:
+            slot_z = slot_z.unsqueeze(0)
+        if slot_z.dim() != 4:
+            raise ValueError(f"slot_z 必须是 [B,K,m,d] 或 [K,m,d]，得到 {tuple(slot_z.shape)}")
+        if int(slot_z.shape[-2]) != self.n_slots or int(slot_z.shape[-1]) != self.d_model:
+            raise ValueError(f"slot_z 尾部应是 [m={self.n_slots}, d={self.d_model}]，"
+                             f"得到 {tuple(slot_z.shape[-2:])}")
+        p = next(self.parameters())
+        flat = slot_z.to(device=p.device, dtype=p.dtype).flatten(-2)   # [B,K,m*d]
+        k_in = torch.nn.functional.normalize(self.k_in_net(flat), dim=-1)
+        k_out = torch.nn.functional.normalize(self.k_out_net(flat), dim=-1)
+        return k_in, k_out
+
+    def scores(self, q_vec: torch.Tensor, k_in: torch.Tensor) -> torch.Tensor:
+        """集合打分 s_k = <q, k_in_k> / tau，形状 [B, K]（与 K、与顺序无关）。"""
+        tau = self.log_temp.exp().clamp_min(1e-4)
+        return torch.einsum("bd,bkd->bk", q_vec, k_in.to(q_vec.dtype)) / tau
+
+    def forward(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
+                hard: bool = False, target_idx: Optional[torch.Tensor] = None
+                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """返回 (z_read [B,m,d], 路由 logits [B,K], k_in, k_out)。
+
+        hard=False：软门控聚合（训练用；target_idx 给定时可另算 CE 监督）。
+        hard=True ：硬选 argmax（推理用；输出就是被选中那个槽的原样载荷）。
+        推理走硬选是为了让 bridge 永远只看到 1 个槽（m 个软 token）—— 与 Phase 1
+        单槽训练时的输入形状完全一致，这是"位置/槽数无关"能真正生效的前提。
+        """
+        q_vec = self.encode_query(q_feat)
+        k_in, k_out = self.encode_keys(slot_z)
+        logits = self.scores(q_vec, k_in)
+        z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
+        z = z.to(device=q_vec.device, dtype=q_vec.dtype)
+        if hard:
+            idx = logits.argmax(dim=-1)                       # [B]
+            z_read = z[torch.arange(z.shape[0], device=z.device), idx]
+        else:
+            w = torch.softmax(logits, dim=-1)                 # [B,K]
+            # 关键：软门控必须**跨槽加权**，但不能让 m 内的 token 互相混（保持 m 结构）
+            z_read = torch.einsum("bk,bkmd->bmd", w, z)
+        return z_read, logits, k_in, k_out
+
+    @torch.no_grad()
+    def chain(self, q_feat: torch.Tensor, slot_z: torch.Tensor, hops: int = 2
+              ) -> List[int]:
+        """多跳：第 1 跳按问题选，之后用 k_out 更新查询接力选下一跳。返回槽位下标序列。"""
+        hops = max(1, int(hops))
+        q_vec = self.encode_query(q_feat)
+        k_in, k_out = self.encode_keys(slot_z)
+        picked: List[int] = []
+        for _ in range(min(hops, int(k_in.shape[1]))):
+            s = self.scores(q_vec, k_in)[0]
+            if picked:
+                s[torch.tensor(picked, device=s.device)] = float("-inf")
+            idx = int(s.argmax().item())
+            picked.append(idx)
+            q_vec = torch.nn.functional.normalize(q_vec + k_out[:, idx], dim=-1)
+        return picked
+
+
+def extract_query_feature(model: Any, tokenizer: Any, question: str,
+                          system_prompt: str = "", layer: int = LATENT_LAYER,
+                          device: Any = None) -> torch.Tensor:
+    """问题 -> [1, 2d] 查询特征（L0 平均嵌入 ‖ L18 平均隐状态）。
+
+    为什么两层都要：L0 是词形（实体名靠它区分），L18 是语境化语义（关系靠它区分）。
+    只用 L0 时同关系不同主语几乎不可分；只用 L18 时未见实体的词形会被磨平。
+    """
+    if model is None or tokenizer is None:
+        raise ValueError("extract_query_feature 需要 model 与 tokenizer")
+    dev = torch.device(device) if device is not None else _model_device(model)
+    full, n_sys_chars = build_chat_parts(tokenizer, system_prompt, question)
+    # 只用问题本身（system 是常量，放进键里只会给所有样本加同一个偏移）
+    q_text = full[n_sys_chars:] if n_sys_chars else full
+    ids = _tokenize_no_special(tokenizer, q_text or question, dev)
+    with torch.no_grad(), delta_write_disabled(model):
+        out = model(input_ids=ids, attention_mask=torch.ones_like(ids),
+                    output_hidden_states=True, use_cache=False)
+    hs = getattr(out, "hidden_states", None)
+    if hs is None:
+        raise RuntimeError("模型没有返回 hidden_states（需要 output_hidden_states=True）")
+    if int(layer) >= len(hs):
+        raise ValueError(f"layer={layer} 超出 hidden_states 层数 {len(hs)}")
+    h0 = hs[0].mean(dim=1)                                  # [1, d]
+    hl = hs[int(layer)].mean(dim=1)                         # [1, d]
+    p = model.get_input_embeddings().weight
+    return torch.cat([h0, hl], dim=-1).to(dtype=p.dtype)
 
 
 # ----------------------------- 3) 槽位载荷库 -----------------------------
@@ -728,10 +898,12 @@ class LatentReader:
 
     def __init__(self, compressor: LatentCompressor, bridge: LatentBridge,
                  encoder: LatentEncoder, config: Dict[str, Any],
-                 checkpoint: str, fingerprint: Dict[str, Any]):
+                 checkpoint: str, fingerprint: Dict[str, Any],
+                 router: Optional["LatentRouter"] = None):
         self.compressor = compressor
         self.bridge = bridge
         self.encoder = encoder
+        self.router = router
         self.config = dict(config or {})
         self.checkpoint = checkpoint
         self.fingerprint = dict(fingerprint or {})
@@ -814,13 +986,26 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
                         max_unit_tokens=int(cfg.get("max_unit_tokens",
                                                     LATENT_MAX_UNIT_TOKENS)),
                         device=dev)
+    router = None
+    if bool(cfg.get("has_router", False)):
+        # 有 Router 的 ckpt 必须把 Router 一起恢复：缺了它，多槽输入会退回
+        # "K 个槽裸拼"的老路径（位置敏感、槽数依赖），指标会莫名其妙地掉回基线。
+        blob_router = blob.get("router")
+        if not blob_router:
+            raise ValueError(f"config.has_router=True 但 checkpoint 里没有 router 权重：{checkpoint}")
+        router = LatentRouter(hs, n_slots=int(cfg["n_slots"]),
+                              d_key=int(cfg.get("d_key", LATENT_D_KEY)))
+        router.load_state_dict(blob_router, strict=strict)
+        router.to(dev).eval()
+        router.requires_grad_(False)
     return LatentReader(comp, bridge, enc, cfg, checkpoint,
-                        checkpoint_fingerprint(checkpoint))
+                        checkpoint_fingerprint(checkpoint), router=router)
 
 
 def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: LatentBridge,
-                           config: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> str:
-    """保存压缩器 + 桥接器 + 配置（推理侧 load_latent_reader 严格对齐这份 config）。"""
+                           config: Dict[str, Any], meta: Optional[Dict[str, Any]] = None,
+                           router: Optional["LatentRouter"] = None) -> str:
+    """保存压缩器 + 桥接器(+可选 Router) + 配置（推理侧 load_latent_reader 严格对齐）。"""
     if not isinstance(compressor, LatentCompressor) or not isinstance(bridge, LatentBridge):
         raise TypeError("save_latent_checkpoint 需要 LatentCompressor + LatentBridge")
     if int(compressor.hidden_size) != int(bridge.hidden_size):
@@ -832,9 +1017,19 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
     cfg["inner_dim"] = int(compressor.inner_dim)
     cfg["num_heads"] = int(compressor.num_heads)
     cfg["bottleneck"] = int(bridge.bottleneck)
+    if router is not None:
+        cfg["has_router"] = True
+        cfg["d_key"] = int(router.d_key)
+        if int(router.d_model) != int(compressor.hidden_size):
+            raise ValueError("router.d_model != compressor.hidden_size")
+        if int(router.n_slots) != int(compressor.n_slots):
+            raise ValueError("router.n_slots != compressor.n_slots")
+    else:
+        cfg["has_router"] = False
     blob = {"schema": LATENT_SCHEMA, "config": cfg,
             "compressor": compressor.state_dict(),
             "bridge": bridge.state_dict(),
+            "router": (router.state_dict() if router is not None else None),
             "meta": dict(meta or {})}
     d = os.path.dirname(os.path.abspath(path))
     if d:
@@ -878,7 +1073,10 @@ def _tokenize_no_special(tokenizer: Any, text: str, device: Any) -> torch.Tensor
 def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                            payloads: Optional[torch.Tensor], question: str,
                            system_prompt: str, max_new_tokens: int = 32,
-                           pad_token_id: Optional[int] = None
+                           pad_token_id: Optional[int] = None,
+                           router: Optional["LatentRouter"] = None,
+                           q_feat: Optional[torch.Tensor] = None,
+                           layer: int = LATENT_LAYER, hops: int = 1
                            ) -> Tuple[str, Dict[str, Any]]:
     """潜层读出：只有 system / question 是正常 token，历史证据全部走 soft tokens。
 
@@ -893,11 +1091,22 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
       2. 输出解码：Qwen + Delta-Mem 改过的 generate() 对 inputs_embeds 的返回序列**不保证**
          只含新 token。这里两种形态都处理，并把实际形态写进 meta["decode_mode"]，
          不做"一定只返回新 token"的假设（否则会把 prompt 尾部当答案）。
+
+    router（可选）：多槽输入时先做集合内容寻址，只把被选中那一个槽送进 bridge。
+      有无 router 的差别就是"位置敏感"与"位置无关"的差别（实测同一事实：
+      4 槽裸拼 target_end = 0/16；路由后应逐位等于单槽结果）。
+      hops>1 时按 k_out 链式选出多跳槽位，槽位之间插 Qwen 原生 "\n" embedding 隔离。
     """
     if tokenizer is None or model is None:
         raise ValueError("generate_latent_answer 需要 model 与 tokenizer")
     if payloads is not None and (not torch.is_tensor(payloads)):
         payloads = torch.as_tensor(payloads)
+    if payloads is not None and not torch.is_tensor(payloads):
+        # encode() 返回的是 per-slot payload 列表；这里统一成 [K, m, d]
+        payloads = stack_payloads(list(payloads)) if isinstance(payloads, (list, tuple)) \
+            else torch.as_tensor(payloads)
+        if payloads.dim() == 2:
+            payloads = payloads.unsqueeze(0)
     has_payload = bool(payloads is not None and payloads.numel() > 0)
     if has_payload and bridge is None:
         raise ValueError("给了潜载荷但没有 bridge：无法把 Z 映射成 soft tokens")
@@ -919,7 +1128,31 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
     post = emb_layer(ids_full[:, n_sys:])
     parts = [pre]
     n_soft = 0
-    if has_payload:
+    routed: Optional[List[int]] = None
+    if has_payload and router is not None:
+        slot_z = payloads if payloads.dim() == 4 else payloads.unsqueeze(0)   # [1,K,m,d]
+        slot_z = slot_z.to(dev)
+        qf = q_feat
+        if qf is None:
+            qf = extract_query_feature(model, tokenizer, question, system_prompt,
+                                       layer=layer, device=dev)
+        if int(hops) > 1:
+            routed = router.chain(qf, slot_z, hops=hops)
+        else:
+            _z, logits, _ki, _ko = router(qf, slot_z, hard=True)
+            routed = [int(logits[0].argmax().item())]
+        nl_id = tokenizer("\n", add_special_tokens=False).input_ids[0]
+        nl_emb = emb_layer(torch.tensor([[nl_id]], device=dev))
+        pieces = []
+        for j, idx in enumerate(routed):
+            if j:
+                pieces.append(nl_emb.to(dtype=pre.dtype))
+            sel = bridge(slot_z[:, idx])             # [1, m, d]
+            pieces.append(sel.reshape(1, -1, sel.shape[-1]))
+        soft = torch.cat(pieces, dim=1)
+        n_soft = int(soft.shape[1])
+        parts.append(soft.to(dtype=pre.dtype))
+    elif has_payload:
         soft = bridge(payloads.to(dev))              # [K, m, d] -> [K*m, d]
         if soft.dim() == 3:
             soft = soft.reshape(1, -1, soft.shape[-1])
@@ -953,7 +1186,8 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
     meta = {"n_in": n_in, "n_out": n_out, "n_soft": n_soft,
             "n_sys_tokens": int(n_sys), "insert_at": int(n_sys),
             "decode_mode": decode_mode, "max_new_tokens": int(max_new_tokens),
-            "has_payload": has_payload}
+            "has_payload": has_payload, "routed": routed, "hops": int(hops),
+            "n_slots_in": (int(payloads.shape[0]) if has_payload else 0)}
     return pred, meta
 
 

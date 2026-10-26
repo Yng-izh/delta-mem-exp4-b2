@@ -62,6 +62,7 @@ import random
 import sys
 import time
 from collections import Counter
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("DELTA_MEM_SCAN_IMPL", "torch")
@@ -260,6 +261,40 @@ def encode_item(encoder, item, tag="fact", grad=False):
 # =====================================================================
 # 2) 序列构造：soft tokens + 答案 token 的标签
 # =====================================================================
+def encode_item_slots(encoder, item, tag="fact", grad=False):
+    """编码一条样本，返回 (per-slot payload 列表, 拼接后的 z, info)。
+
+    为什么要 per-slot：LatentRouter 要在**槽位集合**上打分，需要每个槽独立成形
+    [m, d]；encode_item 只给拼好的 [Σk, m, d]，把槽边界丢了，无法路由。
+    """
+    units = item_units(item)
+    payloads, info = encoder.encode(units,
+                                    parent_ids=[f"{tag}:{k}" for k in range(len(units))],
+                                    grad=grad)
+    if not payloads:
+        raise RuntimeError("encode 未返回任何 payload")
+    z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
+    return payloads, z, info
+
+
+_QF_CACHE: Dict[Any, torch.Tensor] = {}
+
+
+def query_feature_cached(model, tokenizer, question, system_prompt, layer, device):
+    """问题特征缓存：同一问题在训练里会被反复采样，重复跑 L0/L18 前向纯属浪费。
+
+    缓存键含 system_prompt 与 layer —— 换了提示词或取层，特征必须重算（否则会拿
+    另一套配置的查询向量去和当前键打分，路由悄悄错位而指标看不出来）。
+    """
+    key = (str(question), str(system_prompt), int(layer), str(device))
+    hit = _QF_CACHE.get(key)
+    if hit is None:
+        hit = LM.extract_query_feature(model, tokenizer, question, system_prompt,
+                                       layer=layer, device=device)
+        _QF_CACHE[key] = hit.detach()
+    return _QF_CACHE[key]
+
+
 def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer):
     """student：system(正常 token) + soft tokens + user/assistant 骨架 + answer token。
 
@@ -318,6 +353,13 @@ def build_teacher_inputs(model, tokenizer, evidence, system_prompt, question, an
     ids = tokenizer(full, return_tensors="pt", add_special_tokens=False)["input_ids"].to(dev)
     ans_ids = tokenizer(str(answer), return_tensors="pt",
                         add_special_tokens=False)["input_ids"].to(dev)
+    # teacher 必须和 student 一样监督 EOS：student 的答案段是 [answer..., EOS]，
+    # teacher 少了 EOS 会让两边答案长度差 1，kl_loss 只能按 min(n) 截，最后一个
+    # 位置的分布（也就是"什么时候停"）永远蒸不到 —— 表现为蒸馏了但生成还在拖尾巴。
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is not None:
+        eos_t = torch.tensor([[eos_id]], device=dev)
+        ans_ids = torch.cat([ans_ids, eos_t], dim=1)
     embeds = torch.cat([emb_layer(ids), emb_layer(ans_ids)], dim=1)
     n_ans = int(ans_ids.shape[1])
     return embeds, n_ans
@@ -471,6 +513,42 @@ def _norm_ans(t: str) -> str:
     return " ".join(t.split())
 
 
+def target_slot_index(units, answer, fallback=0):
+    """目标槽位下标：用答案字符串在事实里的出现位置判定，不依赖数据集的摆放约定。
+
+    为什么不用"第 0 条就是目标"：那样一旦数据生成顺序变了，寻址监督会训练模型
+    去选错槽位，而且错得很隐蔽（QA 损失照样下降，因为软门控聚合仍然看得到目标）。
+    """
+    a = _norm_ans(answer)
+    if a:
+        for i, u in enumerate(units):
+            if a in _norm_ans(u):
+                return i
+    return int(fallback)
+
+
+def sample_slot_subset(payloads, target_idx, rng, max_slots=None):
+    """随机取 K_cur ∈ [1, K] 个槽位（**必含目标槽**）、随机顺序，返回 (slot_z, new_tgt)。
+
+    这是 Phase 2 的核心课程：模型必须学会"无论给了几个槽、目标排第几，都按问题
+    选到同一个槽"。固定 4 槽训练只会学到"第 0 位是答案"这个位置先验（实测：
+    训练集 39.5%，把目标挪到最后掉到 21.5%，只给 1 槽直接 0%）。
+    """
+    K = len(payloads)
+    if K <= 0:
+        raise ValueError("sample_slot_subset 收到空 payload 列表")
+    tgt = int(target_idx) if 0 <= int(target_idx) < K else 0
+    hi = K if max_slots is None else max(1, min(K, int(max_slots)))
+    k_cur = rng.randint(1, hi)
+    others = [i for i in range(K) if i != tgt]
+    rng.shuffle(others)
+    keep = [tgt] + others[:max(0, k_cur - 1)]
+    rng.shuffle(keep)
+    new_tgt = keep.index(tgt)
+    slot_z = LM.stack_payloads([payloads[i] for i in keep])       # [K_cur, m, d]
+    return slot_z, new_tgt, keep
+
+
 def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
              layer=LM.LATENT_LAYER, max_unit_tokens=LM.LATENT_MAX_UNIT_TOKENS,
              verbose=False, label="eval", bridge_only=False):
@@ -485,9 +563,12 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
     """
     if not hasattr(model, "generate"):
         return None, 0
-    comp, bridge = reader_like
+    comp, bridge = reader_like[0], reader_like[1]
+    router = reader_like[2] if len(reader_like) > 2 else None
     comp.eval()
     bridge.eval()
+    if router is not None:
+        router.eval()
     enc = None if bridge_only else LM.LatentEncoder(
         model, tokenizer, comp, layer=layer, max_unit_tokens=max_unit_tokens)
     hit = 0
@@ -500,7 +581,8 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
             z, _info = encode_item(enc, item, tag="val")
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z,
-            question=item["question"], system_prompt=system_prompt, max_new_tokens=16)
+            question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
+            router=router, layer=layer)
         n += 1
         gold = item["answer"]
         if isinstance(gold, list):
@@ -555,9 +637,12 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
     位置对齐：causal LM 的 logits[t] 预测 token t+1，因此第 i 个答案 token 的预测
     取自它**前一个**位置的 logits（写错会整体错一位，看起来像"永远差一点"）。
     """
-    comp, bridge = reader_like
+    comp, bridge = reader_like[0], reader_like[1]
+    router = reader_like[2] if len(reader_like) > 2 else None
     comp.eval()
     bridge.eval()
+    if router is not None:
+        router.eval()
     enc = LM.LatentEncoder(model, tokenizer, comp, layer=layer,
                            max_unit_tokens=max_unit_tokens)
     hit = tot = 0
@@ -633,13 +718,31 @@ def train(args):
                              target_norm=target_norm).to(dev)
     print(f"[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 {target_norm:.4f}"
           f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）", flush=True)
+    router = None
+    if args.router:
+        router = LM.LatentRouter(hidden, n_slots=args.m, d_key=args.d_key).to(dev)
+        print(f"[router] LatentRouter 启用：d_key={args.d_key} τ0="
+              f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+              f"{'（Compressor 主干冻结）' if args.freeze_compressor else ''}", flush=True)
     if args.init:
         blob = LM._safe_torch_load(args.init)
         comp.load_state_dict(blob["compressor"])
         bridge.load_state_dict(blob["bridge"])
+        if router is not None and blob.get("router"):
+            router.load_state_dict(blob["router"])
+            print(f"[init] Router 也一并从 {args.init} 载入", flush=True)
         print(f"[init] 从 {args.init} 初始化（阶段 B 常规做法）", flush=True)
-    n_train = sum(p.numel() for p in comp.parameters()) + \
-              sum(p.numel() for p in bridge.parameters())
+    if args.freeze_compressor:
+        if router is None:
+            raise SystemExit("--freeze-compressor 只在 --router 下有意义（Phase 2）")
+        # Phase 2 只放开寻址头：压缩器主干冻住，保证值编码不被寻址梯度改写。
+        for prm in comp.parameters():
+            prm.requires_grad_(False)
+        comp.eval()
+        print("[freeze] Compressor 主干已冻结（只训 Router + Bridge）", flush=True)
+    n_train = sum(p.numel() for p in comp.parameters() if p.requires_grad) + \
+              sum(p.numel() for p in bridge.parameters()) + \
+              (sum(p.numel() for p in router.parameters()) if router is not None else 0)
     print(f"[params] 可训练 {n_train/1e6:.3f}M "
           f"(compressor={sum(p.numel() for p in comp.parameters())/1e6:.3f}M, "
           f"bridge={sum(p.numel() for p in bridge.parameters())/1e6:.3f}M)", flush=True)
@@ -684,14 +787,22 @@ def train(args):
         print("[dry-run] 数据/模型/参数已就绪，开始一次前向+反向自检（不写 checkpoint）",
               flush=True)
 
-    opt = torch.optim.AdamW([p for p in list(comp.parameters()) + list(bridge.parameters())
-                             if p.requires_grad], lr=args.lr)
+    opt_params = list(comp.parameters()) + list(bridge.parameters()) + \
+        (list(router.parameters()) if router is not None else [])
+    opt = torch.optim.AdamW([p for p in opt_params if p.requires_grad], lr=args.lr)
     encoder = LM.LatentEncoder(model, tokenizer, comp, layer=args.layer,
                                max_unit_tokens=args.max_unit_tokens, device=dev)
     system_prompt = args.system_prompt
+    reader_like = (comp, bridge) if router is None else (comp, bridge, router)
+    rng_slots = random.Random(args.seed + 777)      # 变槽数采样的独立随机流
     max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
-    comp.train()
+    if args.freeze_compressor:
+        comp.eval()          # 冻结主干：训练循环里的 comp.train() 会覆盖，这里兜住
+    else:
+        comp.train()
     bridge.train()
+    if router is not None:
+        router.train()
     def _cfg(steps_done):
         return {"schema": LM.LATENT_SCHEMA, "n_slots": args.m, "layer": args.layer,
                 "inner_dim": args.inner_dim, "num_heads": args.heads,
@@ -701,7 +812,9 @@ def train(args):
                 "stage": args.stage, "kl_weight": args.kl_weight, "kl_tau": args.kl_tau,
                 "recon_weight": args.recon_weight, "lr": args.lr,
                 "steps": steps_done, "epochs": args.epochs, "seed": args.seed,
-                "smoke_model": bool(args.smoke_model)}
+                "smoke_model": bool(args.smoke_model),
+                "router": bool(args.router), "d_key": int(args.d_key),
+                "addr_weight": float(args.addr_weight)}
 
     step = 0
     micro = 0
@@ -712,7 +825,7 @@ def train(args):
         # step=0 基线：随机初始化的压缩器/桥接器在这批样本上的表现（对照起点）
         comp.eval()
         bridge.eval()
-        em0, n0 = evaluate((comp, bridge), model, tokenizer, val_data, system_prompt,
+        em0, n0 = evaluate(reader_like, model, tokenizer, val_data, system_prompt,
                            limit=args.eval_limit, layer=args.layer,
                            max_unit_tokens=args.max_unit_tokens, verbose=True,
                            label="eval@0", bridge_only=args.bridge_only)
@@ -728,15 +841,35 @@ def train(args):
             # ① 压缩（grad=True：保留到压缩器输出的梯度路径）
             #    一条样本有几条事实就编几个槽位（与推理期 bank 布局一致）
             #    --bridge-only：跳过压缩器，原文 token embedding 直接进 bridge（消融用）
+            payloads = None
             if args.bridge_only:
                 z, enc_info = encode_item_raw_embed(model, tokenizer, item)
+            elif router is not None:
+                # 路由需要每个槽独立成形 [m,d]，所以保留 per-slot payload。
+                # Phase 2 冻结压缩器时用 grad=False：反正要 detach，建图纯浪费显存。
+                payloads, z, enc_info = encode_item_slots(
+                    encoder, item, tag="fact", grad=not args.freeze_compressor)
             else:
                 z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
             # ② Z -> soft tokens（**必须过 bridge**）
             #    推理期 generate_latent_answer 内部就是 soft = bridge(payloads)；
             #    训练时若直接把 z 当 soft token 喂进去，bridge 不在计算图里、
             #    梯度检查会报 bridge_last_linear=false，且推理期用的是随机投影。
-            soft = bridge(z)
+            r_logits = None
+            tgt_slot = 0
+            if router is not None and payloads is not None:
+                # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
+                tgt_slot = target_slot_index(item_units(item), item["answer"])
+                slot_z, tgt_slot, _keep = sample_slot_subset(
+                    payloads, tgt_slot, rng_slots, args.max_slots or None)
+                if args.freeze_compressor:
+                    slot_z = slot_z.detach()
+                q_feat = query_feature_cached(model, tokenizer, item["question"],
+                                              system_prompt, args.layer, dev)
+                z_read, r_logits, _ki, _ko = router(q_feat, slot_z, hard=False)
+                soft = bridge(z_read)
+            else:
+                soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt, item["question"], item["answer"])
@@ -747,6 +880,13 @@ def train(args):
                                  use_cache=False).logits
             loss_qa = qa_loss(s_logits, labels)
             loss = loss_qa
+            loss_addr = None
+            if r_logits is not None:
+                # 显式寻址监督：让"选哪个槽"有直接梯度。只靠 QA 隐式回传时，
+                # 4 槽里 3 个干扰槽会把信号摊薄到学不出来（实测 target_only 直接 0%）。
+                tgt_t = torch.tensor([int(tgt_slot)], device=r_logits.device)
+                loss_addr = F.cross_entropy(r_logits, tgt_t)
+                loss = loss + args.addr_weight * loss_addr
             loss_kl = None
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
@@ -781,17 +921,23 @@ def train(args):
                 # 会震荡（实测 200/400/600 步准确率 0.0625->0.125->0.0625 非单调）。
                 if recon_stage:
                     loss = loss_r
+                    if loss_addr is not None:
+                        loss = loss + args.addr_weight * loss_addr
                 else:
                     loss = loss + args.recon_weight * loss_r
             (loss / args.accum).backward()
             acc_items.append((float(loss_qa.detach()),
-                               None if loss_kl is None else float(loss_kl.detach())))
+                               None if loss_kl is None else float(loss_kl.detach()),
+                               None if loss_addr is None else float(loss_addr.detach())))
             micro += 1
             if micro % args.accum == 0:
                 # 梯度范数（step 前）：.grad is not null 只说明"有梯度"，不说明"梯度可用"；
                 # 范数才知道是不是在有效学习（太小=没信号，爆炸=不稳）
-                gnorm_comp = 0.0 if args.bridge_only else _grad_norm(comp.parameters())
+                gnorm_comp = 0.0 if (args.bridge_only or args.freeze_compressor) \
+                    else _grad_norm(comp.parameters())
                 gnorm_bridge = _grad_norm(bridge.parameters())
+                gnorm_router = (_grad_norm(router.parameters())
+                                if router is not None else 0.0)
                 if grad_seen is None:
                     # 第一个梯度累积边界处取样：此时 .grad 已填充、尚未 step/zero_grad
                     grad_seen = {"model_has_no_grad":
@@ -808,34 +954,46 @@ def train(args):
                         args.out, comp, bridge, _cfg(step),
                         {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                          "git": _git_commit(), "partial": True, "step": step,
-                         "n_train": len(train_data)})
+                         "n_train": len(train_data)}, router=router)
                     print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
                 if args.grad_clip > 0:
+                    clip_params = list(comp.parameters()) + list(bridge.parameters()) + \
+                        (list(router.parameters()) if router is not None else [])
                     torch.nn.utils.clip_grad_norm_(
-                        list(comp.parameters()) + list(bridge.parameters()), args.grad_clip)
+                        [x for x in clip_params if x.requires_grad], args.grad_clip)
                 opt.step()
                 if args.eval_every > 0 and step % args.eval_every == 0:
                     # 训练中周期评估（用户要求的 0/200/400/800 节点；step=0 在循环前跑）
+                    if router is not None:
+                        router.eval()
                     em_i, n_i = evaluate(
-                        (comp, bridge), model, tokenizer, val_data, system_prompt,
+                        reader_like, model, tokenizer, val_data, system_prompt,
                         limit=args.eval_limit, layer=args.layer,
                         max_unit_tokens=args.max_unit_tokens, verbose=True,
                         label=f"eval@{step}", bridge_only=args.bridge_only)
                     print(f"[eval] step={step} full-match={em_i if em_i is None else round(em_i, 4)}"
                           f" (n={n_i}) gnorm_comp={gnorm_comp:.3e}"
-                          f" gnorm_bridge={gnorm_bridge:.3e}", flush=True)
-                    comp.train()
+                          f" gnorm_bridge={gnorm_bridge:.3e}"
+                          f" gnorm_router={gnorm_router:.3e}", flush=True)
+                    if not args.freeze_compressor:
+                        comp.train()
                     bridge.train()
+                    if router is not None:
+                        router.train()
                 opt.zero_grad(set_to_none=True)
                 step += 1
                 qa_avg = sum(x[0] for x in acc_items) / len(acc_items)
                 kls = [x[1] for x in acc_items if x[1] is not None]
                 kl_avg = sum(kls) / len(kls) if kls else None
+                addrs = [x[2] for x in acc_items if x[2] is not None]
+                addr_avg = sum(addrs) / len(addrs) if addrs else None
                 print(f"[step {step}] loss_qa={qa_avg:.4f} "
                       f"loss_kl={'n/a' if kl_avg is None else f'{kl_avg:.4f}'} "
-                      f"soft_tokens={enc_info['n_soft_tokens']} "
+                      f"loss_addr={'n/a' if addr_avg is None else f'{addr_avg:.4f}'} "
+                      f"soft_tokens={int(soft.reshape(1, -1, soft.shape[-1]).shape[1])} "
                       f"compress={enc_info['compression_ratio']} "
                       f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
+                      f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
                       f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
                 if args.max_steps > 0 and step >= max_steps:
@@ -856,12 +1014,60 @@ def train(args):
         print("[grad-check][warn] 冻结权重拿到了梯度：请确认 requires_grad_(False) 生效",
               flush=True)
 
-    em, n_eval = evaluate((comp, bridge), model, tokenizer, val_data, system_prompt,
+    em, n_eval = evaluate(reader_like, model, tokenizer, val_data, system_prompt,
                           limit=args.eval_limit, layer=args.layer,
                           max_unit_tokens=args.max_unit_tokens, verbose=True,
                           label="eval-final", bridge_only=args.bridge_only)
     print(f"[eval] val full-match={em if em is None else round(em, 4)} (n={n_eval}) "
           f"—— 规范化完整答案匹配（不再是子串匹配）", flush=True)
+
+    # 存盘->重载->评：排除"训练进程内状态"对最终评估的影响（悬案：进程内 0.9375 vs
+    # 重载 0，曾发生在 min16 v2 / exp2 v2 上）。若两者不一致，铁证状态污染。
+    if not args.dry_run and not args.bridge_only:
+        import tempfile, os as _os
+        _snap = _os.path.join(tempfile.gettempdir(), "reload_check.pt")
+        LM.save_latent_checkpoint(_snap, comp, bridge, _cfg(args.max_steps),
+                                  {"partial": False}, router=router)
+        _blob = LM._safe_torch_load(_snap)
+        _comp2 = LM.LatentCompressor(LM._model_hidden_size(model),
+                                     n_slots=_blob["config"]["n_slots"],
+                                     inner_dim=_blob["config"]["inner_dim"],
+                                     num_heads=_blob["config"]["num_heads"]).to(dev)
+        _bridge2 = LM.LatentBridge(LM._model_hidden_size(model),
+                                   bottleneck=_blob["config"]["bottleneck"],
+                                   target_norm=float(_blob["config"]["target_norm"])).to(dev)
+        _comp2.load_state_dict(_blob["compressor"]); _bridge2.load_state_dict(_blob["bridge"])
+        _comp2.eval(); _bridge2.eval()
+        _router2 = None
+        if _blob.get("router"):
+            _router2 = LM.LatentRouter(LM._model_hidden_size(model),
+                                       n_slots=_blob["config"]["n_slots"],
+                                       d_key=int(_blob["config"].get("d_key",
+                                                                    LM.LATENT_D_KEY))).to(dev)
+            _router2.load_state_dict(_blob["router"])
+            _router2.eval()
+        _reload_reader = (_comp2, _bridge2) if _router2 is None \
+            else (_comp2, _bridge2, _router2)
+        em_rl, n_rl = evaluate(_reload_reader, model, tokenizer, val_data,
+                               system_prompt, limit=args.eval_limit, layer=args.layer,
+                               max_unit_tokens=args.max_unit_tokens, verbose=False,
+                               label="eval-reload")
+        print(f"[eval-reload] full-match={em_rl if em_rl is None else round(em_rl, 4)} "
+              f"(n={n_rl}) —— 存盘重载后的对照值", flush=True)
+        # 钉死 delta 状态依赖：清空 delta_state 后再评一次。若从高分掉到 0，
+        # 说明训出的 comp/bridge 只在"带着训练累积 delta 状态的模型"上工作 ——
+        # 潜 token 本身没有携带答案信息（悬案 v2 0.9375 vs 重载 0 的根因）。
+        from deltamem.core.delta_impl import reset_delta_mem_states as _rds
+        _rds(model)
+        em_rs, n_rs = evaluate(_reload_reader, model, tokenizer, val_data,
+                               system_prompt, limit=args.eval_limit, layer=args.layer,
+                               max_unit_tokens=args.max_unit_tokens, verbose=False,
+                               label="eval-after-reset")
+        print(f"[eval-after-reset] full-match={em_rs if em_rs is None else round(em_rs, 4)} "
+              f"(n={n_rs}) —— 清空 delta 状态后的对照值", flush=True)
+        if em is not None and em_rl is not None and abs(em - em_rl) > 0.2:
+            print(f"[WARNING] 进程内评估({em:.3f}) 与 重载评估({em_rl:.3f}) 差异巨大！"
+                  f"训练进程内存在影响生成的状态（delta_state / dropout / 缓存）。", flush=True)
 
     if args.dry_run:
         print(f"[dry-run] OK：通路验证完成（{time.time()-t0:.1f}s），未写 checkpoint",
@@ -875,14 +1081,14 @@ def train(args):
             "grad_check": grad_ok, "elapsed_sec": round(time.time() - t0, 1)}
     if args.recon_weight > 0:
         rec_acc, rec_tok = evaluate_recon(
-            (comp, bridge), model, tokenizer, val_data, system_prompt,
+            reader_like, model, tokenizer, val_data, system_prompt,
             limit=min(16, len(val_data)), layer=args.layer,
             max_unit_tokens=args.max_unit_tokens)
         print(f"[eval] recon token-acc={rec_acc:.3f}（n_tok={rec_tok}）—— "
               f"z 里还留了多少原文符号信息", flush=True)
         meta["recon_token_acc"] = rec_acc
 
-    out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta)
+    out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta, router=router)
     print(f"[save] {out} config={json.dumps(cfg, ensure_ascii=False)}", flush=True)
     return 0
 
@@ -949,6 +1155,16 @@ def parse_args(argv=None):
                     help="验证条数；0=内部默认 100 / --data 时全量")
     ap.add_argument("--eval-limit", type=int, default=32)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--router", action="store_true",
+                    help="启用 LatentRouter 集合内容寻址（多槽读出必须开，否则位置敏感）")
+    ap.add_argument("--d-key", type=int, default=LM.LATENT_D_KEY,
+                    help="Router 的查询/键维度")
+    ap.add_argument("--addr-weight", type=float, default=1.0,
+                    help="寻址交叉熵损失权重（router 的显式监督）")
+    ap.add_argument("--freeze-compressor", action="store_true",
+                    help="冻结 Compressor 主干（Phase 2：只训 router 的键/查询头）")
+    ap.add_argument("--max-slots", type=int, default=0,
+                    help="变槽数采样的上限（0=用数据里的全部槽位）")
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     return ap.parse_args(argv)
