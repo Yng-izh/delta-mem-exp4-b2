@@ -2059,7 +2059,10 @@ def main():
                 pred, gen_meta = latent_import().generate_latent_answer(
                     model=model, tokenizer=tok, bridge=latent_reader.bridge,
                     payloads=latent_z, question=qtxt, system_prompt=sys_msg,
-                    max_new_tokens=MAX_NEW_TOKENS)
+                    max_new_tokens=MAX_NEW_TOKENS,
+                        # ckpt 里带了 Router 就必须带上：否则多槽退回 K*m 裸拼，
+                        # 位置敏感的老问题会原样复现，指标崩了却看不出原因。
+                        router=getattr(latent_reader, "router", None))
                 in_len, out_len = int(gen_meta["n_in"]), int(gen_meta["n_out"])
                 trim = None
             else:

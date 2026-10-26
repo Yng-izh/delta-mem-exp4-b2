@@ -177,9 +177,13 @@ def freeze(model):
 # =====================================================================
 def test_no_plaintext_interface():
     params = set(inspect.signature(LM.generate_latent_answer).parameters)
+    # router / q_feat / layer / hops 是潜空间寻址与多跳控制：接受的只有**潜向量**与
+    # 整数标量，没有任何能承载证据文本的入口，因此不削弱"A. 读出接口不含明文"。
     ok("A1 签名参数集合", params == {"model", "tokenizer", "bridge", "payloads",
                                      "question", "system_prompt", "max_new_tokens",
-                                     "pad_token_id"}, extra=str(sorted(params)))
+                                     "pad_token_id",
+                                     "router", "q_feat", "layer", "hops"},
+       extra=str(sorted(params)))
     for bad in ("block", "evidence", "evidence_text", "memory", "context", "facts",
                 "passages", "documents"):
         ok(f"A2 签名不含 {bad}", bad not in params)
@@ -204,6 +208,21 @@ def test_no_plaintext_interface():
        LM.generate_latent_answer(model=model, tokenizer=tok, bridge=bridge,
                                  payloads=None, question="hi",
                                  system_prompt="s", max_new_tokens=2)[1]["has_payload"] is False)
+    # A8：给了 router 且多槽时，**只能**注入 1 个槽的 m 个软 token。
+    # 这条是"位置无关"的机制保证：一旦哪天退回 K*m 裸拼，槽数/顺序依赖就回来了。
+    router = LM.LatentRouter(model.config.hidden_size, n_slots=comp.n_slots).eval()
+    multi = [enc.encode([f"Alice works at ZQX{i}."], parent_ids=[f"cr:{i}"])[0][0]
+             for i in range(3)]
+    _p, meta_r = LM.generate_latent_answer(
+        model=model, tokenizer=tok, bridge=bridge, payloads=multi,
+        question="Where does Alice work?", system_prompt="Be brief.",
+        max_new_tokens=2, router=router, layer=2)
+    ok("A8 有 router 时 n_soft = m（只送 1 个槽，与 K 无关）",
+       meta_r["n_soft"] == comp.n_slots, extra=f"n_soft={meta_r['n_soft']} m={comp.n_slots}")
+    ok("A9 router 记录了被选中的槽位下标", isinstance(meta_r["routed"], list)
+       and len(meta_r["routed"]) == 1, extra=str(meta_r["routed"]))
+    ok("A10 router 下 n_slots_in 仍是输入的槽数",
+       meta_r["n_slots_in"] == 3, extra=str(meta_r["n_slots_in"]))
 
 
 # =====================================================================

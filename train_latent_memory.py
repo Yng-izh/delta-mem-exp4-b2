@@ -519,6 +519,8 @@ def target_slot_index(units, answer, fallback=0):
     为什么不用"第 0 条就是目标"：那样一旦数据生成顺序变了，寻址监督会训练模型
     去选错槽位，而且错得很隐蔽（QA 损失照样下降，因为软门控聚合仍然看得到目标）。
     """
+    if isinstance(answer, (list, tuple)):
+        answer = " ".join(str(x) for x in answer)
     a = _norm_ans(answer)
     if a:
         for i, u in enumerate(units):
@@ -527,7 +529,7 @@ def target_slot_index(units, answer, fallback=0):
     return int(fallback)
 
 
-def sample_slot_subset(payloads, target_idx, rng, max_slots=None):
+def sample_slot_subset(payloads, target_idx, rng, max_slots=None, keep_all=False):
     """随机取 K_cur ∈ [1, K] 个槽位（**必含目标槽**）、随机顺序，返回 (slot_z, new_tgt)。
 
     这是 Phase 2 的核心课程：模型必须学会"无论给了几个槽、目标排第几，都按问题
@@ -538,6 +540,12 @@ def sample_slot_subset(payloads, target_idx, rng, max_slots=None):
     if K <= 0:
         raise ValueError("sample_slot_subset 收到空 payload 列表")
     tgt = int(target_idx) if 0 <= int(target_idx) < K else 0
+    if keep_all:
+        # 多跳样本：链上的每一跳都必须留着，随机丢槽会把推理链剪断，
+        # 模型只会学到"单槽里正好有答案"。顺序仍然打乱，位置无关性照样训练。
+        keep = list(range(K))
+        rng.shuffle(keep)
+        return (LM.stack_payloads([payloads[i] for i in keep]), keep.index(tgt), keep)
     hi = K if max_slots is None else max(1, min(K, int(max_slots)))
     k_cur = rng.randint(1, hi)
     others = [i for i in range(K) if i != tgt]
@@ -578,11 +586,16 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
         if bridge_only:
             z, _info = encode_item_raw_embed(model, tokenizer, item)
         else:
-            z, _info = encode_item(enc, item, tag="val")
+            # 必须传 **per-slot 列表**：encode_item 返回的是 cat 后的 [Σk,m,d]，
+            # 槽位一旦被切成多块（unit 超 max_unit_tokens），Σk>槽数，generate 会把
+            # "块"当成"槽"去路由，选中半条事实。列表形式才能把边界带过去。
+            z, _zcat, _info = encode_item_slots(enc, item, tag="val")
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
-            router=router, layer=layer)
+            router=router, layer=layer,
+            # 多跳样本必须走链式选槽；否则只读第一跳，两跳题永远不可能对
+            hops=max(1, int(item.get("hops", 1) or 1)))
         n += 1
         gold = item["answer"]
         if isinstance(gold, list):
@@ -647,9 +660,19 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
                            max_unit_tokens=max_unit_tokens)
     hit = tot = 0
     for item in data[:limit]:
-        z, _info = encode_item(enc, item, tag="recon")
+        z, _zcat, _info = encode_item_slots(enc, item, tag="recon")
         with torch.no_grad():
-            soft = bridge(z)
+            if router is not None:
+                # recon 必须和训练时走同一条读出路径：训练里 recon_stage 用的是
+                # 路由后的 soft（m 个 token），这里若用裸 bridge(z)（K*m 个 token），
+                # 评估口径与训练不一致，recon 指标不能反映压缩器实际保真度。
+                slot_z = LM.stack_payloads(list(z)).unsqueeze(0)
+                qf = LM.extract_query_feature(model, tokenizer, item["question"],
+                                              system_prompt, layer=layer)
+                z_sel, _lg, _ki, _ko = router(qf, slot_z, hard=True)
+                soft = bridge(z_sel)
+            else:
+                soft = bridge(torch.cat(list(z), dim=0) if len(z) > 1 else z[0])
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt,
                 "Repeat the memory verbatim.", " ".join(item_units(item)))
@@ -744,8 +767,10 @@ def train(args):
               sum(p.numel() for p in bridge.parameters()) + \
               (sum(p.numel() for p in router.parameters()) if router is not None else 0)
     print(f"[params] 可训练 {n_train/1e6:.3f}M "
-          f"(compressor={sum(p.numel() for p in comp.parameters())/1e6:.3f}M, "
-          f"bridge={sum(p.numel() for p in bridge.parameters())/1e6:.3f}M)", flush=True)
+          f"(compressor={sum(p.numel() for p in comp.parameters() if p.requires_grad)/1e6:.3f}M, "
+          f"bridge={sum(p.numel() for p in bridge.parameters() if p.requires_grad)/1e6:.3f}M"
+          + (f", router={sum(p.numel() for p in router.parameters())/1e6:.3f}M"
+             if router is not None else "") + ")", flush=True)
 
     # ---- 数据 ----
     if args.data:
@@ -825,14 +850,19 @@ def train(args):
         # step=0 基线：随机初始化的压缩器/桥接器在这批样本上的表现（对照起点）
         comp.eval()
         bridge.eval()
+        if router is not None:
+            router.eval()
         em0, n0 = evaluate(reader_like, model, tokenizer, val_data, system_prompt,
                            limit=args.eval_limit, layer=args.layer,
                            max_unit_tokens=args.max_unit_tokens, verbose=True,
                            label="eval@0", bridge_only=args.bridge_only)
         print(f"[eval] step=0 full-match={em0 if em0 is None else round(em0, 4)} (n={n0})",
               flush=True)
-        comp.train()
+        if not args.freeze_compressor:
+            comp.train()
         bridge.train()
+        if router is not None:
+            router.train()
     for epoch in range(args.epochs):
         order = list(range(len(train_data)))
         random.Random(args.seed + 100 + epoch).shuffle(order)
@@ -861,7 +891,8 @@ def train(args):
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
                 tgt_slot = target_slot_index(item_units(item), item["answer"])
                 slot_z, tgt_slot, _keep = sample_slot_subset(
-                    payloads, tgt_slot, rng_slots, args.max_slots or None)
+                    payloads, tgt_slot, rng_slots, args.max_slots or None,
+                    keep_all=(int(item.get("hops", 1) or 1) > 1))
                 if args.freeze_compressor:
                     slot_z = slot_z.detach()
                 q_feat = query_feature_cached(model, tokenizer, item["question"],

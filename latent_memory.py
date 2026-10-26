@@ -451,23 +451,36 @@ class LatentRouter(nn.Module):
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """返回 (z_read [B,m,d], 路由 logits [B,K], k_in, k_out)。
 
-        hard=False：软门控聚合（训练用；target_idx 给定时可另算 CE 监督）。
-        hard=True ：硬选 argmax（推理用；输出就是被选中那个槽的原样载荷）。
-        推理走硬选是为了让 bridge 永远只看到 1 个槽（m 个软 token）—— 与 Phase 1
-        单槽训练时的输入形状完全一致，这是"位置/槽数无关"能真正生效的前提。
+        **前向一律硬选 argmax**（训练与推理同一条路径），差别只在梯度：
+
+        hard=False（训练）：直通估计 z_read = z_hard + (z_soft - z_soft.detach())
+            —— 前向数值与推理**逐位相同**，梯度仍能从 z_soft 回传到 logits。
+        hard=True（推理）：纯 z_hard，不走任何聚合。
+
+        为什么不能用软门控聚合做训练前向（原先的错）：
+            实测 4 槽 K=4、τ=0.07 下 ||z_soft|| = 61.9 而 ||z_hard|| = 100.2，
+            ||z_soft - z_hard|| = 54.6% of ||z_hard||，权重 w=[0.18,0.05,0.23,0.54]
+            并不接近 one-hot。也就是说 bridge 在训练时看到的是"4 个事实按权重
+            混合后的平均向量"，推理时看到的是"一条干净的事实"——两个分布。
+            bridge 的 norm-align 只抹平范数，抹不平方向，train/infer 依旧错位。
+            更糟的是训练初期 logits≈0、w 接近均匀，z_read≈全体事实的均值，
+            QA 损失根本无法下降，梯度信号全是噪声。
+            硬选前向 + STE 梯度同时满足两件事：分布一致、路由仍可学
+            （况且路由本身还有 loss_addr 的显式 CE 监督）。
         """
         q_vec = self.encode_query(q_feat)
         k_in, k_out = self.encode_keys(slot_z)
         logits = self.scores(q_vec, k_in)
         z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
         z = z.to(device=q_vec.device, dtype=q_vec.dtype)
-        if hard:
-            idx = logits.argmax(dim=-1)                       # [B]
-            z_read = z[torch.arange(z.shape[0], device=z.device), idx]
-        else:
-            w = torch.softmax(logits, dim=-1)                 # [B,K]
-            # 关键：软门控必须**跨槽加权**，但不能让 m 内的 token 互相混（保持 m 结构）
-            z_read = torch.einsum("bk,bkmd->bmd", w, z)
+        idx = logits.argmax(dim=-1)                                   # [B]
+        z_hard = z[torch.arange(z.shape[0], device=z.device), idx]     # [B,m,d]
+        if hard or not self.training:
+            return z_hard, logits, k_in, k_out
+        w = torch.softmax(logits, dim=-1)                             # [B,K]
+        z_soft = torch.einsum("bk,bkmd->bmd", w, z)
+        # 前向取 z_hard，梯度走 z_soft（STE）
+        z_read = z_hard + (z_soft - z_soft.detach())
         return z_read, logits, k_in, k_out
 
     @torch.no_grad()
@@ -1099,12 +1112,15 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
     """
     if tokenizer is None or model is None:
         raise ValueError("generate_latent_answer 需要 model 与 tokenizer")
-    if payloads is not None and (not torch.is_tensor(payloads)):
-        payloads = torch.as_tensor(payloads)
     if payloads is not None and not torch.is_tensor(payloads):
-        # encode() 返回的是 per-slot payload 列表；这里统一成 [K, m, d]
-        payloads = stack_payloads(list(payloads)) if isinstance(payloads, (list, tuple)) \
-            else torch.as_tensor(payloads)
+        # encode() 返回的是 per-slot payload 列表（每项 [k,m,d]，k=该单元被切的块数）。
+        # **必须**走 stack_payloads：直接 torch.as_tensor(list_of_3d_tensors) 会在
+        # 形状不一致时报 "only one element tensors can be converted to scalars"，
+        # 而 cat 掉再 reshape 又会丢掉槽边界（把"块"当成"槽"）。
+        if isinstance(payloads, (list, tuple)):
+            payloads = stack_payloads(list(payloads))
+        else:
+            payloads = torch.as_tensor(payloads)
         if payloads.dim() == 2:
             payloads = payloads.unsqueeze(0)
     has_payload = bool(payloads is not None and payloads.numel() > 0)
@@ -1141,8 +1157,9 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
         else:
             _z, logits, _ki, _ko = router(qf, slot_z, hard=True)
             routed = [int(logits[0].argmax().item())]
-        nl_id = tokenizer("\n", add_special_tokens=False).input_ids[0]
-        nl_emb = emb_layer(torch.tensor([[nl_id]], device=dev))
+        # 统一走 _tokenize_no_special：它同时兼容真 tokenizer（BatchEncoding）
+        # 和测试桩（返回 dict），直接取 .input_ids 会在桩上 AttributeError。
+        nl_emb = emb_layer(_tokenize_no_special(tokenizer, "\n", dev))
         pieces = []
         for j, idx in enumerate(routed):
             if j:
