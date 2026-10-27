@@ -12,7 +12,7 @@
     LatentCompressor       训练
     LatentBridge           训练
     原有检索器             不训练（也不在本脚本内）
-    潜层门控更新网络       第一阶段不训练、不接入（先做 Hard Overwrite，见 v9_cr 的说明）
+    潜层门控更新网络       第一阶段不训练、不接入（先做 Hard Overwrite；v9_cr 方案已废除，见 KNOWN_ISSUES 历史注记）
 
 两阶段
     阶段 A：单事实读出训练。模型只接收压缩后的 Z 和问题，**不接收 memory 明文**。

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 仓库清理（2026-10-27 下午）——废除方案代码移除，文档对齐当前主线
+
+- **删除**（历史见 git log ≤ e290382）：`v6/v7/v8/v9_slotpool`、`v9_cr`、
+  `run_group_b/b2/b2_v6/b2_v7`、`run_ar_v7`、`run_manifest`、`ar_diag`、
+  `eval_longmemeval_judge`、`diag1/diag2/smoke_b2`、对应 8 个测试文件、
+  `tools/gen_fact_universe|gen_latent_exp2|gen_latent_min16|summarize_sweep|audit_mutations|demo_facts`、
+  `versions/`、`experiments/`、`synth/latent_exp2_*|latent_min16`。
+  原因：自造数据管线不支撑论文核心结论，主线收束为三个问题（用户决策）。
+- **内联**：checkpoint 指纹逻辑（原 `run_manifest.file_fingerprint`）就地内联进
+  `latent_memory.checkpoint_fingerprint`，口径不变；`test_latent_readout.py` G 组改为
+  直接测内联实现（85 项全过）。
+- **文档对齐**：README（142 行，历史轮次压缩为废除注记）、ARCHITECTURE（§1–§9 按当前
+  三层结构/不变量/参数重写，§11 登记废除清单）、KNOWN_ISSUES（§3.6、§6 对齐现状）。
+- 测试全绿：88+89+32+20+14+24 = 263 项。
+
 ## [v9.7-real-data] — 2026-10-27 — 真实数据接入：HotpotQA / MAB-CR 转换器、统一评测入口、两处污染性 bug
 
 **一句话**：按"实验主线收束为三个问题 + 只留两个主基准 + 训练换真实数据 + 方法对比压缩到四组"

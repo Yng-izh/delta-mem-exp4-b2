@@ -904,7 +904,7 @@ def _slot_sort_key(slot_id: str):
 class LatentSlotBank:
     """稳定槽位 ID -> 潜载荷 [k, m, d]。
 
-    - **并行**存在：v9_slotpool 的 texts / tokv / words / metas 一个都不删，它们仍然承担
+    - **并行**存在：texts / tokv / words / metas 一个都不删，它们仍然承担
       检索、结构化分析与诊断；本库只额外挂一份潜载荷。
     - 一个槽位可能被切成 k 块（单元长于 LATENT_MAX_UNIT_TOKENS 时**再分块**，绝不截断），
       因此载荷形状是 [k, m, d]；gather() 按槽位顺序把它们摊平成 [Σk, m, d]，
@@ -1520,14 +1520,9 @@ class LatentReader:
 def checkpoint_fingerprint(path: str) -> Dict[str, Any]:
     """checkpoint 身份指纹（路径 + 字节数 + 全文 sha256 前 16 位），进 manifest。
 
-    优先复用 run_manifest.file_fingerprint（同一个口径，避免两处哈希算法漂移）；
-    run_manifest 不可用时退回本地实现。
+    路径 + 字节数 + 全文 sha256 前 16 位。（旧 run_manifest 模块已随废除方案移除，
+    指纹逻辑就地内联，口径与原来一致。）
     """
-    try:
-        import run_manifest
-        return run_manifest.file_fingerprint(path, label="checkpoint")
-    except Exception:
-        pass
     if not path or not os.path.isfile(path):
         return {"checkpoint": path or "", "exists": False}
     h = hashlib.sha256()
@@ -2064,7 +2059,7 @@ def attach_bank_to_pools(bank: LatentSlotBank, encoder: Any, epi: Any = None,
                          state_pool: Any = None, cr_pool: Any = None) -> Dict[str, int]:
     """把载荷库挂到池上，使 _store / _replace / _drop 之后能同步潜载荷（P1）。
 
-    挂接本身不改变检索：v9_slotpool 的 MaxSim / 时间打分 / CR 双阈值覆写一行都不动。
+    挂接本身不改变检索：MaxSim / 时间打分 / CR 双阈值覆写一行都不动。
     返回 {namespace: 已编码槽位数}。
     """
     out: Dict[str, int] = {}

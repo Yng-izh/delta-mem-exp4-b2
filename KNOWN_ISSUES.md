@@ -65,12 +65,12 @@ finally:
 
 ### 3. 数据歧义：22.5% 的样本答案值在干扰事实里重复
 
-**位置**：`tools/gen_latent_exp2.py`，`make_split()` 生成干扰事实时未排除与答案同值
+**位置**：旧合成数据生成器（已随废案移除；结论适用于任何"干扰与答案同值"的数据，含真实数据集）
 
 | 数据集 | 歧义样本 | 占比 |
 |---|---|---|
 | `latent_exp2_train` | 45/200 | 22.5% |
-| `latent_exp2_val` | 11/64 | 17.2% |
+| 旧合成 val | 11/64 | 17.2% |
 
 **影响**：模型读错槽也能恰好答对 → 准确率**被高估**；这类样本也**无法检验内容寻址是否 work**。
 
@@ -87,7 +87,7 @@ finally:
 
 **现状**：三个机制**结构上都已做到**并有 88 项单测断言（键与值无关、改 A 不动 B 逐位相等、
 两级竞争隔离、前向硬选 + STE、ckpt 严格往返、内容级对齐、指标口径、并列时间戳），
-且 `tools/audit_mutations.py` 用 6 个变异确认这些断言**真有约束力**（核查轮之前有 3 条恒真，
+且核查轮用 6 个变异确认这些断言**真有约束力**（变异审计工具随废案移除；核查轮之前有 3 条恒真，
 让 4 个静默 bug 在 67 项断言下安然无恙，见 CHANGELOG v9.6.1）。但：
 - **一步真实训练都没跑** → 没有任何 `acc / group_acc / ver_multi_acc` 的可用数字；
 - `--fst --smoke-model` 的 smoke 指标是**随机权重下的噪声**，不能引用；
@@ -104,21 +104,23 @@ finally:
 另：评估集必须**按整组问题**截断（`fst_eval_subset`），按行截断会把反事实配对切两半，
 `pair_n` 直接变 0。
 
-### 3.6 FST 没有多跳、没有接进线上管线
+### 3.6 FST 没有两跳链式读出（原"未接进线上管线"）
 
-**位置**：`generate_latent_answer_fst`、`run_ar_v7.py` / `run_group_b2_v7.py`
+**位置**：`generate_latent_answer_fst`（`latent_memory.py`）
 
 **现状**：
-- `hops>1` **显式报错**（`ValueError`）。FST 的键是静态身份键，没有 `k_out` 那一路"客体值接力"，
+- `hops>1` **显式报错**（`ValueError`）。FST 的键是静态身份键，没有"客体值接力"那一路，
   直接按单跳跑会得到"看起来正常的错答案"，所以选择报错而不是静默降级。
-- AR/CR runner 仍走 `generate_latent_answer`（单级 Router），**没有任何代码路径会构造
-  `LatentStateTrajectoryBank`**：需要从 `StatePool` / `EpisodicMemory` 提取
-  `(实体, 属性, 时间)` 来建键与时间线，这是阶段 C 的工作。
+- 真实数据上 FST 已能训练与评估（`train_latent_memory.py --fst` +
+  `eval_latent_table.py --method fst`，MAB-CR 300 题训练、150 步），
+  但**每次只读 1 槽**，而 CR 题多为两跳链 —— 结果表里 CR 的潜层列是**不对等比较**，
+  `oracle` 给 1 条金标也只有 32% 可作旁证。
 
-**影响**：FST 目前只能通过 `train_latent_memory.py --fst` 训练与评估，**线上跑分数字无法产生**。
-论文里"端到端对比"这一栏现在空白。
+**影响**：FST 的 acc 列（2.5%）混合了"单槽 vs 两跳任务"的结构性劣势与学习不足，
+只能与"读对槽位 65%"、"group 0.650"一起解读。
 
-**怎么修**：见 `ARCHITECTURE.md §10` 阶段 C。
+**怎么修**：`generate_latent_answer_fst` 支持 hops=2（第一跳读出的客体值回填为
+第二跳的实体特征），见 `ARCHITECTURE.md §10` P3。
 
 ### 3.7 历史容量与保真度的权衡未量化
 
@@ -145,11 +147,13 @@ finally:
 **现象**：`chain()` 只有形状验证（`hops=2 → picked=[0,1]`）。
 `generate_latent_answer(hops=2)` 的换行隔离也只在随机权重下验证过不崩。
 
-**影响**：三套在用数据全是 `hops=1`。`train_15k` 里虽有 2998 条多跳，但**从未进过潜层管线**。
-两跳题能不能做，完全未知。
+**影响**：当前两套正式基准里，HotpotQA 全部是 2 跳（bridge/comparison）、MAB-CR 多为两跳链，
+而 `generate_latent_answer(hops=2)` 的链式选槽只在随机权重下验证过不崩；
+Router 训练侧对多跳只监督第 1 跳（`target_slot_index` 取 evidence[0]）。
+两跳链式读出的真实效果仍未知——这正是 HotpotQA 潜层 acc 停在 chance 的候选原因之一。
 
-**修法**：把 `train_15k` 的多跳子集接进 `load_synth_jsonl` + Phase 2，评估时按 `item["hops"]` 走链。
-（`sample_slot_subset(keep_all=True)` 与 `evaluate(hops=...)` 都已就位，缺的是数据接入与验证。）
+**修法**：HotpotQA 训练时对第 2 跳加监督（或推理期按 `item["hops"]` 走链并验证），
+见 `ARCHITECTURE.md §10` P3。
 
 ---
 
@@ -166,15 +170,12 @@ finally:
 
 ---
 
-### 6. 评测管线 3 处已知修复未落地
+### 6. （历史）旧评测管线的 3 处已知问题，随方案废除关闭
 
-| 位置 | 问题 |
-|---|---|
-| `v8_slotpool.py` | top-K 后按 `orig_idx` 重排的顺序 bug |
-| `v8_slotpool.py` | `cur_ts` 单句时间戳冻结 |
-| 软 token 预算统计 | 预算应按真实 `num_chunks * 4` 算，而非配置值 |
-
-**影响**：不在潜层主链路上，但会影响 AR 管线的检索与预算口径。
+`v8_slotpool` 的 top-K 重排顺序 bug、`cur_ts` 单句时间戳冻结、软 token 预算统计口径 ——
+三者都属于已废除的 AR 管线（见 `ARCHITECTURE.md` §11），代码已移除，不再跟踪。
+软 token 预算按真实 `num_chunks * 4` 统计这一条，在当前 `eval_latent_table.py`
+里以实测 `mem_tokens` 列呈现，不受旧口径影响。
 
 ---
 

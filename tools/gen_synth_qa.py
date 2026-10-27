@@ -29,7 +29,7 @@
 - 关系不在 `REL_SPECS` 里 → **跳过**，不生成半通顺的问题；跳过原因计入 `--stats`。
 - 主语是代词 / 客体过长 / 含分号 → 跳过（这些几乎都是解析噪声）。
 - `was born in` 的客体按"4 位年份"判定问 when 还是 where。
-- 多跳只接受 obj(f1) 与 subj(f2) **归一化后精确相等**（与 `v9_cr.linked()` 同一硬约束）。
+- 多跳只接受 obj(f1) 与 subj(f2) **归一化后精确相等**（旧 v9_cr.linked() 同一硬约束的口径保留）。
 
 用法
 ----
@@ -141,7 +141,7 @@ MAX_OBJ_WORDS = 6
 
 
 def norm(s):
-    """实体归一化：小写、去冠词/标点、压空格（与 v9_cr.linked 的口径一致）。"""
+    """实体归一化：小写、去冠词/标点、压空格（与旧 v9_cr.linked 的口径一致）。"""
     t = str(s or "").lower().strip().strip(".,;:\"'()[]")
     t = re.sub(r"^(the|a|an)\s+", "", t)
     t = re.sub(r"[^a-z0-9\u00c0-\u024f\u4e00-\u9fff ]+", " ", t)

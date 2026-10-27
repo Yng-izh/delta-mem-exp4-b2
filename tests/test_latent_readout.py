@@ -466,39 +466,21 @@ def test_cr_path_budget():
 
 
 # =====================================================================
-# G. 配置指纹隔离
+# G. checkpoint 指纹（run_manifest 已随废除方案移除，指纹逻辑内联在 latent_memory）
 # =====================================================================
 def test_manifest_fingerprint():
-    import run_manifest as RM
-
-    base = {"mode": "v9", "top_k": 12,
-            "latent": {"n_slots": 4, "layer": 18, "read_budget": 32,
-                       "checkpoint": {"checkpoint": "/x/a.pt", "exists": True,
-                                      "sha256_16": "aaaa"}}}
-    cid_a = RM.config_id(base, kind="ar", src="eventqa_65536")
-    same = json.loads(json.dumps(base))
-    ok("G1 同配置 config_id 稳定", RM.config_id(same, kind="ar", src="eventqa_65536") == cid_a)
-    b = json.loads(json.dumps(base))
-    b["latent"]["n_slots"] = 8
-    ok("G2 不同 m -> 不同 config_id",
-       RM.config_id(b, kind="ar", src="eventqa_65536") != cid_a)
-    c = json.loads(json.dumps(base))
-    c["latent"]["checkpoint"]["sha256_16"] = "bbbb"
-    ok("G3 换了 checkpoint -> 不同 config_id",
-       RM.config_id(c, kind="ar", src="eventqa_65536") != cid_a)
-    # 文件指纹
-    fp_missing = RM.file_fingerprint("/nonexistent/latent.pt", label="checkpoint")
+    fp_missing = LM.checkpoint_fingerprint("/nonexistent/latent.pt")
     ok("G4 缺失 checkpoint 的指纹 exists=False", fp_missing["exists"] is False)
     with tempfile.NamedTemporaryFile("wb", suffix=".pt", delete=False) as f:
         f.write(b"latent-ckpt-bytes")
         tmp = f.name
     try:
-        fp = RM.file_fingerprint(tmp, label="checkpoint")
-        ok("G5 指纹含字节数与 16 位 sha256",
+        fp = LM.checkpoint_fingerprint(tmp)
+        ok("G5 指纹含字节数与 16 位 sha256 且可复现",
            fp["exists"] is True and fp["bytes"] == len(b"latent-ckpt-bytes")
-           and len(fp["sha256_16"]) == 16, extra=str(fp))
-        ok("G6 latent_memory 与 run_manifest 指纹口径一致",
-           LM.checkpoint_fingerprint(tmp)["sha256_16"] == fp["sha256_16"])
+           and len(fp["sha256_16"]) == 16
+           and fp["sha256_16"] == LM.checkpoint_fingerprint(tmp)["sha256_16"],
+           extra=str(fp))
     finally:
         os.remove(tmp)
 
