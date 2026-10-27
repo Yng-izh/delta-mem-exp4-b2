@@ -1,0 +1,719 @@
+{
+ "summary": {
+  "label": "cr-router",
+  "n": 40,
+  "acc": 0.025,
+  "pair_acc": null,
+  "pair_n": 0,
+  "mem_tokens": 4.0,
+  "prompt_tokens": 4.0,
+  "ms_mean": 2235.7143223285675,
+  "ms_p50": 2012.9740238189697,
+  "pre_ms_mean": 1180.8549523353577,
+  "read_acc": 0.05
+ },
+ "config": {
+  "method": "router",
+  "data": "synth/mab_cr_val.jsonl",
+  "ckpt": "ckpt/mab_cr_router.pt",
+  "limit": 40,
+  "seed": 0,
+  "base": "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554",
+  "adapter": "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5",
+  "no_adapter": false,
+  "gpu": "0",
+  "device": "",
+  "smoke_model": false,
+  "layer": 18,
+  "max_unit_tokens": 64,
+  "max_new_tokens": 16,
+  "text_topk": 5,
+  "hist_max": 4,
+  "system_prompt": "You are a helpful assistant. Answer with the shortest exact value.",
+  "label": "cr-router",
+  "save_json": "results/mab_cr_router.json",
+  "verbose": false
+ },
+ "rows": [
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1846.2536334991455,
+   "total_ms": 2814.3978118896484,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    5
+   ],
+   "gold": "Paris",
+   "question": "What is the place of origin for the broadcaster who first aired \"Your Hit Parade\"?",
+   "pred": "New York City",
+   "ok": false,
+   "idx": 0
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1171.4587211608887,
+   "total_ms": 1998.8243579864502,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Gundam",
+   "question": "What is the notable work of the performer associated with Miley Stewart?",
+   "pred": "Hannah Montana",
+   "ok": false,
+   "idx": 1
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1330.4083347320557,
+   "total_ms": 2104.6817302703857,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    11
+   ],
+   "gold": "London",
+   "question": "In what city did the individual who established Metz Cathedral have their occupation?",
+   "pred": "Metz",
+   "ok": false,
+   "idx": 2
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1188.671588897705,
+   "total_ms": 1933.6392879486084,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    10
+   ],
+   "gold": "Normanton",
+   "question": "Where is the headquarters of the company that developed Sailfish OS located?",
+   "pred": "Finland",
+   "ok": false,
+   "idx": 3
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1152.916669845581,
+   "total_ms": 3509.1845989227295,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    8
+   ],
+   "gold": "Washington, D.C.",
+   "question": "In which city did the founder of the religion of Steve Cooley have their work location?",
+   "pred": "Steve Cooley is not the founder of a religion. He is a former U",
+   "ok": false,
+   "idx": 4
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1123.9001750946045,
+   "total_ms": 2927.9043674468994,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Epworth",
+   "question": "What is the birthplace of the person who established the religion of Saint Eligius?",
+   "pred": "The person who established the religion of Saint Eligius is not known. Saint Elig",
+   "ok": false,
+   "idx": 5
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1181.4258098602295,
+   "total_ms": 2012.9740238189697,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    9
+   ],
+   "gold": "New Delhi",
+   "question": "In what city does the director/manager of the original broadcaster of \"NHL on ABC\" hold their citizenship?",
+   "pred": "Los Angeles",
+   "ok": false,
+   "idx": 6
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1090.5940532684326,
+   "total_ms": 1918.0893898010254,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    23
+   ],
+   "gold": "Silver Lake",
+   "question": "In which place was the manufacturing company of Chevrolet Caprice founded?",
+   "pred": "Detroit, Michigan",
+   "ok": false,
+   "idx": 7
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1078.7506103515625,
+   "total_ms": 1771.9993591308594,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7
+   ],
+   "gold": "Finnish",
+   "question": "Which language is considered the official language of Eric Weissberg's country of citizenship?",
+   "pred": "English",
+   "ok": false,
+   "idx": 8
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1373.6817836761475,
+   "total_ms": 2079.8802375793457,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    0
+   ],
+   "gold": "Vienna",
+   "question": "Where is the educational institution located where Tom Selleck was educated and its headquarters also situated?",
+   "pred": "California",
+   "ok": false,
+   "idx": 9
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1218.562126159668,
+   "total_ms": 1902.8820991516113,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    0
+   ],
+   "gold": "American English",
+   "question": "Which language was used by Mario Puzo in writing his famous work?",
+   "pred": "English",
+   "ok": false,
+   "idx": 10
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1117.1441078186035,
+   "total_ms": 2986.6268634796143,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Recep Tayyip Erdoğan",
+   "question": "What is the name of the current head of state of the country where \"Outsourced\" came from?",
+   "pred": "The song \"Outsourced\" by the band The Prodigy was released",
+   "ok": false,
+   "idx": 11
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1157.1245193481445,
+   "total_ms": 3012.2714042663574,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    4
+   ],
+   "gold": "Epworth",
+   "question": "What is the birthplace of the person who founded the religion that Ferdinando I de' Medici professes?",
+   "pred": "Ferdinando I de' Medici professed Catholicism. The Catholic",
+   "ok": false,
+   "idx": 12
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1069.474697113037,
+   "total_ms": 2846.708059310913,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    26
+   ],
+   "gold": "Rodez",
+   "question": "In which location did the spouse of Igor of Kiev pass away?",
+   "pred": "The spouse of Igor of Kiev, Olga of Kiev, passed away in the",
+   "ok": false,
+   "idx": 13
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1072.4472999572754,
+   "total_ms": 1948.6932754516602,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    27
+   ],
+   "gold": "Russellville",
+   "question": "Which city serves as the capital of the country of origin for the sport of the Tunisia national football team?",
+   "pred": "Tunis",
+   "ok": false,
+   "idx": 14
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1082.8373432159424,
+   "total_ms": 1961.247444152832,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    21
+   ],
+   "gold": "Duluth",
+   "question": "What is the capital city of the country where the sport associated with John Harkes has its origin?",
+   "pred": "Sofia",
+   "ok": false,
+   "idx": 15
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1258.579969406128,
+   "total_ms": 2047.6329326629639,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    19
+   ],
+   "gold": "Soviet Union",
+   "question": "From which country does the sport, with which Carlos Gómez is associated, come from?",
+   "pred": "Cuba",
+   "ok": false,
+   "idx": 16
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1055.5329322814941,
+   "total_ms": 2882.486343383789,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    20
+   ],
+   "gold": "Harrisville",
+   "question": "What city serves as the capital of the country where the performer who is the spouse of Derek Shepherd holds citizenship?",
+   "pred": "The performer who is the spouse of Derek Shepherd is Dr. Izzie Shepherd",
+   "ok": false,
+   "idx": 17
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1159.7681045532227,
+   "total_ms": 1867.5603866577148,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    18
+   ],
+   "gold": "German",
+   "question": "Which language does the performer of Hermione Granger know how to speak, write or sign?",
+   "pred": "English",
+   "ok": false,
+   "idx": 18
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1053.0242919921875,
+   "total_ms": 1819.7684288024902,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    20
+   ],
+   "gold": "Leeds",
+   "question": "What is the birthplace of the author of \"The Marriage of Figaro\"?",
+   "pred": "Vienna",
+   "ok": false,
+   "idx": 19
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1178.8675785064697,
+   "total_ms": 2616.557836532593,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7
+   ],
+   "gold": "Shinzō Abe",
+   "question": "In which country was Darryl Strawberry's sport developed, and who is the head of government in that nation?",
+   "pred": "United States of America, President of the United States",
+   "ok": false,
+   "idx": 20
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1231.0795783996582,
+   "total_ms": 1979.5262813568115,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Latin",
+   "question": "What languages are spoken, written or signed by the founder of Shingon Buddhism?",
+   "pred": "Chinese",
+   "ok": false,
+   "idx": 21
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1070.3706741333008,
+   "total_ms": 2851.6926765441895,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    20
+   ],
+   "gold": "journalist",
+   "question": "What is the professional role of the chairperson of the Congolese Party of Labour?",
+   "pred": "The chairperson of the Congolese Party of Labour is the leader of the",
+   "ok": false,
+   "idx": 22
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1221.7199802398682,
+   "total_ms": 2133.075952529907,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Oderzo",
+   "question": "Which city serves as the capital city of the country where the sport played by the partner of Victoria Beckham originated?",
+   "pred": "Lisbon",
+   "ok": false,
+   "idx": 23
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1326.6711235046387,
+   "total_ms": 2208.040952682495,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    2
+   ],
+   "gold": "New Delhi",
+   "question": "Which city serves as the capital of the country that gave rise to the sport played by Rogério Ceni?",
+   "pred": "São Paulo",
+   "ok": false,
+   "idx": 24
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1127.9404163360596,
+   "total_ms": 1793.9376831054688,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    31
+   ],
+   "gold": "Africa",
+   "question": "Which continent is the country of origin for Gala RFC located in?",
+   "pred": "Europe",
+   "ok": false,
+   "idx": 25
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1065.5872821807861,
+   "total_ms": 1757.8442096710205,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    21
+   ],
+   "gold": "Tehran",
+   "question": "In which city of the country where Charles Messier held citizenship is the capital located?",
+   "pred": "Paris",
+   "ok": false,
+   "idx": 26
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1357.724666595459,
+   "total_ms": 2148.2176780700684,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Arabic",
+   "question": "Which language is the official language of the country whose citizenship is held by the director/manager of \"Past Masters\"?",
+   "pred": "English",
+   "ok": false,
+   "idx": 27
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1178.5295009613037,
+   "total_ms": 1917.9987907409668,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    5
+   ],
+   "gold": "Kingdom of the Netherlands",
+   "question": "What is the country of citizenship of Davina McCall?",
+   "pred": "United Kingdom",
+   "ok": false,
+   "idx": 28
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1279.679775238037,
+   "total_ms": 2647.355556488037,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    18
+   ],
+   "gold": "Graham Linehan",
+   "question": "Who was The IT Crowd created by?",
+   "pred": "The IT Crowd was created by Graham Linehan.",
+   "ok": false,
+   "idx": 29
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1224.961757659912,
+   "total_ms": 1947.763442993164,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7
+   ],
+   "gold": "association football",
+   "question": "Which sport is Indiana Mr. Basketball associated with?",
+   "pred": "basketball",
+   "ok": false,
+   "idx": 30
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1125.5314350128174,
+   "total_ms": 1808.824062347412,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    18
+   ],
+   "gold": "Stephen Hillenburg",
+   "question": "Who was The Dark Knight created by?",
+   "pred": "Bob Kane",
+   "ok": false,
+   "idx": 31
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1217.698097229004,
+   "total_ms": 1921.7877388000488,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    18
+   ],
+   "gold": "quarterback",
+   "question": "What position does Shay Given play?",
+   "pred": "Goalkeeper",
+   "ok": false,
+   "idx": 32
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1059.5686435699463,
+   "total_ms": 1996.1764812469482,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    5
+   ],
+   "gold": "United Kingdom",
+   "question": "What is the country of citizenship of Glenn Miller?",
+   "pred": "United States",
+   "ok": false,
+   "idx": 33
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1186.0032081604004,
+   "total_ms": 1879.4667720794678,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7
+   ],
+   "gold": "association football",
+   "question": "Which sport is Larry Bird associated with?",
+   "pred": "Basketball",
+   "ok": false,
+   "idx": 34
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1180.110216140747,
+   "total_ms": 2942.8634643554688,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    8
+   ],
+   "gold": "De re militari",
+   "question": "What is Alexander Hamilton famous for?",
+   "pred": "Founding Father, first U.S. Secretary of the Treasury, author of The",
+   "ok": false,
+   "idx": 35
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1254.8532485961914,
+   "total_ms": 2018.4221267700195,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    17
+   ],
+   "gold": "McDonald's",
+   "question": "Which company is Big Mac produced by?",
+   "pred": "McDonald's",
+   "ok": true,
+   "idx": 36
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1049.3178367614746,
+   "total_ms": 1849.6997356414795,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Brothers Grimm",
+   "question": "Who is the author of Micrographia?",
+   "pred": "Robert Hooke",
+   "ok": false,
+   "idx": 37
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1054.6205043792725,
+   "total_ms": 2778.2959938049316,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6
+   ],
+   "gold": "Thiago Motta",
+   "question": "Who is the head coach of San Francisco Giants?",
+   "pred": "The head coach of the San Francisco Giants is Jeff Luhnow.",
+   "ok": false,
+   "idx": 38
+  },
+  {
+   "mem_tokens": 4,
+   "prompt_tokens": 4,
+   "pre_ms": 1060.8057975769043,
+   "total_ms": 1883.573055267334,
+   "n_read_units": 1,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    5
+   ],
+   "gold": "Esperanto",
+   "question": "What is the official language of Tampere?",
+   "pred": "Finnish",
+   "ok": false,
+   "idx": 39
+  }
+ ]
+}
