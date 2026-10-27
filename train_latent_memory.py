@@ -216,6 +216,19 @@ def load_synth_jsonl(path, limit=0, seed=0):
                 "cf": bool(rec.get("cf", False)),
                 "hops": int(rec.get("hops") or 1),
                 "cluster": meta.get("cluster", (meta.get("clusters") or [None])[0]),
+                # ---- FST-Mem（阶段 B）需要的结构化字段 ----
+                # unit_meta 与 units **逐条对齐**：每条记忆单元属于哪个 (实体,属性)、
+                # 写入时间、是不是干扰项。没有它就只能靠正则解析句子猜三元组，
+                # 而"猜错一个属性"在本方法里等价于"更新打到了别的事实键"——静默致命。
+                "unit_meta": rec.get("unit_meta") or [],
+                "kind": str(rec.get("kind") or ""),
+                "entity": rec.get("entity"),
+                "relation": rec.get("relation"),
+                "fact_key": rec.get("fact_key"),
+                "as_of": rec.get("as_of"),
+                "answer_fact_time": rec.get("answer_fact_time"),
+                "probe": str(rec.get("probe") or ""),
+                "timeline": rec.get("timeline") or [],
             })
     if limit and len(items) > limit:
         rng = random.Random(seed)
@@ -428,6 +441,26 @@ class SmokeModel(nn.Module):
 
     def get_input_embeddings(self):
         return self.emb
+
+    def generate(self, inputs_embeds=None, attention_mask=None, max_new_tokens=8,
+                 pad_token_id=None, **kw):
+        """最小贪心生成：只为 --smoke-model 跑通 generate 通路（不代表任何真实行为）。
+
+        没有这个方法时 --smoke-model 一旦走到评估就 AttributeError
+        （evaluate 里靠 hasattr 兜住、直接放弃评估，于是"通路验证"根本没验证生成）。
+        返回形态与"只返回新 token"的真实实现一致。
+        """
+        if inputs_embeds is None:
+            raise ValueError("SmokeModel.generate 需要 inputs_embeds")
+        x = inputs_embeds
+        ids = []
+        for _ in range(int(max_new_tokens)):
+            h = self.body(x)
+            nxt = int(self.head(h[:, -1:]).argmax(-1).item())
+            ids.append(nxt)
+            e = self.emb(torch.tensor([[nxt]], dtype=torch.long, device=x.device))
+            x = torch.cat([x, e.to(dtype=x.dtype)], dim=1)
+        return torch.tensor([ids], dtype=torch.long, device=x.device)
 
     def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None,
                 output_hidden_states=False, use_cache=False, **kw):
@@ -706,15 +739,13 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
     return (hit / tot if tot else None), tot
 
 
-def train(args):
-    t0 = time.time()
-    torch.manual_seed(args.seed)
-    random.seed(args.seed)
-    dev = torch.device(args.device if args.device else
-                       ("cpu" if args.smoke_model else
-                        ("cuda" if torch.cuda.is_available() else "cpu")))
+def _load_backbone(args, dev=None):
+    """加载冻结主干（Qwen 或 --smoke-model 的极小随机模型）。返回 (model, tok, dev, hidden)。
 
-    # ---- 模型 ----
+    抽成函数是为了让常规训练（train）与 FST-Mem 训练（train_fst）共享**同一份**
+    加载逻辑：两份拷贝迟早漂移，而"其中一条路忘了挂 adapter / 忘了关 Delta 写入"
+    只会表现为"某组实验莫名其妙差几个点"，极难定位。
+    """
     if args.smoke_model:
         model = SmokeModel().to(dev)
         tokenizer = StubTok()
@@ -727,23 +758,35 @@ def train(args):
             print(f"[smoke] --layer {args.layer} 超出 smoke 模型层数，"
                   f"降到 {model.config.num_hidden_layers - 1}（只影响自检）", flush=True)
             args.layer = model.config.num_hidden_layers - 1
-    else:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(args.base)
-        model = AutoModelForCausalLM.from_pretrained(
-            args.base, torch_dtype=torch.bfloat16, device_map=f"cuda:{args.gpu}",
-            attn_implementation="sdpa")
-        if not args.no_adapter:
-            # deltamem.core 顶层硬依赖 transformers.models.smollm3（4.51 无此子包），
-            # 这里经 deltamem_compat 注入最小占位后再 import，详见该模块的说明。
-            import deltamem_compat as DMC
-            HFDeltaMemConfig, attach_delta_mem, load_delta_mem_adapter = \
-                DMC.import_delta_mem()
-            cfg = HFDeltaMemConfig.from_pretrained(args.adapter)
-            attach_delta_mem(model, cfg)
-            load_delta_mem_adapter(model, input_dir=args.adapter)
-        dev = torch.device(f"cuda:{args.gpu}")
-        hidden = LM._model_hidden_size(model)
+        return model, tokenizer, dev, hidden
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.base)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.base, torch_dtype=torch.bfloat16, device_map=f"cuda:{args.gpu}",
+        attn_implementation="sdpa")
+    if not args.no_adapter:
+        # deltamem.core 顶层硬依赖 transformers.models.smollm3（4.51 无此子包），
+        # 这里经 deltamem_compat 注入最小占位后再 import，详见该模块的说明。
+        import deltamem_compat as DMC
+        HFDeltaMemConfig, attach_delta_mem, load_delta_mem_adapter = \
+            DMC.import_delta_mem()
+        cfg = HFDeltaMemConfig.from_pretrained(args.adapter)
+        attach_delta_mem(model, cfg)
+        load_delta_mem_adapter(model, input_dir=args.adapter)
+    dev = torch.device(f"cuda:{args.gpu}")
+    return model, tokenizer, dev, LM._model_hidden_size(model)
+
+
+def train(args):
+    t0 = time.time()
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    dev = torch.device(args.device if args.device else
+                       ("cpu" if args.smoke_model else
+                        ("cuda" if torch.cuda.is_available() else "cpu")))
+
+    # ---- 模型 ----
+    model, tokenizer, dev, hidden = _load_backbone(args, dev)
     n_frozen = freeze_model(model)
     print(f"[freeze] 冻结参数 {n_frozen/1e6:.1f}M（Delta 写入同时关闭）", flush=True)
 
@@ -1144,6 +1187,517 @@ def train(args):
     return 0
 
 
+# =====================================================================
+# 5) FST-Mem（阶段 B）：状态—轨迹解耦潜层记忆的训练与评估
+# =====================================================================
+# 这一节**不改动**上面的 train()/evaluate()：它们是阶段 A（单级 Router）的既有基线，
+# 任何改动都会让历史实验不可复现。FST 走独立的入口（--fst），共享的是底层模块
+# （Compressor / Bridge / 编码器 / 事实键与两级 Router），不是训练循环。
+#
+# 三个机制与代码的对应关系（论文里要逐条对得上）：
+#   机制一 实体—属性级稳定寻址  -> LM.LatentFactKeyEncoder（键与值无关）
+#   机制二 状态—轨迹解耦槽位      -> LM.LatentStateTrajectoryBank（cur + 有限历史）
+#   机制三 时序条件两级读出      -> LM.FstRouter（先选键，再选版本）
+def _fst_feat(model, tokenizer, text, layer, dev, cache):
+    """短文本特征缓存：实体名/属性名/年份在数据里高度重复，重复前向纯属浪费。"""
+    k = ("txt", str(text))
+    if k in cache:
+        return cache[k]
+    v = LM.extract_text_feature(model, tokenizer, text, layer=layer, device=dev)
+    cache[k] = v.detach()
+    return cache[k]
+
+
+def fst_units_and_meta(item):
+    """校验 unit_meta 与 units 逐条对齐。不齐直接报错——猜就是错的开始。"""
+    units = item_units(item)
+    ums = list(item.get("unit_meta") or [])
+    if not ums:
+        raise ValueError(f"样本缺 unit_meta（FST 需要每条记忆的 实体/属性/时间）："
+                         f"q={item.get('question')!r}")
+    if len(ums) != len(units):
+        raise ValueError(f"unit_meta({len(ums)}) 与 units({len(units)}) 条数不一致："
+                         f"q={item.get('question')!r}")
+    for i, um in enumerate(ums):
+        if not um.get("entity") or not um.get("relation"):
+            raise ValueError(f"unit_meta[{i}] 缺 entity/relation：{um!r}")
+        if _norm_ans(um.get("fact")) != _norm_ans(units[i]):
+            raise ValueError(f"unit_meta[{i}].fact 与 units[{i}] 不是同一条事实："
+                             f"{um.get('fact')!r} vs {units[i]!r}")
+    return units, ums
+
+
+def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
+                   shuffle_order=False, rng=None):
+    """把一条样本的时间线按要求顺序写进 LatentStateTrajectoryBank，并定位监督目标。
+
+    顺序（order）在这里是**显式可选**的：默认按数据的写入顺序（= 真实的时间线），
+    shuffle_order=True 时随机排列写入顺序。事实键与时间戳都写在数据里，因此
+    两种顺序写出来的库在语义上必须等价 —— 这正是"组合稳定性"要测的东西。
+
+    返回 dict，其中 tgt_group/tgt_ver 是被监督的"正确事实键 + 正确版本"。
+    viable=False 表示目标版本已被容量淘汰（hist_max 太小），此时该样本**没法学**，
+    训练要跳过、评估要算错（这正是"硬覆写"基线该拿 0 分的原因）。
+    """
+    units, ums = fst_units_and_meta(item)
+    payloads, _z, info = encode_item_slots(encoder, item, tag=tag, grad=grad)
+    if len(payloads) != len(units):
+        raise RuntimeError(f"编码返回 {len(payloads)} 个槽位，但样本有 {len(units)} 条记忆")
+    order = list(range(len(units)))
+    if shuffle_order:
+        (rng or random).shuffle(order)
+    # fp32 存储：训练路径要把梯度带回去，bf16 往返会引入无意义的舍入；
+    # 载荷本身来自 bf16 压缩器，转 fp32 是无损的。
+    bank = LM.LatentStateTrajectoryBank(hist_max=hist_max, dtype=torch.float32)
+    ent, rel, seen_facts = {}, {}, {}
+    for i in order:
+        um = ums[i]
+        k = LM.fact_key(um["entity"], um["relation"])
+        ent.setdefault(k, str(um["entity"]))
+        rel.setdefault(k, str(um["relation"]))
+        seen_facts.setdefault(k, []).append(str(um.get("fact") or ""))
+        bank.write(k, payloads[i], time=um.get("time", ""), detach=not grad)
+    keys = bank.group_keys()
+    tgt_key = item.get("fact_key") or LM.fact_key(item.get("entity"), item.get("relation"))
+    tgt_key = LM.fact_key(*LM.split_fact_key(tgt_key))
+    out = {"bank": bank, "keys": keys, "tgt_key": tgt_key, "viable": False,
+           "tgt_group": -1, "tgt_ver": -1, "d_units": len(units), "info": info,
+           "n_groups": len(keys)}
+    if tgt_key not in keys:
+        raise RuntimeError(f"目标事实键不在库里：{tgt_key!r}（键={keys}）")
+    out["tgt_group"] = keys.index(tgt_key)
+    want_t = LM._norm_time(item.get("answer_fact_time")
+                           if item.get("answer_fact_time") is not None
+                           else item.get("as_of"))
+    vers = bank.list_versions(tgt_key)
+    for vi, v in enumerate(vers):
+        if LM._time_match_score(want_t, v["time"]) == 2:
+            out["tgt_ver"] = vi
+            out["viable"] = True
+            break
+    # 目标组/版本的张量：只把**这个键**的版本送去版本级打分
+    out["tgt_ver_n"] = len(vers)          # 目标组里还剩几个版本（=1 表示没得选）
+    out.update(fst_group_tensors(bank, keys, tgt_group=out["tgt_group"],
+                                 hist_max=hist_max))
+    out["ent"], out["rel"] = ent, rel
+    return out
+
+
+def fst_group_tensors(bank, keys, tgt_group, hist_max):
+    """整库版本张量 + 目标组内部的版本张量（两级打分各自需要什么就给什么）。"""
+    per_group = bank.gather_all_versions(keys)
+    ver_z, ver_mask = LM.pad_version_stack(per_group, dtype=torch.float32, device="cpu")
+    tgt_payloads = per_group[int(tgt_group)]
+    tgt_z, tgt_mask = LM.pad_version_stack([tgt_payloads], dtype=torch.float32,
+                                           device="cpu")
+    times = [[v["time"] for v in bank.list_versions(k)] for k in keys]
+    return {"ver_z": ver_z, "ver_mask": ver_mask,
+            "tgt_ver_z": tgt_z, "tgt_ver_mask": tgt_mask, "times": times}
+
+
+def fst_build_inputs(fst_item, model, tokenizer, layer, dev, cache):
+    """库 + 时间特征 -> 两级 Router 的完整输入张量。"""
+    keys = fst_item["keys"]
+    ent, rel = fst_item["ent"], fst_item["rel"]
+    e_feat = torch.cat([_fst_feat(model, tokenizer, ent[k], layer, dev, cache)
+                        for k in keys], dim=0)
+    r_feat = torch.cat([_fst_feat(model, tokenizer, rel[k], layer, dev, cache)
+                        for k in keys], dim=0)
+    ver_z = fst_item["ver_z"].to(dev)
+    ver_mask = fst_item["ver_mask"].to(dev)
+    d = int(ver_z.shape[-1])
+    ver_t_feat = torch.zeros((len(keys), int(ver_z.shape[1]), d),
+                             dtype=ver_z.dtype, device=dev)
+    for gi, ts in enumerate(fst_item["times"]):
+        for vi, t in enumerate(ts):
+            if _norm_key_time(t):
+                ver_t_feat[gi, vi] = _fst_feat(model, tokenizer, t, layer, dev,
+                                               cache).to(device=dev,
+                                                         dtype=ver_t_feat.dtype)[0]
+    return e_feat, r_feat, ver_z, ver_mask, ver_t_feat
+
+
+def _norm_key_time(t):
+    return LM._norm_time(t)
+
+
+def fst_query_time_feat(item, model, tokenizer, layer, dev, cache):
+    """问题里的时间条件 -> 特征；没有条件返回 None（Router 内部按零向量处理）。"""
+    t = LM._norm_time(item.get("as_of"))
+    if not t:
+        return None
+    return _fst_feat(model, tokenizer, t, layer, dev, cache)
+
+
+def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
+                 system_prompt, layer, hist_max, limit=32, cache=None,
+                 verbose=False, label="fst-eval", shuffle_order=False, seed=0,
+                 ignore_query_time=False):
+    """FST 的评估：严格答案匹配 + **两级寻址准确率** + 探针分解 + 反事实配对 + 顺序稳定性。
+
+    只报答案准确率是不够的：答案对了可能是"没选对版本但那条刚好也能答对"
+    （2021 与 2025 的雇主都可能出现在干扰事实里）。所以这里必须同时报
+    group_acc（选对属性了吗）与 ver_acc（选对时间版本了吗）。
+    """
+    comp.eval()
+    bridge.eval()
+    fst_router.eval()
+    cache = {} if cache is None else cache
+    dev = torch.device(LM._model_device(model))
+    rng = random.Random(seed + 991)
+    n = hit = grp_ok = ver_ok = 0
+    ver_n_multi = ver_ok_multi = 0
+    probes = {}
+    pairs = {}
+    n_soft_seen = []
+    order_same = order_n = 0
+    fails = []
+    for item in data[:limit]:
+        try:
+            fi = build_fst_bank(encoder, item, hist_max, tag="val", grad=False,
+                                shuffle_order=shuffle_order, rng=rng)
+        except Exception as e:                       # 数据问题要显式报，不许跳过不回话
+            raise RuntimeError(f"[{label}] 构造 FST 库失败：q={item.get('question')!r}: {e}")
+        # 张量由 generate_latent_answer_fst 内部从**真实 bank** 构造：
+        # 评估必须走产品路径，不能在这里另建一套张量（两套迟早不一致）。
+        pred, meta = LM.generate_latent_answer_fst(
+            model=model, tokenizer=tokenizer, bridge=bridge, bank=fi["bank"],
+            question=item["question"], system_prompt=system_prompt,
+            fst_router=fst_router, max_new_tokens=16, layer=layer,
+            query_time=(None if ignore_query_time else item.get("as_of")),
+            device=dev, feat_cache=cache)
+        n += 1
+        n_soft_seen.append(int(meta["n_soft"]))
+        gold = item["answer"]
+        if isinstance(gold, (list, tuple)):
+            gold = " ".join(str(g) for g in gold)
+        okq = _norm_ans(pred) == _norm_ans(gold)
+        hit += int(okq)
+        g_ok = int(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"])
+        v_ok = int(meta["ver_picked"] == fi["tgt_ver"]) if fi["viable"] else 0
+        grp_ok += g_ok
+        ver_ok += v_ok
+        # 只有一个版本的目标组"选对版本"是恒真（没有可选项）——那种样本不能算进
+        # 版本级准确率，否则 ver_acc 会被大量单版本样本（如未改过的居住地）虚抬。
+        if int(fi["tgt_ver_n"]) > 1:
+            ver_n_multi += 1
+            ver_ok_multi += v_ok
+        probe = item.get("probe") or ("history" if LM._norm_time(item.get("as_of"))
+                                      else "current")
+        d = probes.setdefault(probe, {"n": 0, "hit": 0})
+        d["n"] += 1
+        d["hit"] += int(okq)
+        qk = _norm_ans(item["question"])
+        pairs.setdefault(qk, []).append(bool(okq))
+        if shuffle_order and order_n < 10 ** 9:
+            # 顺序稳定性：同一库用另一种写入顺序，答案必须一致
+            fi2 = build_fst_bank(encoder, item, hist_max, tag="val", grad=False,
+                                 shuffle_order=False)
+            pred2, _m2 = LM.generate_latent_answer_fst(
+                model=model, tokenizer=tokenizer, bridge=bridge, bank=fi2["bank"],
+                question=item["question"], system_prompt=system_prompt,
+                fst_router=fst_router, max_new_tokens=16, layer=layer,
+                query_time=(None if ignore_query_time else item.get("as_of")),
+                device=dev, feat_cache=cache)
+            order_n += 1
+            order_same += int(_norm_ans(pred2) == _norm_ans(pred))
+        if verbose and not okq and len(fails) < 8:
+            fails.append((item["question"], gold, str(pred)[:40],
+                          meta["group_keys"][meta["group_picked"]],
+                          meta["ver_time"], item.get("as_of")))
+    n_pairs_ok = sum(1 for v in pairs.values() if all(v))
+    res = {"n": n,
+           "acc": (hit / n if n else None),
+           "group_acc": (grp_ok / n if n else None),
+           "ver_acc": (ver_ok / n if n else None),
+           "ver_multi_acc": (ver_ok_multi / ver_n_multi if ver_n_multi else None),
+           "ver_multi_n": ver_n_multi,
+           "pair_acc": (n_pairs_ok / len(pairs) if pairs else None),
+           "pair_n": len(pairs),
+           "probes": {k: {"n": v["n"], "acc": (v["hit"] / v["n"] if v["n"] else None),
+                          "hit": v["hit"]} for k, v in sorted(probes.items())},
+           "n_soft": (int(sum(n_soft_seen) / len(n_soft_seen)) if n_soft_seen else 0),
+           "order_stable": (order_same / order_n if order_n else None)}
+    if verbose:
+        for row in fails:
+            print(f"  [{label}] ✗ q={row[0]!r} gold={row[1]!r} pred={row[2]!r} "
+                  f"pick={row[3]!r} ver={row[4]!r} as_of={row[5]!r}", flush=True)
+    return res
+
+
+def train_fst(args):
+    """阶段 B：在"同实体多属性 + 多次覆写 + 时间条件"的数据上训练 FST-Mem。"""
+    t0 = time.time()
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    dev = torch.device(args.device if args.device else
+                       ("cpu" if args.smoke_model else
+                        ("cuda" if torch.cuda.is_available() else "cpu")))
+    if not args.data:
+        raise SystemExit("--fst 需要 --data（tools/gen_fst_update.py 的产出）")
+    model, tokenizer, dev, hidden = _load_backbone(args, dev)
+    n_frozen = freeze_model(model)
+    print(f"[freeze] 冻结参数 {n_frozen/1e6:.1f}M（Delta 写入同时关闭）", flush=True)
+
+    comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
+                               num_heads=args.heads).to(dev)
+    with torch.no_grad():
+        _emb_w = model.get_input_embeddings().weight
+        target_norm = float(_emb_w.float().norm(dim=-1).mean())
+    bridge = LM.LatentBridge(hidden, bottleneck=args.bottleneck,
+                             target_norm=target_norm).to(dev)
+    fst_router = LM.FstRouter(hidden, n_slots=args.m, d_key=args.d_key).to(dev)
+    if args.init:
+        blob = LM._safe_torch_load(args.init)
+        comp.load_state_dict(blob["compressor"])
+        bridge.load_state_dict(blob["bridge"])
+        if blob.get("fst_router"):
+            fst_router.load_state_dict(blob["fst_router"])
+            print(f"[init] FST Router 也一并从 {args.init} 载入", flush=True)
+        print(f"[init] 从 {args.init} 初始化", flush=True)
+    if args.freeze_compressor:
+        for prm in comp.parameters():
+            prm.requires_grad_(False)
+        comp.eval()
+        print("[freeze] Compressor 主干已冻结（只训 FST Router + Bridge）", flush=True)
+    n_train = (sum(p.numel() for p in comp.parameters() if p.requires_grad)
+               + sum(p.numel() for p in bridge.parameters())
+               + sum(p.numel() for p in fst_router.parameters()))
+    print(f"[params] 可训练 {n_train/1e6:.3f}M "
+          f"(compressor={sum(p.numel() for p in comp.parameters() if p.requires_grad)/1e6:.3f}M,"
+          f" bridge={sum(p.numel() for p in bridge.parameters())/1e6:.3f}M,"
+          f" fst_router={sum(p.numel() for p in fst_router.parameters())/1e6:.3f}M) "
+          f"hist_max={args.hist_max}", flush=True)
+
+    train_data = load_synth_jsonl(args.data, limit=args.n_train, seed=args.seed)
+    if not train_data:
+        raise SystemExit(f"--data 读不到任何样本：{args.data}")
+    if args.val_data:
+        val_data = load_synth_jsonl(args.val_data, limit=args.n_val, seed=args.seed + 1)
+    else:
+        val_data = train_data[:max(1, min(len(train_data), args.n_val or 8))]
+        print("[data][warn] 未给 --val-data，用训练集前若干条做通路检查，"
+              "该数字不是验证指标", flush=True)
+    for prob in check_split_leakage(train_data, val_data):
+        print(f"[data][warn] 切分不干净：{prob}", flush=True)
+    probes = Counter(it.get("probe") or "?" for it in train_data)
+    print(f"[data] {args.data}: train={len(train_data)} val={len(val_data)} "
+          f"探针={dict(sorted(probes.items()))} 平均记忆单元="
+          f"{sum(len(item_units(it)) for it in train_data)/max(1, len(train_data)):.1f}",
+          flush=True)
+    print(f"[data] 例：units={item_units(train_data[0])} "
+          f"q={train_data[0]['question']!r} a={train_data[0]['answer']!r} "
+          f"as_of={train_data[0].get('as_of')!r}", flush=True)
+
+    encoder = LM.LatentEncoder(model, tokenizer, comp, layer=args.layer,
+                               max_unit_tokens=args.max_unit_tokens, device=dev)
+    system_prompt = args.system_prompt
+    opt_params = list(comp.parameters()) + list(bridge.parameters()) + \
+        list(fst_router.parameters())
+    opt = torch.optim.AdamW([p for p in opt_params if p.requires_grad], lr=args.lr)
+    cache = {}
+    max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
+    if args.freeze_compressor:
+        comp.eval()
+    else:
+        comp.train()
+    bridge.train()
+    fst_router.train()
+
+    def _cfg(steps_done):
+        return {"schema": LM.LATENT_SCHEMA, "n_slots": args.m, "layer": args.layer,
+                "inner_dim": args.inner_dim, "num_heads": args.heads,
+                "bottleneck": args.bottleneck, "max_unit_tokens": args.max_unit_tokens,
+                "target_norm": round(float(target_norm), 6),
+                "read_budget": LM.LATENT_READ_BUDGET, "dtype": LM.LATENT_DTYPE,
+                "stage": "fst", "hist_max": int(args.hist_max),
+                "addr_weight": float(args.addr_weight), "ver_weight": float(args.ver_weight),
+                "lr": args.lr, "steps": steps_done, "epochs": args.epochs,
+                "seed": args.seed, "smoke_model": bool(args.smoke_model),
+                "router": False, "fst": True, "d_key": int(args.d_key)}
+
+    step = micro = 0
+    acc = []
+    grad_seen = None
+    skipped_evicted = 0
+    t_start = time.time()
+    for epoch in range(args.epochs):
+        order = list(range(len(train_data)))
+        random.Random(args.seed + 100 + epoch).shuffle(order)
+        for i in order:
+            item = train_data[i]
+            fi = build_fst_bank(encoder, item, args.hist_max, tag="fact",
+                                grad=not args.freeze_compressor)
+            if not fi["viable"]:
+                # 目标版本已被容量淘汰：这条样本在当前 hist_max 下**无解**。
+                # 拿它算 CE 等于把 Router 往"选一个已经被删掉的版本"上训。
+                skipped_evicted += 1
+                continue
+            e_feat, r_feat, ver_z, ver_mask, ver_t_feat = fst_build_inputs(
+                fi, model, tokenizer, args.layer, dev, cache)
+            tq = (None if args.ignore_query_time else
+                  fst_query_time_feat(item, model, tokenizer, args.layer, dev, cache))
+            q_feat = query_feature_cached(model, tokenizer, item["question"],
+                                          system_prompt, args.layer, dev)
+            out = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq,
+                             ver_mask=ver_mask, hard=False)
+            soft = bridge(out["z_read"])
+            embeds, labels, n_ans = build_student_inputs(
+                model, tokenizer, soft, system_prompt, item["question"], item["answer"])
+            with LM.delta_write_disabled(model):
+                s_logits = model(inputs_embeds=embeds,
+                                 attention_mask=torch.ones(embeds.shape[:2],
+                                                           dtype=torch.long, device=dev),
+                                 use_cache=False).logits
+            loss_qa = qa_loss(s_logits, labels)
+            t_g = torch.tensor([int(fi["tgt_group"])], device=out["logits_group"].device)
+            # 版本监督打在**目标组**那一行：用 logits_ver（被选中组）会在选错组时
+            # 监督到另一组的版本布局（甚至填充位），loss 瞬间到 1e4 量级。
+            t_v = torch.tensor([int(fi["tgt_ver"])], device=out["logits_ver"].device)
+            loss_grp = F.cross_entropy(out["logits_group"], t_g)
+            loss_ver = F.cross_entropy(
+                out["logits_ver_all"][int(fi["tgt_group"]):int(fi["tgt_group"]) + 1], t_v)
+            loss = loss_qa + args.addr_weight * loss_grp + args.ver_weight * loss_ver
+            (loss / args.accum).backward()
+            acc.append((float(loss_qa.detach()), float(loss_grp.detach()),
+                        float(loss_ver.detach())))
+            micro += 1
+            if micro % args.accum:
+                continue
+            if grad_seen is None:
+                grad_seen = {
+                    "bridge_last_linear": bridge.net[3].weight.grad is not None,
+                    "fst_key_e_net": fst_router.key.e_net[0].weight.grad is not None,
+                    "fst_key_output": fst_router.key.out[0].weight.grad is not None,
+                    "fst_state_ver_net": fst_router.state.ver_net[0].weight.grad is not None,
+                    "model_has_no_grad": all(p.grad is None for p in model.parameters()),
+                }
+                if not args.freeze_compressor:
+                    grad_seen["compressor_queries"] = comp.queries.grad is not None
+            g_comp = 0.0 if args.freeze_compressor else _grad_norm(comp.parameters())
+            g_bridge = _grad_norm(bridge.parameters())
+            g_fst = _grad_norm(fst_router.parameters())
+            if args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    [p for p in opt_params if p.requires_grad], args.grad_clip)
+            opt.step()
+            opt.zero_grad(set_to_none=True)
+            step += 1
+            qa_avg = sum(x[0] for x in acc) / len(acc)
+            grp_avg = sum(x[1] for x in acc) / len(acc)
+            ver_avg = sum(x[2] for x in acc) / len(acc)
+            print(f"[step {step}] loss_qa={qa_avg:.4f} loss_grp={grp_avg:.4f} "
+                  f"loss_ver={ver_avg:.4f} "
+                  f"soft_tokens={int(soft.reshape(1, -1, soft.shape[-1]).shape[1])} "
+                  f"compress={fi['info']['compression_ratio']} "
+                  f"gnorm_comp={g_comp:.3e} gnorm_bridge={g_bridge:.3e} "
+                  f"gnorm_fst={g_fst:.3e} skip_evicted={skipped_evicted} "
+                  f"({time.time()-t_start:.0f}s)", flush=True)
+            acc = []
+            if args.eval_every > 0 and step % args.eval_every == 0 and not args.dry_run:
+                res_ev = evaluate_fst(fst_router, comp, bridge, encoder, model,
+                                      tokenizer, val_data, system_prompt, args.layer,
+                                      args.hist_max, limit=args.eval_limit,
+                                      cache=cache, verbose=False,
+                                      label=f"fst@{step}",
+                                      ignore_query_time=args.ignore_query_time)
+                print(f"[eval] step={step} {_fmt_fst(res_ev)}", flush=True)
+                if not args.freeze_compressor:
+                    comp.train()
+                bridge.train()
+                fst_router.train()
+            if args.save_every > 0 and step % args.save_every == 0 and not args.dry_run:
+                LM.save_latent_checkpoint(
+                    args.out, comp, bridge, _cfg(step),
+                    {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                     "git": _git_commit(), "partial": True, "step": step},
+                    fst_router=fst_router)
+                print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
+            if args.max_steps > 0 and step >= max_steps:
+                break
+        if args.max_steps > 0 and step >= max_steps:
+            break
+
+    if grad_seen is None:
+        raise RuntimeError("训练没有完成任何一个优化步：检查 --accum/--max-steps/--epochs "
+                           "以及 skipped_evicted（hist_max 太小会让所有样本都不可学）")
+    print(f"[grad-check] {json.dumps(grad_seen, ensure_ascii=False)}", flush=True)
+    if not all(v for k, v in grad_seen.items() if k != "model_has_no_grad"):
+        raise RuntimeError("梯度没有回传到 Bridge/FST Router 的某个头 —— "
+                           "检查是否误把 student 前向放进 no_grad() 或提前 detach")
+    if not grad_seen["model_has_no_grad"]:
+        print("[grad-check][warn] 冻结权重拿到了梯度：确认 requires_grad_(False) 生效",
+              flush=True)
+
+    res_val = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, val_data,
+                           system_prompt, args.layer, args.hist_max,
+                           limit=args.eval_limit, cache=cache, verbose=True,
+                           label="fst-final", ignore_query_time=args.ignore_query_time)
+    print(f"[eval] val {_fmt_fst(res_val)}", flush=True)
+    res_train = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer,
+                             train_data, system_prompt, args.layer, args.hist_max,
+                             limit=min(args.eval_limit, len(train_data)), cache=cache,
+                             verbose=False, label="fst-train",
+                             ignore_query_time=args.ignore_query_time)
+    print(f"[eval] train {_fmt_fst(res_train)}", flush=True)
+    # 顺序稳定性：换一个写入顺序，答案必须一样（组合稳定性的直接检验）
+    res_ord = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, val_data,
+                           system_prompt, args.layer, args.hist_max,
+                           limit=args.eval_limit, cache=cache, verbose=False,
+                           label="fst-order", shuffle_order=True, seed=args.seed,
+                           ignore_query_time=args.ignore_query_time)
+    print(f"[eval] val(写入顺序打乱) {_fmt_fst(res_ord)}", flush=True)
+
+    if args.dry_run:
+        print(f"[dry-run] OK：FST 通路验证完成（{time.time()-t0:.1f}s），未写 checkpoint",
+              flush=True)
+        return 0
+
+    cfg = _cfg(step)
+    meta = {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "git": _git_commit(), "n_train": len(train_data), "n_val": len(val_data),
+            "fst": True, "hist_max": int(args.hist_max),
+            "val": res_val, "train": res_train, "val_order_shuffled": res_ord,
+            "grad_check": grad_seen, "skipped_evicted": int(skipped_evicted),
+            "elapsed_sec": round(time.time() - t0, 1)}
+    out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta,
+                                    fst_router=fst_router)
+    print(f"[save] {out} config={json.dumps(cfg, ensure_ascii=False)}", flush=True)
+    # 存盘->重载->评：FST 多了一个 Router 要恢复，这一步顺便验证 ckpt 完整性
+    rd = LM.load_latent_reader(out, model, tokenizer, device=dev)
+    if rd.fst_router is None:
+        raise RuntimeError("重载后 fst_router 为空：checkpoint 不完整")
+    res_rl = evaluate_fst(rd.fst_router, rd.compressor, rd.bridge, rd.encoder, model,
+                          tokenizer, val_data, system_prompt, args.layer, args.hist_max,
+                          limit=args.eval_limit, cache=cache, verbose=False,
+                          label="fst-reload", ignore_query_time=args.ignore_query_time)
+    print(f"[eval-reload] {_fmt_fst(res_rl)}", flush=True)
+    if res_val["acc"] is not None and res_rl["acc"] is not None \
+            and abs(res_val["acc"] - res_rl["acc"]) > 0.2:
+        print(f"[WARNING] 进程内({res_val['acc']:.3f}) 与 重载({res_rl['acc']:.3f}) "
+              f"差异巨大：训练进程内存在影响生成的状态", flush=True)
+    return 0
+
+
+def _f3(v):
+    """None-safe 的 3 位小数（空集时指标是 None，不是 0）。"""
+    return "n/a" if v is None else f"{v:.3f}"
+
+
+def _fmt_fst(res):
+    """把 FST 指标压成一行（成绩单口径固定，便于多次实验横向对比）。"""
+    if not res:
+        return "n/a"
+    pr = " ".join(f"{k}={_f3(v['acc'])}({v['hit']}/{v['n']})"
+                  for k, v in res["probes"].items())
+    return (f"acc={_f3(res['acc'])} group={_f3(res['group_acc'])} "
+            f"ver={_f3(res['ver_acc'])} ver_multi={_f3(res['ver_multi_acc'])}"
+            f"({res['ver_multi_n']}) pair={_f3(res['pair_acc'])}"
+            f"({res['pair_n']}) {pr} n_soft={res['n_soft']}"
+            + (f" order_stable={_f3(res['order_stable'])}"
+               if res.get("order_stable") is not None else ""))
+
+
 def _git_commit():
     try:
         import subprocess
@@ -1216,6 +1770,14 @@ def parse_args(argv=None):
                     help="冻结 Compressor 主干（Phase 2：只训 router 的键/查询头）")
     ap.add_argument("--max-slots", type=int, default=0,
                     help="变槽数采样的上限（0=用数据里的全部槽位）")
+    ap.add_argument("--fst", action="store_true",
+                    help="FST-Mem（阶段 B）：事实键 + 状态/轨迹解耦 + 时序两级读出")
+    ap.add_argument("--hist-max", type=int, default=LM.LATENT_HIST_MAX,
+                    help="每个事实键保留的历史版本数；0 = 硬覆写对照（历史全丢）")
+    ap.add_argument("--ignore-query-time", action="store_true",
+                    help="消融：丢掉查询里的时间条件（版本级只看问题+载荷，不看年份）")
+    ap.add_argument("--ver-weight", type=float, default=1.0,
+                    help="版本级（时间）寻址的交叉熵权重")
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     return ap.parse_args(argv)
@@ -1228,6 +1790,12 @@ def main(argv=None):
           f"max_unit_tokens={args.max_unit_tokens} lr={args.lr} accum={args.accum} "
           f"kl={args.kl_weight} recon={args.recon_weight} "
           f"smoke={args.smoke_model} dry_run={args.dry_run}", flush=True)
+    if args.fst:
+        print(f"[cfg] fst=True hist_max={args.hist_max} "
+              f"addr_weight={args.addr_weight} ver_weight={args.ver_weight}", flush=True)
+        return train_fst(args)
+    if args.hist_max != LM.LATENT_HIST_MAX and not args.fst:
+        print("[cfg][warn] --hist-max 只在 --fst 下生效，当前被忽略", flush=True)
     return train(args)
 
 

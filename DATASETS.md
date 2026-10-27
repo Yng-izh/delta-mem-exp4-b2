@@ -1,6 +1,6 @@
 # DATASETS.md — 实验数据盘点
 
-**最后更新**：2026-10-27（潜层 Router 重构轮）
+**最后更新**：2026-10-27（FST-Mem 阶段 B 轮）
 
 **一句话**：潜层读出实验实际只用了 **3 套自造玩具数据（共 280 条）**；服务器上另有 **5 套更大的数据从未进过潜层实验**（含 2998 条多跳）；外部 benchmark **一套都没有**。
 
@@ -16,6 +16,17 @@
 
 三套全部 `hops=1`（单跳）。
 
+**第四套（v9.6 新增，动态事实）**：
+
+| 数据集 | 条数 | 事实键/条 | 版本 | 反事实变体 | 实体 | 用途 |
+|---|---|---|---|---|---|---|
+| `fst_update_train.jsonl` | **192** | 5（2 个目标属性键 + 3 个干扰键） | 雇主键 **2 个时间版本** | 2（雇主值互换） | 32 | FST-Mem 阶段 B 训练 |
+| `fst_update_val.jsonl` | **72** | 同上 | 同上 | 2 | 12（与训练**不重叠**） | FST-Mem 验证 |
+
+它不是"4 条互不相关的事实"的放大版，而是**新问题**：同一实体的多个属性各自被多次覆写。
+行数与探针一一对应：`{current: 64, history: 64, unrelated: 64}`（训练集）。
+`unrelated` 探针就是**更新局域性**的测量：雇主怎么改，居住地的答案都不该变。
+
 **字段**
 
 ```jsonc
@@ -29,6 +40,34 @@
   "subject": "Branish", "relation": "founded"
 }
 ```
+
+`fst_update_*` 的字段在上面的基础上多一层结构化元信息（**逐条与 `units` 对齐**）：
+
+```jsonc
+{
+  "kind": "update", "hops": 1,
+  "entity": "Ludarn", "relation": "works at", "fact_key": "ludarn||works at",
+  "unit_meta": [                                    // 与 units 逐条对齐，缺一条就报错
+    {"entity": "Ludarn", "relation": "works at", "time": "2021",
+     "fact": "Ludarn works at Fenwick.", "distractor": false},
+    {"entity": "Ludarn", "relation": "lives in", "time": "2023", ...},
+    {"entity": "Ludarn", "relation": "works at", "time": "2025", ...},   // 当前雇主
+    {"entity": "Islik",  "relation": "works at", "time": "", "distractor": true}
+  ],
+  "timeline":  [{"time": "2021", "relation": "works at", "value": "Fenwick", ...}, ...],
+  "question": "Where does Ludarn work?",   // 或 "In 2021, where did Ludarn work?"
+  "answer": "Velcor",
+  "as_of": "",                              // 历史题填 "2021"（= 查询的时间条件）
+  "answer_fact_time": "2025",               // 正确版本的时间戳（版本级监督用）
+  "probe": "current | history | unrelated",
+  "evidence": ["Ludarn works at Velcor."]
+}
+```
+
+**为什么必须有 `unit_meta`**：靠正则从句子里猜 (实体,属性,时间) 三元组，猜错一个属性
+在本方法里等价于"更新打到了别的事实键"——静默、且指标上只表现为"莫名其妙变差"。
+干扰项的事实键**保证不与目标键冲突**：同一个键写成两条同时刻版本会让"该读哪个版本"
+本身有歧义，这种样本无法归因。
 
 注意 `load_synth_jsonl` 的产出与原始文件不同：`memory` 会被 join 成**单个字符串**（teacher 明文输入 / 重建目标用），槽位切分以 `units` 为准。**取"第一条事实"必须用 `units[0]`，用 `memory[0]` 会取到第一个字符**（2026-10-27 修掉的诊断 bug）。
 
@@ -113,11 +152,13 @@
 | `tools/gen_synth_qa.py` | 事实文本 → 单跳/多跳问答（`parse_fact_triple` 切三元组） | 见脚本头 docstring |
 | `tools/gen_latent_min16.py` | 实验 1：16 条单槽反事实配对 | — |
 | `tools/gen_latent_exp2.py` | 实验 2：4 槽（1 目标 + 3 干扰） | `--n-train-pairs 100 --n-val-pairs 32 --seed 7` |
+| `tools/gen_fst_update.py` | 实验 3（v9.6）：同实体多属性 + 多次覆写 + 时间条件；干扰项键不与目标键冲突 | `--n-train-entities 32 --n-val-entities 12 --years 2021,2023,2025 --seed 0` |
 
 重生成命令：
 
 ```bash
 python tools/gen_latent_exp2.py --n-train-pairs 100 --n-val-pairs 32 --seed 7
+python tools/gen_fst_update.py            # -> synth/fst_update_{train,val}.jsonl
 ```
 
 ---

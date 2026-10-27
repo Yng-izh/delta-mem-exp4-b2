@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## [v9.6-fst-mem] — 2026-10-27 — FST-Mem：事实键 + 状态/轨迹解耦 + 时序两级读出（阶段 B，**未训练**）
+
+**一句话**：把 `LatentRouter` 从"候选方法"降级为**静态多事实内容寻址基线**，在它之上加三件事：
+① 寻址键从"整条事实"改成 **(实体,属性)** —— 键**与值无关**，值变了键不变；
+② 每个事实键拆成**当前状态 + 有限历史轨迹**，写新值 = 旧值下沉、新值上位，**其他键逐位不动**；
+③ 读出改成**两级**：先选 (实体,属性)，再在被选中组内部按时间条件选版本，Reader 只收到 1 个版本的
+m 个软 token。**真实训练一步没跑，没有任何效果数字**；`hops>1` 未实现（显式报错）；
+未接进 AR/CR 线上管线。
+
+### 一、为什么要动（研究定位的修正）
+
+原方案的 `LatentRouter` = Compressor + 内容寻址 + Bridge + 软 token，三个组件都有成熟研究基础，
+不足以撑起论文贡献；而且它只解决**静态多事实读取**，完全没用到项目已有的**事实覆写**与**时间记忆**能力。
+新的研究问题是：**事实被压缩成潜向量之后，在不断新增、局部更新、历史回溯的过程中，
+如何保持实体—属性绑定、避免无关事实干扰、并按时间取回历史值。**
+
+### 二、三个机制 ↔ 代码
+
+| 机制 | 代码 | 关键契约（单测直接断言） |
+|---|---|---|
+| 一 · 实体—属性级稳定寻址 | `latent_memory.LatentFactKeyEncoder` | `k_{e,r}=norm(out([h_e,h_r,h_e⊙h_r]))`；不同属性给不同键；实体/属性**不可交换**（有交互项）；梯度到四个头 |
+| 二 · 状态—轨迹解耦槽位 | `latent_memory.LatentStateTrajectoryBank(LatentSlotBank)` | 写新值→旧值进 hist；**改 A 键时 B 键载荷 `torch.equal` 逐位相等**；超容量**真正释放**槽位；`read(key, time)` 的匹配优先级 |
+| 三 · 时序条件两级读出 | `latent_memory.FstRouter` | 事实级打分**与组数/顺序无关**；`logits_ver` 长度 = 组内版本数（不是 G×V）；掩码位 `-1e4` 且不会被选中；**STE 前向 `torch.equal` 等于硬选** |
+
+### 三、本轮新增/改动
+
+| 文件 | 内容 |
+|---|---|
+| `latent_memory.py` | `LATENT_HIST_MAX`；`fact_key/split_fact_key/_norm_time/_time_match_score/_as_year`；`extract_text_feature`；`LatentFactKeyEncoder`、`TemporalStateSelector`、`FstRouter`、`_payload_md`、`pad_version_stack`；`LatentStateTrajectoryBank`（`write/read/list_versions/gather_versions/gather_all_versions/stats`）；`_emit_latent`（把"算好的 soft 注入并生成"抽出来，供两条读出路径共用）；`generate_latent_answer_fst`；ckpt 支持 `has_fst` + `fst_router`（缺权重**报错**，不许退回裸拼） |
+| `train_latent_memory.py` | `--fst / --hist-max / --ver-weight / --ignore-query-time`；`_load_backbone()`（常规与 FST 共用一份加载逻辑）；`build_fst_bank / fst_group_tensors / fst_build_inputs / evaluate_fst / train_fst`；`load_synth_jsonl` 保留 `unit_meta/as_of/probe/fact_key/timeline/answer_fact_time`；`SmokeModel.generate()`（此前没有，`--smoke-model` 一评估就 AttributeError） |
+| `tools/gen_fst_update.py` | 新数据集：同实体多属性 + 多次覆写 + 时间条件；192 训练 / 72 验证，实体不相交；干扰项键不与目标键冲突 |
+| `tests/test_fst_mem.py` | **67 项**机制断言（F 事实键 / G 键编码器 / H 库语义与更新局域性 / I 两级寻址与 STE / J 读出只注入 1 个版本且值不进 tokenizer / K ckpt 往返） |
+| `results/fst_mem_2026-10-27/` | 本轮完整记录 + 7 份日志 |
+
+### 四、本轮踩到并修掉的 3 个真 bug（都会静默失效）
+
+| # | Bug | 后果 | 修法 |
+|---|---|---|---|
+| 1 | `LatentStateTrajectoryBank.versions()` 与父类 `self.versions`（`{slot_id: 覆写次数}` 字典）**同名** | `TypeError: 'dict' object is not callable`，库直接不可用 | 改名 `list_versions/count_versions`，并在代码里写明为什么不能叫 `versions` |
+| 2 | 版本级监督打在 `logits_ver`（**被选中组**那一行）上 | 路由初期选错组时，监督指向另一组的版本布局（甚至填充位），`loss_ver` 从 0 跳到 **9990** | `FstRouter` 额外返回 `logits_ver_all[G,V]`，监督取 `[tgt_group]` 那一行 |
+| 3 | STE 软期望是 fp32、硬选是 bf16，相加被提升成 fp32 | bridge 的 bf16 权重直接报错（或悄悄全精度往返） | `z_soft.to(dtype=z_hard.dtype)` 后再做"梯度直通" |
+
+另外实现时**刻意没做**：块对角注意力掩码、绑定子空间、正交键约束 —— 两级读出已经在**输入层**
+把"只送一个版本"做到位；在证明这一步不够之前改冻结模型的注意力结构属于"加模块 ≠ 加贡献"。
+
+### 五、验证（都是通路验证，**不是**效果）
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_fst_mem.py` | **ALL PASS (67 checks)** |
+| `tests/test_latent_readout.py` | **ALL PASS (89 checks)**（重构 `_emit_latent` 后逐条不回归） |
+| `--fst --smoke-model` 全链路 | 训练 6 步 → 评估 → 存盘 → 重载 → 评估，`grad-check` 五个头全 true，`n_soft=4`（= m，与版本数无关） |
+| `--fst --hist-max 0`（硬覆写对照） | `skip_evicted` 递增（历史题无解 → 跳过）、`ver_multi=n/a(0)`：符合预期 |
+| `--fst --ignore-query-time`（时序条件消融） | 正常跑通，指标与完整版可分栏对比 |
+| 阶段 A（`--router`）回归 | `[step]`/`[eval]` 输出与改动前一致（本地仅 `deltamem` 导入失败，该包只在服务器上有） |
+
+### 六、没有做的事（不要误读）
+
+- **一步真实训练都没跑**：`acc/group_acc/ver_multi_acc` 在 smoke 里都是随机权重下的噪声，
+  **不能**作为"FST 有效"或"FST 无效"的任何证据。
+- `hops>1` 未实现；FST 未接进 AR/CR 线上管线（需从 `StatePool`/`EpisodicMemory` 构造事实键与时间线）。
+- 历史容量 `LATENT_HIST_MAX` 的容量—保真权衡未量化。
+- 阶段 A 的 22.5% 数据歧义缺陷在新数据集已规避，但**旧数据集未重生成**。
+
 ## [v9.5-latent-router] — 2026-10-27 — "17% 之谜"水落石出（4 个自伤脚本 bug）→ 位置敏感根因 → LatentRouter 重构 + 7 个自查失效修复
 
 **一句话**：训练期 17.2% 与重载后 0% 的落差**不是产品 bug**，是我自己诊断脚本的 4 个 bug；

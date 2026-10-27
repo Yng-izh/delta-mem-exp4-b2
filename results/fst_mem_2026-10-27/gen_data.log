@@ -1,0 +1,5 @@
+[out] train=192 -> /Users/yngizh/quant/deepseek/delta-mem-exp4/synth/fst_update_train.jsonl
+[out] val=72 -> /Users/yngizh/quant/deepseek/delta-mem-exp4/synth/fst_update_val.jsonl
+[out] 实体 train/val=32/12（不相交）+64 个只做干扰
+[out] 探针分布(train)={'current': 64, 'history': 64, 'unrelated': 64}
+[out] 例：{"kind": "update", "hops": 1, "entity": "Ludarn", "unit_meta": [{"entity": "Ludarn", "relation": "works at", "time": "2021", "fact": "Ludarn works at Fenwick.", "distractor": false}, {"entity": "Ludarn", "relation": "lives in", "time": "2023", "fact": "Ludarn lives in Ostrel.", "distractor": false}, {"entity": "Ludarn", "relation": "works at", "time": "2025", "fact": "Ludarn works at Velcor.", "di

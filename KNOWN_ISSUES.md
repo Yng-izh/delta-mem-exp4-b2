@@ -1,6 +1,6 @@
 # KNOWN_ISSUES.md — 已知问题登记
 
-**最后更新**：2026-10-27（潜层 Router 重构轮）
+**最后更新**：2026-10-27（FST-Mem 阶段 B 轮）
 
 只登记**确实存在、已确认、但尚未修复**的问题。每条都写明「怎么发现的 / 影响什么 / 怎么修」。
 已修的问题记在 [`CHANGELOG.md`](CHANGELOG.md) 对应版本里。
@@ -72,6 +72,53 @@ finally:
 - 保留数据，评估时额外报一列「无歧义子集」准确率（不破坏已有结果）
 
 ---
+
+### 3.5 FST-Mem 的效果完全未验证（与第 2 条并列，单独立项）
+
+**位置**：`latent_memory.LatentFactKeyEncoder / LatentStateTrajectoryBank / FstRouter`、
+`train_latent_memory.py --fst`
+
+**现状**：三个机制**结构上都已做到**并有 67 项单测断言（键与值无关、改 A 不动 B 逐位相等、
+两级竞争隔离、前向硬选 + STE、ckpt 严格往返），但：
+- **一步真实训练都没跑** → 没有任何 `acc / group_acc / ver_multi_acc` 的可用数字；
+- `--fst --smoke-model` 的 smoke 指标是**随机权重下的噪声**，不能引用；
+- 没有与"直接拼接潜槽位 / 阶段 A Router / 硬覆写"的对照跑分。
+
+**影响**：任何"FST 解决了组合不稳定 / 更新局部性 / 时间一致性"的表述**目前都不成立**。
+单测保证的是"实现符合设计"，不是"设计有效"。
+
+**怎么修**：按 `ARCHITECTURE.md §6.5` 的消融矩阵在 v100-2 上依次跑
+（`--router` → `--fst --hist-max 0` → `--fst --hist-max 2` → `--fst --ignore-query-time`），
+每档至少 3 个 seed，报 `acc + group_acc + ver_multi_acc + 三探针 + pair_acc + order_stable`。
+
+### 3.6 FST 没有多跳、没有接进线上管线
+
+**位置**：`generate_latent_answer_fst`、`run_ar_v7.py` / `run_group_b2_v7.py`
+
+**现状**：
+- `hops>1` **显式报错**（`ValueError`）。FST 的键是静态身份键，没有 `k_out` 那一路"客体值接力"，
+  直接按单跳跑会得到"看起来正常的错答案"，所以选择报错而不是静默降级。
+- AR/CR runner 仍走 `generate_latent_answer`（单级 Router），**没有任何代码路径会构造
+  `LatentStateTrajectoryBank`**：需要从 `StatePool` / `EpisodicMemory` 提取
+  `(实体, 属性, 时间)` 来建键与时间线，这是阶段 C 的工作。
+
+**影响**：FST 目前只能通过 `train_latent_memory.py --fst` 训练与评估，**线上跑分数字无法产生**。
+论文里"端到端对比"这一栏现在空白。
+
+**怎么修**：见 `ARCHITECTURE.md §10` 阶段 C。
+
+### 3.7 历史容量与保真度的权衡未量化
+
+**位置**：`LATENT_HIST_MAX`（默认 4）
+
+**现状**：超容量时 FIFO 淘汰最旧版本并**真正释放槽位**（不保留"读不到的僵尸槽"）。
+但"保留几条历史够用""压缩后的历史丢了多少信息""历史变长后读出开销与定位精度如何退化"
+**一个都没测**。
+
+**影响**：`hist_max` 目前是拍的常数，不是实验结论。审稿人会问"历史很长怎么办"。
+
+**怎么修**：造 `hist_max ∈ {0,1,2,4,8}` × 时间跨度 ∈ {3,6,12} 的网格，
+报 `history` 探针准确率与 `n_versions` 的关系曲线。
 
 ## P1 — 会让某些路径静默失效
 

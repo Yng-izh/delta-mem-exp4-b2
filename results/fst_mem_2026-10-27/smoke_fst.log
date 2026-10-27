@@ -1,0 +1,32 @@
+[cfg] stage=a m=4 layer=1 inner=64 heads=4 bottleneck=16 max_unit_tokens=16 lr=0.0001 accum=1 kl=0.0 recon=0.0 smoke=True dry_run=False
+[cfg] fst=True hist_max=4 addr_weight=1.0 ver_weight=1.0
+/Users/yngizh/Library/Python/3.9/lib/python/site-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+[smoke] 使用极小随机模型（hidden=64, vocab=512）：只验证通路，不代表 Qwen 行为
+[freeze] 冻结参数 0.2M（Delta 写入同时关闭）
+[params] 可训练 0.039M (compressor=0.030M, bridge=0.002M, fst_router=0.007M) hist_max=4
+[data] synth/fst_update_train.jsonl: train=24 val=12 探针={'current': 8, 'history': 7, 'unrelated': 9} 平均记忆单元=5.0
+[data] 例：units=['Quinesk works at Brackline.', 'Quinesk lives in Haldwyn.', 'Quinesk works at Velcor.', 'Yunent works at Nivora.', 'Wenent works at Talquin.'] q='In 2021, where did Quinesk work?' a='Brackline' as_of='2021'
+[step 1] loss_qa=5.7201 loss_grp=0.9729 loss_ver=1.4547 soft_tokens=4 compress=1.0 gnorm_comp=2.268e+01 gnorm_bridge=4.563e-01 gnorm_fst=5.881e+01 skip_evicted=0 (0s)
+[step 2] loss_qa=7.0541 loss_grp=1.4870 loss_ver=0.0687 soft_tokens=4 compress=1.0 gnorm_comp=4.143e+00 gnorm_bridge=8.556e-01 gnorm_fst=1.071e+01 skip_evicted=0 (0s)
+[step 3] loss_qa=6.2802 loss_grp=1.1281 loss_ver=0.0000 soft_tokens=4 compress=1.0 gnorm_comp=1.806e+00 gnorm_bridge=7.431e-01 gnorm_fst=5.890e+00 skip_evicted=0 (0s)
+[eval] step=3 acc=0.000 group=0.125 ver=0.875 ver_multi=0.833(6) pair=0.000(8) current=0.000(0/2) history=0.000(0/4) unrelated=0.000(0/2) n_soft=4
+[step 4] loss_qa=6.1994 loss_grp=1.2497 loss_ver=0.0783 soft_tokens=4 compress=1.0 gnorm_comp=2.695e+00 gnorm_bridge=5.363e-01 gnorm_fst=7.654e+00 skip_evicted=0 (0s)
+[step 5] loss_qa=6.3342 loss_grp=1.5012 loss_ver=1.2874 soft_tokens=4 compress=1.0 gnorm_comp=3.208e+01 gnorm_bridge=7.450e-01 gnorm_fst=7.868e+01 skip_evicted=0 (0s)
+[step 6] loss_qa=6.3631 loss_grp=1.2082 loss_ver=0.0920 soft_tokens=4 compress=1.0 gnorm_comp=2.847e+00 gnorm_bridge=6.944e-01 gnorm_fst=7.232e+00 skip_evicted=0 (0s)
+[eval] step=6 acc=0.000 group=0.125 ver=0.875 ver_multi=0.833(6) pair=0.000(8) current=0.000(0/2) history=0.000(0/4) unrelated=0.000(0/2) n_soft=4
+[ckpt] step 6 已保存 -> /tmp/fst_smoke.pt
+[grad-check] {"bridge_last_linear": true, "fst_key_e_net": true, "fst_key_output": true, "fst_state_ver_net": true, "model_has_no_grad": true, "compressor_queries": true}
+  [fst-final] ✗ q='Where does Kelolt live?' gold='Duvhal' pred='414 394 337 473 80 478 482 119 285 11 48' pick='ravina||works at' ver='' as_of=''
+  [fst-final] ✗ q='In 2021, where did Kelolt work?' gold='Velcor' pred='414 394 337 443 366 233 142 120 87 211 9' pick='selesk||lives in' ver='' as_of='2021'
+  [fst-final] ✗ q='In 2021, where did Jorost work?' gold='Brackline' pred='414 394 337 443 366 233 142 120 87 211 9' pick='mirolt||works at' ver='' as_of='2021'
+  [fst-final] ✗ q='Where does Jorent work?' gold='Velcor' pred='414 394 337 473 80 478 482 119 285 11 48' pick='jorent||works at' ver='2025' as_of=''
+  [fst-final] ✗ q='In 2021, where did Jorent work?' gold='Velcor' pred='414 394 337 473 80 478 129 492 493 160 4' pick='islora||lives in' ver='' as_of='2021'
+  [fst-final] ✗ q='In 2021, where did Aldina work?' gold='Talquin' pred='414 394 337 473 80 478 482 119 285 11 48' pick='ravina||lives in' ver='' as_of='2021'
+  [fst-final] ✗ q='Where does Norund live?' gold='Ostrel' pred='414 394 337 443 366 233 142 120 355 452 ' pick='veyolt||lives in' ver='' as_of=''
+  [fst-final] ✗ q='Where does Branira work?' gold='Brackline' pred='414 394 337 473 80 478 482 119 285 11 48' pick='pierik||works at' ver='' as_of=''
+[eval] val acc=0.000 group=0.125 ver=0.875 ver_multi=0.833(6) pair=0.000(8) current=0.000(0/2) history=0.000(0/4) unrelated=0.000(0/2) n_soft=4
+[eval] train acc=0.000 group=0.250 ver=0.750 ver_multi=0.500(4) pair=0.000(8) history=0.000(0/4) unrelated=0.000(0/4) n_soft=4
+[eval] val(写入顺序打乱) acc=0.000 group=0.125 ver=0.625 ver_multi=0.500(6) pair=0.000(8) current=0.000(0/2) history=0.000(0/4) unrelated=0.000(0/2) n_soft=4 order_stable=0.875
+[save] /tmp/fst_smoke.pt config={"schema": 1, "n_slots": 4, "layer": 1, "inner_dim": 64, "num_heads": 4, "bottleneck": 16, "max_unit_tokens": 16, "target_norm": 7.980747, "read_budget": 32, "dtype": "bf16", "stage": "fst", "hist_max": 4, "addr_weight": 1.0, "ver_weight": 1.0, "lr": 0.0001, "steps": 6, "epochs": 1, "seed": 0, "smoke_model": true, "router": false, "fst": true, "d_key": 8}
+[eval-reload] acc=0.000 group=0.125 ver=0.875 ver_multi=0.833(6) pair=0.000(8) current=0.000(0/2) history=0.000(0/4) unrelated=0.000(0/2) n_soft=4
