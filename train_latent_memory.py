@@ -618,32 +618,46 @@ def target_slot_index(units, answer, fallback=0, evidence=None):
     return int(fallback)
 
 
-def sample_slot_subset(payloads, target_idx, rng, max_slots=None, keep_all=False):
-    """随机取 K_cur ∈ [1, K] 个槽位（**必含目标槽**）、随机顺序，返回 (slot_z, new_tgt)。
+def sample_slot_subset(payloads, target_idx, rng, max_slots=None, keep_all=False,
+                       must_keep=None):
+    """随机取 K_cur ∈ [1, K] 个槽位（**必含目标槽与 must_keep**）、随机顺序。
 
     这是 Phase 2 的核心课程：模型必须学会"无论给了几个槽、目标排第几，都按问题
-    选到同一个槽"。固定 4 槽训练只会学到"第 0 位是答案"这个位置先验（实测：
+    选到同一个槽"。固定槽数训练只会学到"第 0 位是答案"这个位置先验（实测：
     训练集 39.5%，把目标挪到最后掉到 21.5%，只给 1 槽直接 0%）。
+
+    `must_keep`：多跳样本的**整条证据链**。旧实现为了"别把链剪断"直接
+    `keep_all=True` 把 20 多槽全留下 —— 结果变槽数课程在真实数据上完全失效，
+    Router 要在一开始就从 23 槽里选中第 1 跳（chance 4.3%），实测 200 步后
+    仍停在 chance（HotpotQA dev 5% vs 无记忆 12%）。正确做法是"证据链全留、
+    其余随机丢"，既保住链条又保住课程。
     """
     K = len(payloads)
     if K <= 0:
         raise ValueError("sample_slot_subset 收到空 payload 列表")
     tgt = int(target_idx) if 0 <= int(target_idx) < K else 0
-    if keep_all:
-        # 多跳样本：链上的每一跳都必须留着，随机丢槽会把推理链剪断，
-        # 模型只会学到"单槽里正好有答案"。顺序仍然打乱，位置无关性照样训练。
+    must = {tgt} | {int(i) for i in (must_keep or []) if 0 <= int(i) < K}
+    if keep_all or len(must) >= K:
         keep = list(range(K))
         rng.shuffle(keep)
         return (LM.stack_payloads([payloads[i] for i in keep]), keep.index(tgt), keep)
     hi = K if max_slots is None else max(1, min(K, int(max_slots)))
-    k_cur = rng.randint(1, hi)
-    others = [i for i in range(K) if i != tgt]
+    k_cur = max(len(must), rng.randint(1, hi))
+    others = [i for i in range(K) if i not in must]
     rng.shuffle(others)
-    keep = [tgt] + others[:max(0, k_cur - 1)]
+    keep = sorted(must) + others[:max(0, k_cur - len(must))]
     rng.shuffle(keep)
     new_tgt = keep.index(tgt)
     slot_z = LM.stack_payloads([payloads[i] for i in keep])       # [K_cur, m, d]
     return slot_z, new_tgt, keep
+
+
+def evidence_slot_indices(units, evidence):
+    """证据句在 units 里的下标（多跳链的每一跳）。找不到的跳过 —— 不猜。"""
+    ev = {_norm_ans(e) for e in (evidence or [])}
+    if not ev:
+        return []
+    return [i for i, u in enumerate(units) if _norm_ans(u) in ev]
 
 
 def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
@@ -1025,9 +1039,12 @@ def train(args):
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
                 tgt_slot = target_slot_index(item_units(item), item["answer"],
                                              evidence=item.get("evidence"))
+                # 多跳：证据链每一跳都必须留在候选里（否则链被剪断），
+                # 其余槽位按课程随机丢 —— 这一步是"变槽数"能真正生效的关键。
                 slot_z, tgt_slot, _keep = sample_slot_subset(
                     payloads, tgt_slot, rng_slots, args.max_slots or None,
-                    keep_all=(int(item.get("hops", 1) or 1) > 1))
+                    must_keep=evidence_slot_indices(item_units(item),
+                                                    item.get("evidence")))
                 if args.freeze_compressor:
                     slot_z = slot_z.detach()
                 q_feat = query_feature_cached(model, tokenizer, item["question"],

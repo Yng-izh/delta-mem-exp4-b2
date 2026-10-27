@@ -15,6 +15,7 @@
 """
 import contextlib
 import os
+import random
 import sys
 import types
 
@@ -178,9 +179,51 @@ def test_delta_write_restore():
         restore()
 
 
+def test_slot_curriculum():
+    """R1–R5：变槽数课程的三个不变量（写错不会报错，只会让 Router 停在 chance）。"""
+    payloads = [torch.zeros(1, 4, 8) for _ in range(23)]
+    for i, p in enumerate(payloads):
+        p.fill_(float(i))                       # 用填充值当"身份"，便于核对保留下来的槽
+
+    rng = random.Random(0)
+    seen_sizes = set()
+    for _ in range(200):
+        slot_z, new_tgt, keep = T.sample_slot_subset(
+            payloads, 7, rng, max_slots=8, must_keep=[7, 11])
+        seen_sizes.add(len(keep))
+        if not ({7, 11} <= set(keep)):
+            break
+        if float(slot_z[new_tgt][0, 0]) != 7.0:
+            break
+    ok("R1 must_keep 与目标槽始终保留、且 new_tgt 指向目标槽",
+        {7, 11} <= set(keep) and float(slot_z[new_tgt][0, 0]) == 7.0)
+    ok("R2 变槽数课程真正生效（样本内槽数 < 总槽数，且不止一种取值）",
+       max(seen_sizes) <= 8 and len(seen_sizes) > 1, extra=f"sizes={sorted(seen_sizes)}")
+    ok("R3 抽到的槽位按需截断到 max_slots（多一点：must_keep 优先）",
+       max(seen_sizes) <= 8)
+
+    # R4：没有 must_keep 时也必含目标
+    rng2 = random.Random(1)
+    for _ in range(50):
+        slot_z, new_tgt, keep = T.sample_slot_subset(payloads, 3, rng2, max_slots=4)
+        assert 3 in keep and float(slot_z[new_tgt][0, 0]) == 3.0
+
+    # R5：keep_all 仍然全留（兼容旧行为）
+    slot_z, new_tgt, keep = T.sample_slot_subset(payloads, 5, random.Random(2),
+                                                 keep_all=True)
+    ok("R5 keep_all=True 仍保留全部 23 槽", len(keep) == 23)
+
+    # R6：证据下标解析（多跳链的每一跳）
+    units = ["A one.", "B two.", "C three."]
+    idx = T.evidence_slot_indices(units, ["C three.", "A one."])
+    ok("R6 evidence_slot_indices 返回全部命中的跳", sorted(idx) == [0, 2], extra=str(idx))
+    ok("R7 无 evidence 时返回空（不猜）", T.evidence_slot_indices(units, []) == [])
+
+
 def main():
     test_assemble_loss()
     test_delta_write_restore()
+    test_slot_curriculum()
     print("=" * 70)
     if FAILS:
         print(f"FAILED {len(FAILS)}/{N_OK + len(FAILS)}: {FAILS}")
