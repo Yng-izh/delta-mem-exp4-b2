@@ -1,0 +1,45 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=8 lr=0.0001 accum=1 kl=0.0 recon=1.0 smoke=False dry_run=True
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:06<40:00,  6.05s/it]Loading weights:   3%|▎         | 10/398 [00:06<02:54,  2.23it/s]Loading weights:   4%|▍         | 15/398 [00:06<01:43,  3.70it/s]Loading weights:   5%|▌         | 20/398 [00:06<01:06,  5.67it/s]Loading weights:   6%|▋         | 25/398 [00:06<00:48,  7.71it/s]Loading weights:   7%|▋         | 29/398 [00:06<00:42,  8.64it/s]Loading weights:   9%|▉         | 36/398 [00:07<00:27, 13.38it/s]Loading weights:  10%|█         | 40/398 [00:07<00:23, 14.98it/s]Loading weights:  12%|█▏        | 47/398 [00:07<00:17, 20.51it/s]Loading weights:  13%|█▎        | 51/398 [00:07<00:15, 22.39it/s]Loading weights:  15%|█▍        | 58/398 [00:07<00:11, 28.52it/s]Loading weights:  16%|█▌        | 63/398 [00:07<00:10, 30.72it/s]Loading weights:  17%|█▋        | 69/398 [00:07<00:09, 34.68it/s]Loading weights:  19%|█▊        | 74/398 [00:08<00:10, 32.30it/s]Loading weights:  20%|██        | 81/398 [00:08<00:08, 35.73it/s]Loading weights:  22%|██▏       | 86/398 [00:08<00:08, 38.63it/s]Loading weights:  23%|██▎       | 91/398 [00:08<00:07, 40.38it/s]Loading weights:  24%|██▍       | 96/398 [00:08<00:07, 39.85it/s]Loading weights:  26%|██▌       | 102/398 [00:08<00:07, 42.00it/s]Loading weights:  27%|██▋       | 107/398 [00:08<00:07, 40.72it/s]Loading weights:  28%|██▊       | 113/398 [00:08<00:06, 42.44it/s]Loading weights:  30%|██▉       | 118/398 [00:09<00:06, 41.07it/s]Loading weights:  31%|███       | 124/398 [00:09<00:06, 41.90it/s]Loading weights:  32%|███▏      | 129/398 [00:09<00:06, 39.56it/s]Loading weights:  34%|███▍      | 135/398 [00:09<00:06, 42.92it/s]Loading weights:  35%|███▌      | 140/398 [00:09<00:06, 41.83it/s]Loading weights:  37%|███▋      | 146/398 [00:09<00:05, 43.31it/s]Loading weights:  38%|███▊      | 151/398 [00:09<00:05, 41.49it/s]Loading weights:  39%|███▉      | 156/398 [00:10<00:05, 41.08it/s]Loading weights:  40%|████      | 161/398 [00:10<00:06, 36.44it/s]Loading weights:  42%|████▏     | 168/398 [00:10<00:06, 33.94it/s]Loading weights:  43%|████▎     | 172/398 [00:10<00:06, 34.64it/s]Loading weights:  45%|████▍     | 178/398 [00:10<00:05, 39.73it/s]Loading weights:  46%|████▌     | 183/398 [00:10<00:07, 30.50it/s]Loading weights:  48%|████▊     | 190/398 [00:11<00:06, 33.99it/s]Loading weights:  49%|████▊     | 194/398 [00:11<00:06, 31.89it/s]Loading weights:  51%|█████     | 201/398 [00:11<00:05, 36.72it/s]Loading weights:  52%|█████▏    | 205/398 [00:11<00:05, 34.46it/s]Loading weights:  53%|█████▎    | 211/398 [00:11<00:05, 35.42it/s]Loading weights:  54%|█████▍    | 215/398 [00:11<00:05, 32.13it/s]Loading weights:  56%|█████▌    | 221/398 [00:12<00:05, 30.07it/s]Loading weights:  58%|█████▊    | 229/398 [00:12<00:04, 38.76it/s]Loading weights:  59%|█████▉    | 235/398 [00:12<00:04, 37.33it/s]Loading weights:  60%|██████    | 240/398 [00:12<00:04, 36.25it/s]Loading weights:  62%|██████▏   | 246/398 [00:12<00:04, 31.00it/s]Loading weights:  64%|██████▍   | 256/398 [00:12<00:03, 40.61it/s]Loading weights:  66%|██████▌   | 261/398 [00:13<00:03, 40.40it/s]Loading weights:  67%|██████▋   | 267/398 [00:13<00:03, 40.18it/s]Loading weights:  68%|██████▊   | 272/398 [00:13<00:03, 36.63it/s]Loading weights:  70%|██████▉   | 278/398 [00:13<00:03, 39.13it/s]Loading weights:  71%|███████   | 283/398 [00:13<00:03, 36.35it/s]Loading weights:  72%|███████▏  | 287/398 [00:13<00:03, 32.15it/s]Loading weights:  73%|███████▎  | 291/398 [00:13<00:03, 30.52it/s]Loading weights:  75%|███████▌  | 300/398 [00:14<00:02, 40.29it/s]Loading weights:  77%|███████▋  | 305/398 [00:14<00:02, 37.01it/s]Loading weights:  78%|███████▊  | 311/398 [00:14<00:02, 37.87it/s]Loading weights:  79%|███████▉  | 315/398 [00:14<00:02, 31.19it/s]Loading weights:  80%|████████  | 320/398 [00:14<00:02, 34.76it/s]Loading weights:  81%|████████▏ | 324/398 [00:15<00:03, 24.52it/s]Loading weights:  84%|████████▎ | 333/398 [00:15<00:02, 32.11it/s]Loading weights:  85%|████████▍ | 337/398 [00:15<00:01, 31.83it/s]Loading weights:  86%|████████▋ | 344/398 [00:15<00:01, 35.94it/s]Loading weights:  87%|████████▋ | 348/398 [00:15<00:01, 34.28it/s]Loading weights:  89%|████████▉ | 355/398 [00:15<00:01, 37.03it/s]Loading weights:  90%|█████████ | 359/398 [00:15<00:01, 31.12it/s]Loading weights:  91%|█████████ | 363/398 [00:16<00:01, 31.10it/s]Loading weights:  92%|█████████▏| 367/398 [00:16<00:01, 25.65it/s]Loading weights:  93%|█████████▎| 372/398 [00:16<00:00, 29.11it/s]Loading weights:  95%|█████████▍| 377/398 [00:16<00:00, 32.31it/s]Loading weights:  96%|█████████▌| 381/398 [00:16<00:00, 29.50it/s]Loading weights:  97%|█████████▋| 386/398 [00:16<00:00, 33.36it/s]Loading weights:  98%|█████████▊| 390/398 [00:17<00:00, 24.24it/s]Loading weights: 100%|██████████| 398/398 [00:17<00:00, 23.13it/s]
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+/share/exp4group/train_latent_memory.py:740: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+[router] LatentRouter 启用：d_key=256 τ0=0.0700 addr_weight=1.0
+[params] 可训练 14.375M (compressor=4.994M, bridge=2.630M, router=6.752M)
+[data] synth/latent_exp2_train.jsonl: train=200 val=64 hops={1: 200} 平均记忆单元=4.0
+[data] 例：units=['Harish is married to Elian.', 'Fenik is married to Taron.', 'Branish founded Ondrey.'] q='What did Branish found?' a='Ondrey'
+[dry-run] 数据/模型/参数已就绪，开始一次前向+反向自检（不写 checkpoint）
+  [eval@0] ✗ q='Where did Quinurd study?' gold='Duvhal' pred='Unknown'
+  [eval@0] ✗ q='Where did Quinurd study?' gold='Kestmor' pred='Unknown'
+  [eval@0] ✗ q='Where does Islurd live?' gold='Perthia' pred='Islurd does not live anywhere as there is no known person or'
+  [eval@0] ✗ q='Where does Islurd live?' gold='Duvhal' pred='Islurd does not live anywhere as there is no known person or'
+[eval@0] pair-acc=0/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.0 (n=4) gnorm_comp=6.186e+02 gnorm_bridge=2.668e+02 gnorm_router=2.928e+01
+[step 1] loss_qa=10.1250 loss_kl=n/a loss_addr=1.0612 soft_tokens=4 compress=0.705882 gnorm_comp=6.186e+02 gnorm_bridge=2.668e+02 gnorm_router=2.928e+01 (8s)
+[step 2] loss_qa=8.3750 loss_kl=n/a loss_addr=6.0864 soft_tokens=4 compress=0.606061 gnorm_comp=1.736e+02 gnorm_bridge=6.622e+01 gnorm_router=1.090e+02 (10s)
+  [eval@2] ✗ q='Where did Quinurd study?' gold='Duvhal' pred='Unknown'
+  [eval@2] ✗ q='Where did Quinurd study?' gold='Kestmor' pred='Unknown'
+  [eval@2] ✗ q='Where does Islurd live?' gold='Perthia' pred='Islurd does not live anywhere as there is no known person or'
+  [eval@2] ✗ q='Where does Islurd live?' gold='Duvhal' pred='Islurd does not live anywhere as there is no known person or'
+[eval@2] pair-acc=0/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=2 full-match=0.0 (n=4) gnorm_comp=2.235e+02 gnorm_bridge=1.033e+02 gnorm_router=2.918e+01
+[step 3] loss_qa=8.5000 loss_kl=n/a loss_addr=1.4597 soft_tokens=4 compress=0.705882 gnorm_comp=2.235e+02 gnorm_bridge=1.033e+02 gnorm_router=2.918e+01 (17s)
+[step 4] loss_qa=10.7500 loss_kl=n/a loss_addr=1.5092 soft_tokens=4 compress=0.625 gnorm_comp=8.708e+01 gnorm_bridge=4.622e+01 gnorm_router=2.772e+01 (18s)
+  [eval@4] ✗ q='Where did Quinurd study?' gold='Duvhal' pred='Unknown'
+  [eval@4] ✗ q='Where did Quinurd study?' gold='Kestmor' pred='Unknown'
+  [eval@4] ✗ q='Where does Islurd live?' gold='Perthia' pred='Unknown'
+  [eval@4] ✗ q='Where does Islurd live?' gold='Duvhal' pred='Unknown'
+[eval@4] pair-acc=0/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=4 full-match=0.0 (n=4) gnorm_comp=8.213e+01 gnorm_bridge=4.396e+01 gnorm_router=4.735e+00
+[step 5] loss_qa=6.5625 loss_kl=n/a loss_addr=1.0915 soft_tokens=4 compress=0.8 gnorm_comp=8.213e+01 gnorm_bridge=4.396e+01 gnorm_router=4.735e+00 (22s)
+[step 6] loss_qa=10.0000 loss_kl=n/a loss_addr=0.8883 soft_tokens=4 compress=0.645161 gnorm_comp=6.912e+01 gnorm_bridge=3.692e+01 gnorm_router=1.526e+01 (24s)
+[grad-check] {"model_has_no_grad": true, "compressor_queries": true, "compressor_input_proj": true, "bridge_last_linear": true}
+  [eval-final] ✗ q='Where did Quinurd study?' gold='Duvhal' pred='Unknown'
+  [eval-final] ✗ q='Where did Quinurd study?' gold='Kestmor' pred='Unknown'
+  [eval-final] ✗ q='Where does Islurd live?' gold='Perthia' pred='Islurd lives in the city of Varn.'
+  [eval-final] ✗ q='Where does Islurd live?' gold='Duvhal' pred='Islurd lives in the city of Varn.'
+[eval-final] pair-acc=0/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] val full-match=0.0 (n=4) —— 规范化完整答案匹配（不再是子串匹配）
+[dry-run] OK：通路验证完成（119.3s），未写 checkpoint

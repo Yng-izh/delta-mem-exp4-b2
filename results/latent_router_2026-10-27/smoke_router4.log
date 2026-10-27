@@ -1,0 +1,59 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0005 accum=1 kl=0.0 recon=0.0 smoke=False dry_run=True
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<06:21,  1.04it/s]Loading weights:   1%|          | 4/398 [00:01<01:24,  4.68it/s]Loading weights:   3%|▎         | 11/398 [00:01<00:27, 14.14it/s]Loading weights:   4%|▍         | 15/398 [00:01<00:24, 15.88it/s]Loading weights:   5%|▌         | 20/398 [00:01<00:19, 19.52it/s]Loading weights:   6%|▋         | 25/398 [00:01<00:14, 24.96it/s]Loading weights:   7%|▋         | 29/398 [00:01<00:14, 26.34it/s]Loading weights:   8%|▊         | 33/398 [00:01<00:13, 27.14it/s]Loading weights:  10%|▉         | 38/398 [00:02<00:11, 30.55it/s]Loading weights:  12%|█▏        | 47/398 [00:02<00:08, 40.32it/s]Loading weights:  13%|█▎        | 52/398 [00:02<00:08, 39.25it/s]Loading weights:  15%|█▍        | 58/398 [00:02<00:08, 41.76it/s]Loading weights:  16%|█▌        | 63/398 [00:02<00:08, 40.37it/s]Loading weights:  17%|█▋        | 69/398 [00:02<00:07, 41.94it/s]Loading weights:  19%|█▊        | 74/398 [00:02<00:09, 33.35it/s]Loading weights:  20%|█▉        | 78/398 [00:03<00:09, 34.36it/s]Loading weights:  21%|██        | 82/398 [00:03<00:09, 33.63it/s]Loading weights:  23%|██▎       | 91/398 [00:03<00:07, 42.90it/s]Loading weights:  24%|██▍       | 96/398 [00:03<00:07, 41.17it/s]Loading weights:  25%|██▌       | 101/398 [00:03<00:07, 40.77it/s]Loading weights:  27%|██▋       | 106/398 [00:03<00:07, 40.92it/s]Loading weights:  28%|██▊       | 113/398 [00:03<00:06, 43.88it/s]Loading weights:  30%|██▉       | 118/398 [00:04<00:07, 39.43it/s]Loading weights:  31%|███       | 124/398 [00:04<00:07, 36.40it/s]Loading weights:  32%|███▏      | 128/398 [00:04<00:08, 33.05it/s]Loading weights:  34%|███▍      | 135/398 [00:04<00:06, 37.84it/s]Loading weights:  35%|███▍      | 139/398 [00:04<00:07, 36.15it/s]Loading weights:  37%|███▋      | 146/398 [00:04<00:06, 40.35it/s]Loading weights:  38%|███▊      | 151/398 [00:04<00:06, 39.74it/s]Loading weights:  39%|███▉      | 157/398 [00:05<00:05, 41.27it/s]Loading weights:  41%|████      | 162/398 [00:05<00:05, 40.19it/s]Loading weights:  42%|████▏     | 168/398 [00:05<00:06, 34.94it/s]Loading weights:  43%|████▎     | 172/398 [00:05<00:06, 34.09it/s]Loading weights:  44%|████▍     | 176/398 [00:05<00:07, 31.10it/s]Loading weights:  45%|████▌     | 181/398 [00:05<00:06, 35.06it/s]Loading weights:  47%|████▋     | 189/398 [00:05<00:05, 41.60it/s]Loading weights:  49%|████▊     | 194/398 [00:06<00:04, 41.05it/s]Loading weights:  51%|█████     | 201/398 [00:06<00:05, 38.73it/s]Loading weights:  53%|█████▎    | 209/398 [00:06<00:04, 45.29it/s]Loading weights:  54%|█████▍    | 214/398 [00:06<00:04, 38.23it/s]Loading weights:  56%|█████▌    | 223/398 [00:06<00:03, 46.15it/s]Loading weights:  57%|█████▋    | 228/398 [00:06<00:03, 43.76it/s]Loading weights:  59%|█████▊    | 233/398 [00:06<00:03, 42.72it/s]Loading weights:  60%|█████▉    | 238/398 [00:07<00:03, 41.95it/s]Loading weights:  62%|██████▏   | 245/398 [00:07<00:03, 45.06it/s]Loading weights:  63%|██████▎   | 250/398 [00:07<00:03, 38.35it/s]Loading weights:  64%|██████▍   | 255/398 [00:07<00:04, 32.02it/s]Loading weights:  66%|██████▋   | 264/398 [00:07<00:03, 40.81it/s]Loading weights:  68%|██████▊   | 269/398 [00:07<00:03, 34.63it/s]Loading weights:  69%|██████▉   | 276/398 [00:08<00:03, 30.94it/s]Loading weights:  73%|███████▎  | 289/398 [00:08<00:02, 45.81it/s]Loading weights:  74%|███████▍  | 295/398 [00:08<00:02, 42.51it/s]Loading weights:  76%|███████▌  | 301/398 [00:08<00:02, 41.24it/s]Loading weights:  77%|███████▋  | 308/398 [00:08<00:02, 44.22it/s]Loading weights:  79%|███████▊  | 313/398 [00:09<00:02, 37.81it/s]Loading weights:  81%|████████  | 322/398 [00:09<00:01, 44.52it/s]Loading weights:  82%|████████▏ | 327/398 [00:09<00:01, 42.59it/s]Loading weights:  84%|████████▎ | 333/398 [00:09<00:01, 43.64it/s]Loading weights:  85%|████████▍ | 338/398 [00:09<00:01, 42.06it/s]Loading weights:  86%|████████▋ | 344/398 [00:09<00:01, 43.58it/s]Loading weights:  88%|████████▊ | 349/398 [00:09<00:01, 42.45it/s]Loading weights:  89%|████████▉ | 354/398 [00:09<00:01, 41.39it/s]Loading weights:  90%|█████████ | 359/398 [00:10<00:00, 41.23it/s]Loading weights:  92%|█████████▏| 365/398 [00:10<00:00, 41.97it/s]Loading weights:  93%|█████████▎| 370/398 [00:10<00:00, 41.32it/s]Loading weights:  95%|█████████▍| 377/398 [00:10<00:00, 38.72it/s]Loading weights:  96%|█████████▋| 384/398 [00:10<00:00, 42.74it/s]Loading weights:  98%|█████████▊| 389/398 [00:10<00:00, 35.85it/s]Loading weights:  99%|█████████▉| 394/398 [00:10<00:00, 38.71it/s]Loading weights: 100%|██████████| 398/398 [00:11<00:00, 36.12it/s]
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+/share/exp4group/train_latent_memory.py:725: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+[router] LatentRouter 启用：d_key=256 τ0=0.0700 addr_weight=1.0
+[params] 可训练 14.375M (compressor=4.994M, bridge=2.630M)
+[data] synth/latent_exp2_train.jsonl: train=200 val=64 hops={1: 200} 平均记忆单元=4.0
+[data] 例：units=['Harish is married to Elian.', 'Fenik is married to Taron.', 'Branish founded Ondrey.'] q='What did Branish found?' a='Ondrey'
+[dry-run] 数据/模型/参数已就绪，开始一次前向+反向自检（不写 checkpoint）
+[step 1] loss_qa=9.6875 loss_kl=n/a loss_addr=0.6771 soft_tokens=16 compress=0.470588 gnorm_comp=3.862e+02 gnorm_bridge=2.871e+02 gnorm_router=6.134e+00 (2s)
+[step 2] loss_qa=9.3750 loss_kl=n/a loss_addr=1.3319 soft_tokens=16 compress=0.484848 gnorm_comp=3.461e+01 gnorm_bridge=2.630e+01 gnorm_router=5.502e+00 (3s)
+[step 3] loss_qa=9.3750 loss_kl=n/a loss_addr=0.9388 soft_tokens=16 compress=0.470588 gnorm_comp=2.615e+01 gnorm_bridge=1.960e+01 gnorm_router=2.945e+00 (4s)
+[step 4] loss_qa=11.4375 loss_kl=n/a loss_addr=1.4163 soft_tokens=16 compress=0.5 gnorm_comp=1.192e+01 gnorm_bridge=5.211e+00 gnorm_router=4.268e+00 (5s)
+[step 5] loss_qa=8.8750 loss_kl=n/a loss_addr=1.0925 soft_tokens=16 compress=0.457143 gnorm_comp=2.278e+01 gnorm_bridge=4.806e+01 gnorm_router=3.298e-01 (6s)
+[step 6] loss_qa=11.6250 loss_kl=n/a loss_addr=1.1171 soft_tokens=16 compress=0.516129 gnorm_comp=3.386e+00 gnorm_bridge=9.118e+00 gnorm_router=4.839e-01 (7s)
+[step 7] loss_qa=11.8750 loss_kl=n/a loss_addr=1.0740 soft_tokens=16 compress=0.516129 gnorm_comp=6.503e+00 gnorm_bridge=2.033e+01 gnorm_router=5.406e-01 (8s)
+[step 8] loss_qa=6.6875 loss_kl=n/a loss_addr=1.1388 soft_tokens=16 compress=0.470588 gnorm_comp=1.191e+00 gnorm_bridge=4.997e+00 gnorm_router=7.208e-01 (9s)
+[step 9] loss_qa=13.3750 loss_kl=n/a loss_addr=0.6839 soft_tokens=16 compress=0.457143 gnorm_comp=4.300e-01 gnorm_bridge=1.774e+00 gnorm_router=3.379e-01 (10s)
+[step 10] loss_qa=15.5625 loss_kl=n/a loss_addr=0.6739 soft_tokens=16 compress=0.533333 gnorm_comp=5.750e-01 gnorm_bridge=2.405e+00 gnorm_router=5.312e-01 (11s)
+[grad-check] {"model_has_no_grad": true, "compressor_queries": true, "compressor_input_proj": true, "bridge_last_linear": true}
+  [eval-final] ✗ q='Where did Quinurd study?' gold='Duvhal' pred='Unknown'
+  [eval-final] ✗ q='Where did Quinurd study?' gold='Kestmor' pred='Unknown'
+  [eval-final] ✗ q='Where does Islurd live?' gold='Perthia' pred='Islurd does not live anywhere as there is no known public fi'
+  [eval-final] ✗ q='Where does Islurd live?' gold='Duvhal' pred='Islurd does not live anywhere as there is no known public fi'
+  [eval-final] ✗ q='Where does Selolt live?' gold='Vandhe' pred='Unknown'
+  [eval-final] ✗ q='Where does Selolt live?' gold='Haldwyn' pred='Unknown'
+  [eval-final] ✗ q='What did Jorana found?' gold='Nivora' pred='Jorana founded nothing notable. The name may be a misspellin'
+  [eval-final] ✗ q='What did Jorana found?' gold='Ondrey' pred='Jorana founded nothing notable. The name may be a misspellin'
+  [eval-final] ✗ q='What did Branald found?' gold='Brackline' pred='Branald founded the company **Branald Technologies**.'
+  [eval-final] ✗ q='What did Branald found?' gold='Velcor' pred='Branald founded the company **Branald Technologies**.'
+  [eval-final] ✗ q='Where did Selent study?' gold='Kestmor' pred='Selent studied at the University of Pennsylvania.'
+  [eval-final] ✗ q='Where did Selent study?' gold='Haldwyn' pred='Selent studied at the University of Pennsylvania.'
+  [eval-final] ✗ q='What did Quinesk found?' gold='Talquin' pred='Quinesk did not found anything notable. The name may be a co'
+  [eval-final] ✗ q='What did Quinesk found?' gold='Velcor' pred='Quinesk did not found anything notable. The name may be a co'
+  [eval-final] ✗ q='Where was Tarrik born?' gold='Ostrel' pred='Tarrik was born in the United States.'
+  [eval-final] ✗ q='Where was Tarrik born?' gold='Duvhal' pred='Tarrik was born in the United States.'
+  [eval-final] ✗ q='What did Veyrik found?' gold='Nivora' pred='Veyrik founded the Veyrik Group, a company involved in real '
+  [eval-final] ✗ q='What did Veyrik found?' gold='Talquin' pred='Veyrik founded the Veyrik Group, a company involved in real '
+  [eval-final] ✗ q='Where does Pieyn work?' gold='Velcor' pred="I don't know who specifically you mean. If this is a questio"
+  [eval-final] ✗ q='Where does Pieyn work?' gold='Ondrey' pred="I don't know who specifically you mean. If this is a questio"
+  [eval-final] ✗ q='Where does Fenovi live?' gold='Perthia' pred='Fenovi lives in the forest.'
+  [eval-final] ✗ q='Where does Fenovi live?' gold='Vandhe' pred='Fenovi lives in the forest.'
+  [eval-final] ✗ q='What did Fenurd found?' gold='Fenwick' pred='Fenurd founded nothing notable. The name may be a confusion '
+  [eval-final] ✗ q='What did Fenurd found?' gold='Nivora' pred='Fenurd founded nothing notable. The name may be a confusion '
+  [eval-final] ✗ q='Where did Yunald study?' gold='Vandhe' pred='Yunald studied at the University of California, Los Angeles '
+  [eval-final] ✗ q='Where did Yunald study?' gold='Haldwyn' pred='Yunald studied at the University of California, Los Angeles '
+  [eval-final] ✗ q='Where does Veyent work?' gold='Ondrey' pred='Veyent works in San Jose, California.'
+  [eval-final] ✗ q='Where does Veyent work?' gold='Talquin' pred='Veyent works in San Jose, California.'
+  [eval-final] ✗ q='Where was Branent born?' gold='Kestmor' pred='Branent was not born anywhere as there is no known historica'
+  [eval-final] ✗ q='Where was Branent born?' gold='Vandhe' pred='Branent was not born anywhere as there is no known historica'
+  [eval-final] ✗ q='What did Veyyn found?' gold='Velcor' pred='Veyyn founded nothing notable. The name may be a misspelling'
+  [eval-final] ✗ q='What did Veyyn found?' gold='Fenwick' pred='Veyyn founded nothing notable. The name may be a misspelling'
+[eval-final] pair-acc=0/16 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] val full-match=0.0 (n=32) —— 规范化完整答案匹配（不再是子串匹配）
+[dry-run] OK：通路验证完成（144.4s），未写 checkpoint

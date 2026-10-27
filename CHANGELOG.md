@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## [v9.5-latent-router] — 2026-10-27 — "17% 之谜"水落石出（4 个自伤脚本 bug）→ 位置敏感根因 → LatentRouter 重构 + 7 个自查失效修复
+
+**一句话**：训练期 17.2% 与重载后 0% 的落差**不是产品 bug**，是我自己诊断脚本的 4 个 bug；
+修干净后真相是**读出完全由"槽位排第几位"决定、与内容无关**（同一事实：单槽 15/16 → 4 槽 target_only
+仍 15/16 → 4 槽 full 1/16 → 4 槽 target_end **0/16**）。已按「键值解耦 + 集合内容寻址」重构
+`LatentRouter`，**但一步训练都没跑，效果未知**。重构后两轮自查又揪出 **7 个会静默失效的问题**
+（含 1 个我自己的设计错误），全部修复。完整记录见
+[`results/latent_router_2026-10-27/`](results/latent_router_2026-10-27/README.md)。
+
+### 一、17% 之谜：4 个自伤脚本 bug（结论：checkpoint 存取没问题）
+
+| # | Bug | 后果 |
+|---|---|---|
+| 1 | 诊断脚本硬编码 system prompt，与训练默认值不同 | 输入分布不同，指标不可比 |
+| 2 | 诊断脚本未关闭 Delta 写入 → `delta_state` 跨样本累积 | 前几条正常，之后整体崩到 0 |
+| 3 | `generate(inputs_embeds=...)` 返回序列不含输入前缀，脚本却切 `out[0, n_in:]` | 解出空串 → 假 0/32 |
+| 4 | `load_synth_jsonl` 把 `memory` 变成拼接字符串，脚本用 `memory[0]` 取到第一个**字符** | 造出 `["T","M","S"]` 畸形槽位 |
+
+已直接测量排除（全部无关）：delta_state 污染最终分数、`comp/bridge` 的 train-vs-eval 模式、
+`torch_dtype=` vs `dtype=`、`attn_implementation="sdpa"` vs `"eager"`、adapter 路径默认值、
+`load_delta_mem_adapter` 位置/关键字参数、forward 是否改写权重（722 个参数张量哈希前后一致）、
+`load_state_dict` 严格性。
+
+### 二、真正的根因（干净重测，训练同款 prompt + Delta 写入关闭 + 每条 reset）
+
+| ckpt | 条件 | 严格全匹配 | pair-acc |
+|---|---|---|---|
+| 1 事实 | 单槽 | **15/16 (93.8%)** | 7/8 |
+| 1 事实 | 4 槽 target_only（内容相同，只是外壳是 4 槽） | **15/16 (93.8%)** | — |
+| 1 事实 | 4 槽 full（+3 干扰，目标首位） | **1/16 (6.2%)** | — |
+| 1 事实 | 4 槽 target_end（目标末位） | **0/16 (0%)** | — |
+| 4 事实 | 训练集 full / 验证集 full | 79/200 (39.5%) / **11/64 (17.2%)** | 16/100 / **0/32** |
+| 4 事实 | 训练集 target_only / 验证集 target_only | **0/200 / 0/64** | 0/100 / 0/32 |
+| — | 明文 4 槽（32 条）/ Oracle（32 条） | 24/32 (75%) / 17/32 (53%) | — |
+
+三条判据：①**target_only 只喂正确那条反而 0/200**——若真在按内容寻址，这是最容易的情形；
+②1 槽 ckpt 套 4 槽外壳就崩（15/16→1/16），内容一模一样 → 纯位置效应；
+③**17.2% 低于 31.2% 的 relation-prior 基线**（6 种关系、18 个答案值，按关系猜就能到 31.2%）→ 是噪声不是能力。
+瓶颈在 **Compressor + Bridge**，不在 Reader（明文 75%、Oracle 53% 都远高于 17.2%）。
+
+### 三、重构（`latent_memory.py` / `train_latent_memory.py`）
+
+`LatentRouter`：`s_k = <q, k_in_k>/τ` 无位置内积打分；**推理 argmax 只送 1 个槽**（m 个软 token），
+让 bridge 永远看到 Phase 1 单槽形状 → 位置先验被彻底去掉。键值解耦：`k_in` 编码主语+关系（寻址）、
+`k_out` 编码客体值（多跳接力 `chain()`）。查询取 `[L0 mean ‖ L18 mean]`（词形 + 语境）。
+训练侧新增 `--router/--d-key/--addr-weight/--freeze-compressor/--max-slots`，
+`sample_slot_subset` 做变槽数 + 随机顺序（必含目标槽），`loss_addr` 显式监督寻址。
+
+### 四、两轮自查揪出的 7 个失效（含 1 个我自己的设计错误）
+
+| # | 问题 | 证据 |
+|---|---|---|
+| 1 | **软门控聚合做训练前向，与推理硬选不同分布**（我的设计错误） | `‖z_soft‖=61.9` vs `‖z_hard‖=100.2`，距离 54.6%，`w=[0.18,0.05,0.23,0.54]` 远非 one-hot。改为直通估计 `z_hard + (z_soft - z_soft.detach())`，前向与推理逐位相同 |
+| 2 | 原有的 `torch.as_tensor(payloads)` 短路新加的 stack 分支 | 多块列表下 `ValueError: only one element tensors can be converted to scalars` |
+| 3 | 槽边界丢失：cat 后 Σk>槽数时把"块"当"槽" | 4 槽其中 1 槽切 2 块 → `cat=(5,4,2560)` 当成 5 个槽 |
+| 4 | 评测管线不传 router（`run_ar_v7`/`run_group_b2_v7`） | Phase 2 ckpt 会退回 K*m 裸拼，位置敏感原样复现 |
+| 5 | `evaluate_recon` 不走路由 | 训练 recon 用 4 token，评估用 16 token，口径不一致 |
+| 6 | 多跳样本被随机丢槽会剪断推理链 | 现有数据全 `hops=1`，此路径未验证 |
+| 7 | **寻址监督 13.5% 标签是错的**：`target_slot_index` 只用答案串匹配，而 22.5% 的样本答案值在干扰事实里也出现 | 27/200 标错槽位；`loss_addr` 把 router 往错方向训且损失照样下降。根因是 `load_synth_jsonl` 丢了 `evidence`。修后 200→0、64→0 |
+
+### 五、验证
+
+- `tests/test_latent_readout.py` **86 → 89 项全过**（A1 白名单纳入 `router/q_feat/layer/hops` 并保留明文禁令；新增 A8 有 router 时 `n_soft=m`、A9 `routed` 下标、A10 `n_slots_in`）。
+- 真实 Qwen3-4B + Delta-Mem 端到端：`slot_z=(4,4,2560)`、`logits=(1,4)`、`chain(hops=2)=[0,1]`、`n_soft=4`（hops=1）/`9`（hops=2 含换行）、无 router 回归 `n_soft=16`、ckpt 往返 `has_router→d_key=256`、老 ckpt `router=None`。
+- `--max-unit-tokens 8` 强制多块：修复后 `soft_tokens=4`（槽边界保住）。
+- Phase 2 冻结：`gnorm_comp=0.000e+00`；init ckpt 在 router 随机初始化下仍 3/4（未破坏已有通路）。
+- 4 槽训练冒烟：`loss_addr` 0.68→1.33→0.67、`gnorm_router` 6.1→0.53（梯度确实存在）。
+
+### 六、新增文档
+
+[`DATASETS.md`](DATASETS.md)（数据盘点：3 套在用 / 5 套未用 / 0 外部 benchmark / 3 个缺口 / 2 个数据缺陷）
+与 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)（9 条未修问题，含 P0 的 `delta_write_disabled` 永久关写）。
+
+### 七、明确没有做的事
+
+**一步训练都没跑**，所以"路由能否救回 4 槽"无任何证据；多跳 `chain` 无真实数据验证；
+bottleneck 未扩容（512 未动，单槽已 93.8%，瓶颈不是容量）；评测管线 3 处已知修复未动。
+
 ## [v9.4-latent-gpu-run] — 2026-10-22 — 阶段 A 首次真机训练：跑完但没学会（0/32），瓶颈定位到压缩器
 
 **一句话**：在 v100-2 上用 15,000 条合成语料跑完 1,875 步（3.7 h），loss_qa 12.6→3.87，

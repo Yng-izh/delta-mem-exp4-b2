@@ -1,0 +1,59 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0005 accum=4 kl=0.0 recon=1.0 smoke=False dry_run=True
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:01<08:46,  1.33s/it]Loading weights:   1%|          | 2/398 [00:01<04:13,  1.56it/s]Loading weights:   2%|▏         | 9/398 [00:01<00:42,  9.19it/s]Loading weights:   4%|▎         | 14/398 [00:01<00:26, 14.57it/s]Loading weights:   5%|▍         | 18/398 [00:01<00:22, 16.87it/s]Loading weights:   6%|▌         | 23/398 [00:02<00:19, 18.88it/s]Loading weights:   7%|▋         | 26/398 [00:02<00:23, 16.10it/s]Loading weights:   7%|▋         | 29/398 [00:02<00:21, 16.99it/s]Loading weights:   8%|▊         | 32/398 [00:02<00:19, 18.54it/s]Loading weights:   9%|▉         | 37/398 [00:02<00:16, 22.49it/s]Loading weights:  10%|█         | 40/398 [00:02<00:15, 22.78it/s]Loading weights:  11%|█▏        | 45/398 [00:03<00:12, 28.37it/s]Loading weights:  12%|█▏        | 49/398 [00:03<00:15, 22.33it/s]Loading weights:  15%|█▍        | 58/398 [00:03<00:10, 31.23it/s]Loading weights:  16%|█▌        | 62/398 [00:03<00:11, 29.76it/s]Loading weights:  17%|█▋        | 69/398 [00:03<00:09, 33.96it/s]Loading weights:  18%|█▊        | 73/398 [00:03<00:09, 32.74it/s]Loading weights:  20%|██        | 80/398 [00:04<00:08, 36.71it/s]Loading weights:  21%|██        | 84/398 [00:04<00:09, 31.87it/s]Loading weights:  23%|██▎       | 91/398 [00:04<00:08, 34.48it/s]Loading weights:  24%|██▍       | 95/398 [00:04<00:09, 32.32it/s]Loading weights:  26%|██▌       | 102/398 [00:04<00:08, 34.58it/s]Loading weights:  27%|██▋       | 106/398 [00:04<00:09, 31.50it/s]Loading weights:  28%|██▊       | 112/398 [00:05<00:07, 36.41it/s]Loading weights:  29%|██▉       | 116/398 [00:05<00:09, 29.64it/s]Loading weights:  30%|███       | 120/398 [00:05<00:08, 31.64it/s]Loading weights:  31%|███▏      | 125/398 [00:05<00:09, 28.95it/s]Loading weights:  33%|███▎      | 130/398 [00:05<00:08, 31.91it/s]Loading weights:  34%|███▍      | 135/398 [00:05<00:07, 34.81it/s]Loading weights:  35%|███▍      | 139/398 [00:05<00:08, 30.71it/s]Loading weights:  36%|███▋      | 145/398 [00:06<00:07, 33.06it/s]Loading weights:  37%|███▋      | 149/398 [00:06<00:08, 30.70it/s]Loading weights:  39%|███▉      | 157/398 [00:06<00:06, 36.06it/s]Loading weights:  40%|████      | 161/398 [00:06<00:07, 32.77it/s]Loading weights:  42%|████▏     | 168/398 [00:06<00:07, 31.41it/s]Loading weights:  43%|████▎     | 172/398 [00:07<00:07, 29.36it/s]Loading weights:  44%|████▍     | 177/398 [00:07<00:06, 33.21it/s]Loading weights:  45%|████▌     | 181/398 [00:07<00:09, 23.76it/s]Loading weights:  48%|████▊     | 190/398 [00:07<00:06, 32.27it/s]Loading weights:  49%|████▊     | 194/398 [00:07<00:06, 29.79it/s]Loading weights:  50%|████▉     | 198/398 [00:07<00:07, 27.44it/s]Loading weights:  51%|█████     | 203/398 [00:08<00:06, 28.49it/s]Loading weights:  53%|█████▎    | 210/398 [00:08<00:05, 36.12it/s]Loading weights:  54%|█████▍    | 215/398 [00:08<00:05, 32.27it/s]Loading weights:  56%|█████▌    | 223/398 [00:08<00:04, 38.41it/s]Loading weights:  57%|█████▋    | 228/398 [00:08<00:04, 37.74it/s]Loading weights:  59%|█████▉    | 234/398 [00:08<00:04, 38.98it/s]Loading weights:  60%|██████    | 239/398 [00:08<00:04, 35.72it/s]Loading weights:  62%|██████▏   | 245/398 [00:09<00:03, 39.64it/s]Loading weights:  63%|██████▎   | 250/398 [00:09<00:03, 38.36it/s]Loading weights:  64%|██████▍   | 256/398 [00:09<00:03, 39.01it/s]Loading weights:  65%|██████▌   | 260/398 [00:09<00:03, 35.83it/s]Loading weights:  67%|██████▋   | 267/398 [00:09<00:03, 39.08it/s]Loading weights:  68%|██████▊   | 271/398 [00:09<00:03, 35.87it/s]Loading weights:  70%|██████▉   | 278/398 [00:09<00:03, 38.38it/s]Loading weights:  71%|███████   | 282/398 [00:10<00:03, 35.52it/s]Loading weights:  73%|███████▎  | 289/398 [00:10<00:02, 39.15it/s]Loading weights:  74%|███████▎  | 293/398 [00:10<00:02, 36.23it/s]Loading weights:  75%|███████▌  | 300/398 [00:10<00:02, 39.78it/s]Loading weights:  76%|███████▋  | 304/398 [00:10<00:02, 36.81it/s]Loading weights:  78%|███████▊  | 311/398 [00:10<00:02, 39.88it/s]Loading weights:  79%|███████▉  | 315/398 [00:10<00:02, 36.34it/s]Loading weights:  81%|████████  | 321/398 [00:11<00:02, 37.35it/s]Loading weights:  82%|████████▏ | 325/398 [00:11<00:02, 34.17it/s]Loading weights:  84%|████████▎ | 333/398 [00:11<00:01, 40.53it/s]Loading weights:  85%|████████▍ | 338/398 [00:11<00:01, 36.52it/s]Loading weights:  86%|████████▋ | 344/398 [00:11<00:01, 40.87it/s]Loading weights:  88%|████████▊ | 349/398 [00:11<00:01, 38.92it/s]Loading weights:  89%|████████▉ | 355/398 [00:12<00:01, 40.20it/s]Loading weights:  90%|█████████ | 360/398 [00:12<00:01, 36.04it/s]Loading weights:  92%|█████████▏| 366/398 [00:12<00:00, 41.00it/s]Loading weights:  93%|█████████▎| 371/398 [00:12<00:00, 38.08it/s]Loading weights:  94%|█████████▍| 376/398 [00:12<00:00, 37.46it/s]Loading weights:  95%|█████████▌| 380/398 [00:12<00:00, 33.12it/s]Loading weights:  97%|█████████▋| 387/398 [00:12<00:00, 34.64it/s]Loading weights:  98%|█████████▊| 391/398 [00:13<00:00, 32.18it/s]Loading weights: 100%|██████████| 398/398 [00:13<00:00, 30.26it/s]
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+/share/exp4group/train_latent_memory.py:725: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+[router] LatentRouter 启用：d_key=256 τ0=0.0700 addr_weight=1.0（Compressor 主干冻结）
+[init] 从 ckpt/latent_min16_v2.pt 初始化（阶段 B 常规做法）
+[freeze] Compressor 主干已冻结（只训 Router + Bridge）
+[params] 可训练 9.381M (compressor=4.994M, bridge=2.630M)
+[data][warn] 切分不干净：问句完全相同 8 条（如 ['what did ravik tolmstead found?', 'what does isla norvund work as?']）
+[data] synth/latent_min16.jsonl: train=16 val=16 hops={1: 16} 平均记忆单元=1.0
+[data] 例：units=['Taron Velstrik works at Velcor.'] q='Where does Taron Velstrik work?' a='Velcor'
+[dry-run] 数据/模型/参数已就绪，开始一次前向+反向自检（不写 checkpoint）
+  [eval@0] ✓ q='Where does Taron Velstrik work?' gold='Velcor' pred='Velcor'
+  [eval@0] ✗ q='Where does Taron Velstrik work?' gold='Nivora' pred='Velcor'
+  [eval@0] ✓ q='Where was Mira Quevald born?' gold='Ostrel' pred='Ostrel'
+  [eval@0] ✓ q='Where was Mira Quevald born?' gold='Vandhe' pred='Vandhe'
+[eval@0] pair-acc=1/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.75 (n=4) gnorm_comp=0.000e+00 gnorm_bridge=1.015e+00 gnorm_router=0.000e+00
+[step 1] loss_qa=0.0475 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.015e+00 gnorm_router=0.000e+00 (9s)
+[step 2] loss_qa=0.1623 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=8.745e+00 gnorm_router=0.000e+00 (13s)
+[step 3] loss_qa=0.3134 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.031e+01 gnorm_router=0.000e+00 (17s)
+[step 4] loss_qa=0.3261 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.899e+01 gnorm_router=0.000e+00 (20s)
+[step 5] loss_qa=0.2573 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.333333 gnorm_comp=0.000e+00 gnorm_bridge=6.721e+00 gnorm_router=0.000e+00 (24s)
+[step 6] loss_qa=0.2388 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.010e+01 gnorm_router=0.000e+00 (28s)
+[step 7] loss_qa=0.1451 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=8.776e+00 gnorm_router=0.000e+00 (31s)
+[step 8] loss_qa=0.5676 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=7.222e+00 gnorm_router=0.000e+00 (35s)
+[step 9] loss_qa=0.3082 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.4 gnorm_comp=0.000e+00 gnorm_bridge=1.232e+01 gnorm_router=0.000e+00 (39s)
+[step 10] loss_qa=0.3588 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=2.264e+01 gnorm_router=0.000e+00 (44s)
+  [eval@10] ✗ q='Where does Taron Velstrik work?' gold='Velcor' pred='Nivora'
+  [eval@10] ✓ q='Where does Taron Velstrik work?' gold='Nivora' pred='Nivora'
+  [eval@10] ✓ q='Where was Mira Quevald born?' gold='Ostrel' pred='Ostrel'
+  [eval@10] ✓ q='Where was Mira Quevald born?' gold='Vandhe' pred='Vandhe'
+[eval@10] pair-acc=1/2 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=10 full-match=0.75 (n=4) gnorm_comp=0.000e+00 gnorm_bridge=1.233e+01 gnorm_router=0.000e+00
+[step 11] loss_qa=0.1480 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.233e+01 gnorm_router=0.000e+00 (52s)
+[step 12] loss_qa=0.3446 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.280e+01 gnorm_router=0.000e+00 (57s)
+[step 13] loss_qa=0.0733 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=6.787e+00 gnorm_router=0.000e+00 (61s)
+[step 14] loss_qa=0.1257 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=6.503e+00 gnorm_router=0.000e+00 (66s)
+[step 15] loss_qa=0.3481 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.333333 gnorm_comp=0.000e+00 gnorm_bridge=1.421e+01 gnorm_router=0.000e+00 (70s)
+[step 16] loss_qa=0.1349 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.333333 gnorm_comp=0.000e+00 gnorm_bridge=1.280e+01 gnorm_router=0.000e+00 (75s)
+[step 17] loss_qa=0.0751 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=1.400e+01 gnorm_router=0.000e+00 (80s)
+[step 18] loss_qa=0.2511 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.363636 gnorm_comp=0.000e+00 gnorm_bridge=8.548e+00 gnorm_router=0.000e+00 (84s)
+[step 19] loss_qa=0.0573 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.333333 gnorm_comp=0.000e+00 gnorm_bridge=5.659e+00 gnorm_router=0.000e+00 (89s)
+[step 20] loss_qa=0.1361 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.4 gnorm_comp=0.000e+00 gnorm_bridge=6.490e+00 gnorm_router=0.000e+00 (93s)
+[grad-check] {"model_has_no_grad": true, "compressor_queries": false, "compressor_input_proj": false, "bridge_last_linear": true}
+Traceback (most recent call last):
+  File "/share/exp4group/train_latent_memory.py", line 1184, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/share/exp4group/train_latent_memory.py", line 1180, in main
+    return train(args)
+           ^^^^^^^^^^^
+  File "/share/exp4group/train_latent_memory.py", line 1010, in train
+    raise RuntimeError(
+RuntimeError: 梯度没有回传到 Compressor/Bridge —— 检查是否误把 student 前向放进了 torch.no_grad()，或 z 被提前 detach。

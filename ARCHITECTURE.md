@@ -4,10 +4,16 @@
 > 每个组件都带状态标记：`已实现` / `已接线·未验证` / `规划中`。
 > 指标与实验结论见 `README.md`、`CHANGELOG.md`、`experiments/`；本文只谈结构与契约。
 >
-> **最重要的一句**：潜层读出（路径 B）**代码已落地但从未训练、从未跑分**。
+> **最重要的一句**：潜层读出（路径 B）**代码已落地，多槽形态已被证伪，重构版未训练**。
 > `AR_READOUT_MODE=latent` 现在会真的把槽位压成软 token 送进 `inputs_embeds`（明文进不去），
 > 但压缩器/桥接器是随机初始化的 —— 没有 `LATENT_CKPT` 时 runner 直接报错退出。
 > 因此**目前所有指标仍来自明文 prompt 模式**，不能声称任何 latent 效果（§6）。
+>
+> 2026-10-27 更新：已用干净诊断（训练同款 prompt + Delta 写入关闭 + 每条 reset）确认
+> **多槽读出失败的原因是纯位置效应、零内容寻址**——同一事实单槽 15/16，套上 4 槽外壳即 1/16，
+> 目标挪到末位 0/16。已引入 `LatentRouter`（集合内积寻址、推理只送 1 槽）作为结构性修法，
+> **但一步训练都没跑**，能否救回无任何证据。详见
+> `results/latent_router_2026-10-27/`、`DATASETS.md`、`KNOWN_ISSUES.md`。
 
 ---
 
@@ -199,6 +205,9 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
 | CR Delta 参与查询（`CR_DELTA_MODE=off\|context\|refresh`） | 已实现·**效果未验证** | `test_cr_delta_log.py` 84 断言；三档指纹互异 |
 | 潜层读出：软 token 注入通路（位置/mask/拼接/位置编码） | 已实现·**真机验证通过** | `tools/diag_latent_capacity.py --sub oracle` 4/4（记忆原文 embedding 直接当软 token） |
 | 潜层读出：压缩器**能否编码内容** | **未达成**（真实负结果） | 重建 token-acc 22.8% vs 平凡基线 top10 19.8%；QA 0/32、200 条过拟合 1/200；加宽 m 无改善。见 `results/latent_stage_a_2026-10-21/` |
+| 潜层读出：**单槽**通路（1 事实 → 1 槽） | **已达成** | 严格全匹配 15/16、反事实配对 7/8（`results/latent_router_2026-10-27/` 第一节） |
+| 潜层读出：**多槽**读出（K 个槽裸拼） | **已证伪（位置效应，非内容寻址）** | 同一事实：单槽 15/16 → 4 槽 target_only 15/16 → 4 槽 full 1/16 → 4 槽 target_end **0/16**；4 槽 ckpt 在 target_only 上 **0/200**；验证 17.2% < relation-prior 基线 31.2% |
+| 潜层读出：**集合内容寻址**（`LatentRouter`） | 已实现·**未训练** | 机制验证通过（形状/梯度/ckpt 往返/单测 89 项）；`s_k=<q,k_in_k>/τ`、推理 argmax 只送 1 槽、`chain()` 多跳。**效果未知** |
 | 逐题诊断字段（used_texts / 跨池统一 ID `epi:/state:/cr:`） | 已实现 | `ar_diag --selftest` 121 项 |
 | 四格联合归因（Reader Acc \| Recall=1 等） | 已实现·**仅合成验证** | `ar_diag --selftest` 121 项；仓库内无带 `diag` 字段的真实 jsonl |
 | 配置指纹 / 结果文件隔离 / 续跑校验 | 已实现 | `test_run_manifest.py` 27 断言 |
@@ -248,6 +257,11 @@ I4 是**目标态**，当前代码不满足（§6）。I5 由 `run_manifest.py` 
     无日期时会让旧状态看起来最新。修它需同时改 `ar_diag` 的对齐位置约定，**本轮未修**。
 11. **潜层读出的软 token 通路无效果证据**（v9.3）：压缩器/桥接器是随机初始化的，
     没有 `LATENT_CKPT` 时 runner 直接报错退出；即便训练，也没有任何真实数据上的对照跑分。
+    **2026-10-27 补充**：单槽通路已达成（15/16），但**多槽读出被证伪**——失败原因是纯位置效应
+    （K 个槽的 K×m 个软 token 裸拼时，冻结 Qwen 只能按位置注意，"第几个槽"而非"内容"决定读出）。
+    `LatentRouter` 是针对此的结构性修法，**尚未训练，不能声称有效**。
+    另注：`delta_write_disabled` 退出时会**永久关闭** Delta 写入（见 `KNOWN_ISSUES.md` P0-1），
+    任何同一进程内既要写又要禁写的路径都会被静默破坏。
     另外 `answer_in_context` 在 latent 模式下是 **None**（`used_texts` 保持空）而非 `False`，
     检索侧命中率与读出准确率必须分开报，不能拿明文匹配当"答案进了上下文"。
 12. **CR 两处硬门控是保守选择**（t19 已量化，`experiments/results/cr_link_recall.json`）：
