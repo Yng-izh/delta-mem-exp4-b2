@@ -1,0 +1,759 @@
+{
+ "summary": {
+  "label": "hp-router-dis4",
+  "n": 40,
+  "acc": 0.175,
+  "pair_acc": null,
+  "pair_n": 0,
+  "mem_tokens": 9.0,
+  "prompt_tokens": 9.0,
+  "ms_mean": 2900.693917274475,
+  "ms_p50": 2708.3740234375,
+  "pre_ms_mean": 1822.8734254837036,
+  "read_acc": 0.275
+ },
+ "config": {
+  "method": "router",
+  "data": "synth/hotpot_sweep/hotpot_validation_dis4_natural.jsonl",
+  "ckpt": "ckpt/hotpot_r2.pt",
+  "limit": 40,
+  "seed": 0,
+  "base": "/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554",
+  "adapter": "/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/6a1a990e770974811b8fb27dab73430807f76cb5",
+  "no_adapter": false,
+  "gpu": "0",
+  "device": "",
+  "smoke_model": false,
+  "layer": 18,
+  "max_unit_tokens": 64,
+  "max_new_tokens": 16,
+  "text_topk": 5,
+  "hist_max": 4,
+  "system_prompt": "You are a helpful assistant. Answer with the shortest exact value.",
+  "label": "hp-router-dis4",
+  "save_json": "results/hp_router_dis4.json",
+  "verbose": false
+ },
+ "rows": [
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2350.391626358032,
+   "total_ms": 3226.1581420898438,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    12,
+    10
+   ],
+   "gold": "no",
+   "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
+   "pred": "no",
+   "ok": true,
+   "idx": 0
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1588.207721710205,
+   "total_ms": 2340.545892715454,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7,
+    3
+   ],
+   "gold": "no",
+   "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
+   "pred": "no",
+   "ok": true,
+   "idx": 1
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2024.0767002105713,
+   "total_ms": 3013.2336616516113,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    3,
+    24
+   ],
+   "gold": "Letters to Cleo",
+   "question": "Which band, Letters to Cleo or Screaming Trees, had more members?",
+   "pred": "Screaming Trees",
+   "ok": false,
+   "idx": 2
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 4530.76171875,
+   "total_ms": 6443.056344985962,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    14,
+    15
+   ],
+   "gold": "Phil Spector",
+   "question": "Who is the writer of this song that was inspired by words on a tombstone and was the first track on the box set Back to Mono?",
+   "pred": "The song \"The Man Who Sold the World\" was inspired by words on a",
+   "ok": false,
+   "idx": 3
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1421.4746952056885,
+   "total_ms": 2708.3740234375,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    7,
+    5
+   ],
+   "gold": "Max Martin, Savan Kotecha and Ilya Salmanzadeh",
+   "question": "Ellie Goulding worked with what other writers on her third studio album, Delirium?",
+   "pred": "Alessandro Cortini",
+   "ok": false,
+   "idx": 4
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1830.2874565124512,
+   "total_ms": 2785.450220108032,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    27,
+    29
+   ],
+   "gold": "Keith Bostic",
+   "question": "who is younger Keith Bostic or Jerry Glanville ?",
+   "pred": "Jerry Glanville",
+   "ok": false,
+   "idx": 5
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1332.4649333953857,
+   "total_ms": 2647.484540939331,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    16,
+    0
+   ],
+   "gold": "821",
+   "question": "What was the Roud Folk Song Index of the nursery rhyme inspiring What Are Little Girls Made Of?",
+   "pred": "1033",
+   "ok": false,
+   "idx": 6
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2172.923803329468,
+   "total_ms": 2968.1882858276367,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    20,
+    21
+   ],
+   "gold": "Bill Murray",
+   "question": "who is the younger brother of The episode guest stars of The Hard Easy",
+   "pred": "Derek",
+   "ok": false,
+   "idx": 7
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2004.6887397766113,
+   "total_ms": 2758.9054107666016,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    13,
+    12
+   ],
+   "gold": "British",
+   "question": "What nationality were social anthropologists Alfred Gell and Edmund Leach?",
+   "pred": "British",
+   "ok": true,
+   "idx": 8
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1261.2543106079102,
+   "total_ms": 2239.4514083862305,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    11,
+    2
+   ],
+   "gold": "1865",
+   "question": "In which year was the King who made the 1925 Birthday Honours born?",
+   "pred": "1888",
+   "ok": false,
+   "idx": 9
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1400.914192199707,
+   "total_ms": 2309.263229370117,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    18,
+    2
+   ],
+   "gold": "Newport",
+   "question": "What is the county seat of the county where East Lempster, New Hampshire is located?",
+   "pred": "Lempster",
+   "ok": false,
+   "idx": 10
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1450.1447677612305,
+   "total_ms": 2659.191131591797,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    4,
+    1
+   ],
+   "gold": "250 million",
+   "question": "How many copies of Roald Dahl's variation on a popular anecdote sold?",
+   "pred": "100,000",
+   "ok": false,
+   "idx": 11
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 916.4543151855469,
+   "total_ms": 1678.6792278289795,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    2,
+    6
+   ],
+   "gold": "no",
+   "question": "Are Yingkou and Fuding the same level of city?",
+   "pred": "no",
+   "ok": true,
+   "idx": 12
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1734.2016696929932,
+   "total_ms": 2886.7480754852295,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    17,
+    22
+   ],
+   "gold": "Larnelle Harris",
+   "question": "David Huntsinger has worked with this gospel singer born in the month of July?",
+   "pred": "Lutheran",
+   "ok": false,
+   "idx": 13
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1231.0898303985596,
+   "total_ms": 2768.3281898498535,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    15,
+    2
+   ],
+   "gold": "North Avenue at Techwood Drive",
+   "question": "Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?",
+   "pred": "1964 Georgia Tech Yellow Jackets football team",
+   "ok": false,
+   "idx": 14
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1614.8698329925537,
+   "total_ms": 2648.814916610718,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    4,
+    7
+   ],
+   "gold": "7 January 1936",
+   "question": "When was the British author who wrote the novel on which \"Here We Go Round the Mulberry Bush\" was based born?",
+   "pred": "1885",
+   "ok": false,
+   "idx": 15
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1306.7364692687988,
+   "total_ms": 2314.1043186187744,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    6,
+    18
+   ],
+   "gold": "Marvel",
+   "question": "Suicide's 1977 released album features a song based on what brand's comic character?",
+   "pred": "The Amazing Spider-Man",
+   "ok": false,
+   "idx": 16
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1361.5608215332031,
+   "total_ms": 2346.312999725342,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    10,
+    8
+   ],
+   "gold": "the late 12th Century",
+   "question": "When was the palace founded at which Columba de Dunbar died in 1435?",
+   "pred": "1435",
+   "ok": false,
+   "idx": 17
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1498.6720085144043,
+   "total_ms": 2654.477119445801,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    6,
+    14
+   ],
+   "gold": "Lord Combermere",
+   "question": "During Siege of Bharatpur, which Commander-in-Chief of Ireland and Commander-in-Chief of India contributed to the storming of the castle?",
+   "pred": "Sir John Hotham",
+   "ok": false,
+   "idx": 18
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1614.403486251831,
+   "total_ms": 2697.192907333374,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    0,
+    4
+   ],
+   "gold": "\"Teach the Controversy\" campaign",
+   "question": "Both Truth in Science and Discovery embrace what campaign?",
+   "pred": "The Campaign for Science and Engineering",
+   "ok": false,
+   "idx": 19
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1271.5849876403809,
+   "total_ms": 2160.2423191070557,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    10,
+    17
+   ],
+   "gold": "Lostprophets disbanded in 2013 after Watkins was charged with sexual offences in late 2012.",
+   "question": "Josey Scott and Ian Watkins were both promising musicians. Which of these talented men was incarcerated, impacting his career with a rock band?",
+   "pred": "Ian Watkins",
+   "ok": false,
+   "idx": 20
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1640.0146484375,
+   "total_ms": 3018.9552307128906,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    1,
+    19
+   ],
+   "gold": "\"We'll Burn That Bridge\"",
+   "question": "Which song was behind the third single on the album  \"A Lot About Livin' (And a Little 'bout Love)\" for two weeks on the country charts?",
+   "pred": "\"Love Is a Long Road\"",
+   "ok": false,
+   "idx": 21
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 3188.8461112976074,
+   "total_ms": 4374.631643295288,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    25,
+    24
+   ],
+   "gold": "1901",
+   "question": "Marcus Wayne Garland spent nine seasons with an American professional baseball team that is based in Baltimore, Maryland, and was one of the AMerican League's original eight charter franchises when the league was established in what year?",
+   "pred": "1901",
+   "ok": true,
+   "idx": 22
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2245.675802230835,
+   "total_ms": 3552.5686740875244,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    30,
+    2
+   ],
+   "gold": "Lush Ltd.",
+   "question": "What retailer in ABQ Uptown is headquarted in Poole, Dorset, United Kingdom?",
+   "pred": "The Balmoral",
+   "ok": false,
+   "idx": 23
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1319.7486400604248,
+   "total_ms": 2263.5889053344727,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    9,
+    3
+   ],
+   "gold": "Wichita",
+   "question": "Both Bishop Carroll Catholic High School and Kapaun Mt. Carmel Catholic High School are located in which city in Kansas?",
+   "pred": "Topeka",
+   "ok": false,
+   "idx": 24
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1037.6842021942139,
+   "total_ms": 2200.7663249969482,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    1,
+    3
+   ],
+   "gold": "Alistair Grant",
+   "question": "Born on 6 March 1937, this man was also a citizen of the United Kingdom.",
+   "pred": "John B. Goodenough",
+   "ok": false,
+   "idx": 25
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2614.833116531372,
+   "total_ms": 3651.3752937316895,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    23,
+    24
+   ],
+   "gold": "1952",
+   "question": "What year did the series on CBS, starring the actor who known for his role in \"Rebel Without a Cause,\" air?",
+   "pred": "1958",
+   "ok": false,
+   "idx": 26
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1287.4093055725098,
+   "total_ms": 2150.433301925659,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    9,
+    11
+   ],
+   "gold": "no",
+   "question": "Do The Importance of Being Icelandic and The Five Obstructions belong to different film genres ?",
+   "pred": "drama",
+   "ok": false,
+   "idx": 27
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1970.8116054534912,
+   "total_ms": 2992.541551589966,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    15,
+    12
+   ],
+   "gold": "Jackson Storm",
+   "question": "The Polar Bears featuring the voice of Armie Hammer, is also the same voice actor for which character in Cars 3?",
+   "pred": "Sully",
+   "ok": false,
+   "idx": 28
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1542.776346206665,
+   "total_ms": 2375.908374786377,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    13,
+    0
+   ],
+   "gold": "44",
+   "question": "Ernest Foot was the best friend of the fighter pilot who had how many victories?",
+   "pred": "12",
+   "ok": false,
+   "idx": 29
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1585.439682006836,
+   "total_ms": 2363.2354736328125,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    11,
+    8
+   ],
+   "gold": "Samoa",
+   "question": "Which country did the Falkland Islands beat in the 2010 Commonwealth games that has eleven administrative divisions?",
+   "pred": "Australia",
+   "ok": false,
+   "idx": 30
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 3598.1109142303467,
+   "total_ms": 5617.043972015381,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    29,
+    31
+   ],
+   "gold": "a pinball machine",
+   "question": "What arcade game is named after the only player in major league history to have a 0.300 batting average for 7 consecutive seasons?",
+   "pred": "The only player in major league history to have a 0.300",
+   "ok": false,
+   "idx": 31
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2254.885196685791,
+   "total_ms": 3065.2918815612793,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    11,
+    8
+   ],
+   "gold": "20",
+   "question": "Marion Greene was a health policy analyst for St. Judt Medical company, which had how many principal operations worldwide?",
+   "pred": "1",
+   "ok": false,
+   "idx": 32
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 364.78161811828613,
+   "total_ms": 1381.6473484039307,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    2,
+    1
+   ],
+   "gold": "Eucryphia",
+   "question": "Which Genus has more species Eucryphia or Lepidozamia ?",
+   "pred": "Eucryphia",
+   "ok": true,
+   "idx": 33
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 2626.866340637207,
+   "total_ms": 3769.835948944092,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": true,
+   "picked": [
+    5,
+    13
+   ],
+   "gold": "Sacred Planet",
+   "question": "Which film was released first: Sacred Planet or Oz the Great and Powerful?",
+   "pred": "Sacred Planet",
+   "ok": true,
+   "idx": 34
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1344.2258834838867,
+   "total_ms": 2135.814428329468,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    21,
+    18
+   ],
+   "gold": "paracyclist",
+   "question": "Other than racing, what sport does the 1998 champion of the Toyota GRand Prix practice?",
+   "pred": "football",
+   "ok": false,
+   "idx": 35
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1423.3009815216064,
+   "total_ms": 2492.9873943328857,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    13,
+    11
+   ],
+   "gold": "The Crowned Prince of the Philadelphia Mob",
+   "question": "What was the nickname of the hitman hired by an Italian American Criminal Organization?",
+   "pred": "The Man Who Never Was",
+   "ok": false,
+   "idx": 36
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1656.386137008667,
+   "total_ms": 2711.833953857422,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    1,
+    13
+   ],
+   "gold": "supervisor of the royal works",
+   "question": "What was the position of Jean Baptiste Androuet du Cerceau under the man who was King of the Polish-Lithuanian Commonwealth from 1573 to 1575?",
+   "pred": "Marshal of France",
+   "ok": false,
+   "idx": 37
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 1924.3299961090088,
+   "total_ms": 3209.483861923218,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    20,
+    9
+   ],
+   "gold": "Janet Damita Jo Jackson",
+   "question": "Which American music star appeared as a guest in a Will & Grace episode called \"Back Up, Dancer\"?",
+   "pred": "Beyoncé",
+   "ok": false,
+   "idx": 38
+  },
+  {
+   "mem_tokens": 9,
+   "prompt_tokens": 9,
+   "pre_ms": 3371.6464042663574,
+   "total_ms": 4445.610761642456,
+   "n_read_units": 2,
+   "decode_mode": "new_tokens_only",
+   "read_ok": false,
+   "picked": [
+    21,
+    13
+   ],
+   "gold": "early 1970s",
+   "question": "When did the rock band that sang \"All Join Hands\" rise to prominence?",
+   "pred": "1968",
+   "ok": false,
+   "idx": 39
+  }
+ ]
+}
