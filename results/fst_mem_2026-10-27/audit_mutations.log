@@ -1,0 +1,15 @@
+==============================================================================
+✓ ste_no_detach          CAUGHT    STE 软期望不再 detach 载荷 -> 载荷被铺上 G×V 混合梯度
+    FAILED 1/88: ['I11 STE 不给载荷额外梯度（与 hard=True 的载荷梯度逐位相同）']
+✓ gather_reversed        CAUGHT    组序反转 -> 读到另一条属性的载荷
+    [FAIL] L2 gather_all_versions 与 list_versions/payload 逐条对齐（组序错位必被抓）
+✓ mask_ignored           CAUGHT    填充版本不再掩码 -> 零向量可能进 Reader
+    [FAIL] L6 掩码位（填充版本）即使分高也不会被选中 g=0 v=1
+✓ key_text_from_key      CAUGHT    读出退回从(小写)键反推实体文本 -> 训练/读出键特征不同源
+    FAILED 1/88: ['M6 训练侧与读出侧用同一份实体/属性文本（原始大小写）']
+✓ ver_metric_unbound     CAUGHT    版本命中不绑组别 -> 组选错也可能记命中
+    FAILED 1/88: ['N1 组选错时版本级一律不计命中']
+✓ tgt_ver_first_match    CAUGHT    并列时间戳取最旧（与 bank.read 的并列规则不一致）
+    FAILED 1/88: ['N5 并列时间戳时监督取最新版本，且与 bank.read() 一致']
+==============================================================================
+OK：6 个变异全部被单测抓住

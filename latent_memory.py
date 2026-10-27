@@ -859,11 +859,18 @@ class FstRouter(nn.Module):
                "group": g, "version": v, "hard": True}
         if hard or not self.training:
             return out
-        # STE：前向 z_hard，梯度走"两级软加权"的期望向量
+        # STE：前向 z_hard，梯度走"两级软加权"的期望向量。
+        # 两个容易写错、且**不会报错只会悄悄更差**的点：
+        #  a) 载荷必须 detach：否则梯度会同时从 z_hard（one-hot 那一路）和软期望那一路
+        #     回传到全部 G×V 条载荷上，压缩器被迫同时满足所有事实——与 2.5 节实测过的
+        #     "软加权前向"同一个病，只是从数值挪到了梯度。载荷只经由 z_hard 拿梯度。
+        #  b) 版本分布必须**按组各算一次**：把选中组的 wv 套到所有组上，等于假设
+        #     "别的组里第 v 个版本也重要"，向量本身就不再是任何一致的期望量。
         wg = torch.softmax(lg_grp, dim=-1)[0]                       # [G]
-        wv = torch.softmax(lg_all, dim=-1)[0]                       # [V]
+        wv_all = torch.softmax(lg_ver_all, dim=-1)                  # [G,V]
         z = z_all.to(device=wg.device, dtype=wg.dtype).flatten(-2)   # [G,V,m*d]
-        z_soft = torch.einsum("g,v,gvd->d", wg, wv, z).reshape(
+        z = z.detach()
+        z_soft = torch.einsum("g,gv,gvd->d", wg, wv_all, z).reshape(
             1, self.n_slots, self.d_model)
         # STE 要求前向数值与推理逐位一致：把软期望转回载荷精度/设备再做"梯度直通"，
         # 否则 z_hard(bf16) + Δ(float32) 会被提升成 float32，bridge 的 bf16 权重直接报错。
@@ -1132,6 +1139,22 @@ class LatentStateTrajectoryBank(LatentSlotBank):
         """所有事实键，按**首次写入顺序**（不是排序，时间轨迹依赖这个顺序）。"""
         return list(self.groups.keys())
 
+    def group_text(self, key: Any) -> Tuple[str, str]:
+        """该事实键对应的 (实体原文, 属性原文)。
+
+        优先返回 write() 时记下的**原始文本**（训练与读出必须用同一份字符串构造
+        键特征）；没记过（手工建库/旧数据）才退化到从键反推的规范化文本。
+        """
+        g = self.groups.get(str(key))
+        if g is None:
+            raise KeyError(f"未知事实键：{key}")
+        e, r = split_fact_key(key)
+        if g.get("ent"):
+            e = str(g["ent"])
+        if g.get("rel"):
+            r = str(g["rel"])
+        return e, r
+
     def has_group(self, key: Any) -> bool:
         return str(key) in self.groups
 
@@ -1140,8 +1163,14 @@ class LatentStateTrajectoryBank(LatentSlotBank):
 
     # ---- 写入（状态转移） ----
     def write(self, key: Any, z: torch.Tensor, time: Any = None,
-              detach: bool = True) -> str:
-        """写一个新版本：旧当前值下沉进历史，新值成为当前值。返回新槽位 ID。"""
+              detach: bool = True, entity: Any = None, relation: Any = None) -> str:
+        """写一个新版本：旧当前值下沉进历史，新值成为当前值。返回新槽位 ID。
+
+        entity/relation 是**原始文本**（保留大小写）。它必须存在这里而不是由
+        `split_fact_key(key)` 反推：键是规范化（小写、去标点）过的，反推出来的文本
+        与训练时喂进编码器的文本不同，同一实体在训练/读出两条路上会得到不同的
+        键特征 —— 不报错、指标看不出，只是"评估时路由器面对没见过的输入"。
+        """
         key = str(key)
         split_fact_key(key)                    # 格式校验：别把整句事实当键写进来
         z = self._normalize(z)
@@ -1151,7 +1180,9 @@ class LatentStateTrajectoryBank(LatentSlotBank):
             sid = self._slot_id(key, 0)
             self.append(sid, z, detach=detach)
             self.groups[key] = {"cur": sid, "cur_time": t, "hist": [],
-                                "n_write": 1}
+                                "n_write": 1,
+                                "ent": (None if entity is None else str(entity)),
+                                "rel": (None if relation is None else str(relation))}
             return sid
         sid = self._slot_id(key, int(g["n_write"]))
         old = g["cur"]
@@ -1842,7 +1873,9 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
         raise ValueError("generate_latent_answer_fst 需要 bridge")
 
     def _tf(text: str) -> torch.Tensor:
-        k = ("txt", str(text))
+        # 缓存键必须带 layer/device：同一段文本在不同层/不同设备上的特征不同，
+        # 只按文本命中会把另一套配置的向量拿来打分（路由悄悄错位，指标看不出）。
+        k = ("txt", str(text), int(layer), str(dev))
         if feat_cache is not None and k in feat_cache:
             return feat_cache[k]
         v = extract_text_feature(model, tokenizer, text, layer=layer, device=dev)
@@ -1850,8 +1883,10 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
             feat_cache[k] = v.detach()
         return v
 
-    e_feat = torch.cat([_tf(split_fact_key(k)[0]) for k in keys], dim=0)   # [G,d]
-    r_feat = torch.cat([_tf(split_fact_key(k)[1]) for k in keys], dim=0)
+    # 实体/属性文本取 bank 里存的**原始文本**，与训练侧完全同源（见 write 的说明）
+    ents_rels = [bank.group_text(k) for k in keys]
+    e_feat = torch.cat([_tf(e) for e, _r in ents_rels], dim=0)            # [G,d]
+    r_feat = torch.cat([_tf(r) for _e, r in ents_rels], dim=0)
     per_group = bank.gather_all_versions(keys)                            # List[List[payload]]
     ver_z, ver_mask = pad_version_stack(per_group, dtype=bank.dtype, device="cpu")
     dev_z = torch.device(dev)
@@ -1867,7 +1902,9 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
 
     q_feat = extract_query_feature(model, tokenizer, question, system_prompt,
                                    layer=layer, device=dev)
-    tq_feat = _tf(query_time) if _norm_time(query_time) else None
+    # 查询时间条件也用**规范化后**的文本取特征：训练侧先 _norm_time 再取特征，
+    # 这里若把原串（'2021,' / ' May 2021'）直接送进去，两侧时间向量就不是同一分布。
+    tq_feat = _tf(_norm_time(query_time)) if _norm_time(query_time) else None
     out = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq_feat,
                      ver_mask=ver_mask, hard=True)
     z_read = out["z_read"]                                            # [1,m,d]

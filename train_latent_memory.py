@@ -1199,8 +1199,12 @@ def train(args):
 #   机制二 状态—轨迹解耦槽位      -> LM.LatentStateTrajectoryBank（cur + 有限历史）
 #   机制三 时序条件两级读出      -> LM.FstRouter（先选键，再选版本）
 def _fst_feat(model, tokenizer, text, layer, dev, cache):
-    """短文本特征缓存：实体名/属性名/年份在数据里高度重复，重复前向纯属浪费。"""
-    k = ("txt", str(text))
+    """短文本特征缓存：实体名/属性名/年份在数据里高度重复，重复前向纯属浪费。
+
+    缓存键必须含 layer 与 device（口径同 query_feature_cached）：只按文本命中，
+    换个层号/设备就会拿到另一套特征去打分，而指标完全看不出问题。
+    """
+    k = ("txt", str(text), int(layer), str(dev))
     if k in cache:
         return cache[k]
     v = LM.extract_text_feature(model, tokenizer, text, layer=layer, device=dev)
@@ -1249,15 +1253,16 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
     # fp32 存储：训练路径要把梯度带回去，bf16 往返会引入无意义的舍入；
     # 载荷本身来自 bf16 压缩器，转 fp32 是无损的。
     bank = LM.LatentStateTrajectoryBank(hist_max=hist_max, dtype=torch.float32)
-    ent, rel, seen_facts = {}, {}, {}
     for i in order:
         um = ums[i]
         k = LM.fact_key(um["entity"], um["relation"])
-        ent.setdefault(k, str(um["entity"]))
-        rel.setdefault(k, str(um["relation"]))
-        seen_facts.setdefault(k, []).append(str(um.get("fact") or ""))
-        bank.write(k, payloads[i], time=um.get("time", ""), detach=not grad)
+        # entity/relation 的**原始文本**随键一起存进库：读出侧从这里取，
+        # 不能让它自己从（规范化过的）键反推，否则训练/读出两条路的键特征不同源。
+        bank.write(k, payloads[i], time=um.get("time", ""), detach=not grad,
+                   entity=um["entity"], relation=um["relation"])
     keys = bank.group_keys()
+    ent = {k: bank.group_text(k)[0] for k in keys}
+    rel = {k: bank.group_text(k)[1] for k in keys}
     tgt_key = item.get("fact_key") or LM.fact_key(item.get("entity"), item.get("relation"))
     tgt_key = LM.fact_key(*LM.split_fact_key(tgt_key))
     out = {"bank": bank, "keys": keys, "tgt_key": tgt_key, "viable": False,
@@ -1270,13 +1275,22 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
                            if item.get("answer_fact_time") is not None
                            else item.get("as_of"))
     vers = bank.list_versions(tgt_key)
+    # 并列时间戳时取**最后**（= 更新）的那个匹配，与 bank.read() 的 `>=` 并列规则一致；
+    # 若这里 break 在第一个匹配（最旧），监督就会指向 read() 永远不会选的那条槽位。
     for vi, v in enumerate(vers):
         if LM._time_match_score(want_t, v["time"]) == 2:
             out["tgt_ver"] = vi
             out["viable"] = True
-            break
     # 目标组/版本的张量：只把**这个键**的版本送去版本级打分
     out["tgt_ver_n"] = len(vers)          # 目标组里还剩几个版本（=1 表示没得选）
+    # 三种"定位不到版本"的情形必须分开，否则训练/评估会把不同原因混成一个数：
+    #   evicted       : 该键写过的版本多于现存版本 -> 目标版本真被容量淘汰（样本不可学）
+    #   label_missing : 数据里没有答案时间戳 -> 与淘汰无关，仍然可训 QA/组级
+    #   label_mismatch: 有时间戳但与任何版本都不精确相等 -> 数据/格式问题，必须显式报
+    out["evicted"] = bool(int(bank.groups[tgt_key]["n_write"]) > len(vers))
+    out["label_missing"] = bool(not want_t)
+    out["label_mismatch"] = bool(not out["viable"] and not out["evicted"]
+                                 and not out["label_missing"])
     out.update(fst_group_tensors(bank, keys, tgt_group=out["tgt_group"],
                                  hist_max=hist_max))
     out["ent"], out["rel"] = ent, rel
@@ -1329,6 +1343,89 @@ def fst_query_time_feat(item, model, tokenizer, layer, dev, cache):
     return _fst_feat(model, tokenizer, t, layer, dev, cache)
 
 
+def fst_eval_subset(data, limit):
+    """按"整组问题"截断，而不是按行截断。
+
+    反事实配对的两条样本共享同一句问题文本。若按行截断到 limit，配对经常被切在
+    中间：一半样本凑不成对，pair_acc 就退化成 acc（甚至因为单成员对 `all([x])`
+    恒真而虚高）。这里以"问题"为不可分割单位取前若干条，保证配对完整。
+    """
+    if limit is None or limit <= 0 or limit >= len(data):
+        return list(data)
+    groups, order = {}, []
+    for r in data:
+        k = _norm_ans(r.get("question"))
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(r)
+    out = []
+    for k in order:
+        out.extend(groups[k])
+        if len(out) >= limit:
+            break
+    return out
+
+
+
+def fst_scores(recs):
+    """把逐条记录折算成 FST 指标（**纯函数**，单测直接喂造假记录）。
+
+    抽出来是为了能被测：指标口径本身写错了（版本命中不绑组别、单版本样本计入
+    版本准确率、单成员配对记作通过）不会让任何"跑得通"的测试失败，只会让论文
+    里的数字虚高。见 tools/audit_mutations.py 的 ver_metric_unbound 变异。
+
+    每条 record 需要的键：
+        okq, g_ok, ver_picked, tgt_ver, viable, tgt_ver_n, tgt_group,
+        evicted, label_missing, probe, question, gold, n_soft
+    """
+    n = len(recs)
+    hit = sum(int(r["okq"]) for r in recs)
+    grp_ok = sum(int(r["g_ok"]) for r in recs)
+    grp0_ok = sum(int(int(r["tgt_group"]) == 0) for r in recs)
+    # 版本级命中必须**同时**选对组：ver_picked 是"被选中组内部"的下标，
+    # 组选错时拿它跟目标组的下标比较没有意义（还会因为下标碰巧相等而误记命中）。
+    v_ok = [int(bool(r["g_ok"]) and int(r["viable"])
+                and int(r["tgt_ver"]) >= 0
+                and int(r["ver_picked"]) == int(r["tgt_ver"])) for r in recs]
+    # 只有"目标组有多个可选项"时版本级指标才有信息量：单版本组选谁都是对（恒真）。
+    multi = [i for i, r in enumerate(recs)
+             if int(r["tgt_ver_n"]) > 1 and bool(r["viable"])]
+    probes, pairs = {}, {}
+    for r in recs:
+        d = probes.setdefault(r["probe"], {"n": 0, "hit": 0})
+        d["n"] += 1
+        d["hit"] += int(r["okq"])
+        # 配对必须带 gold：同问题两个变体 gold 相同的（如 unrelated 探针）不构成
+        # 反事实配对，不能算进 pair_acc；单成员对也不能算（all([x]) 恒真）。
+        pairs.setdefault(_norm_ans(r["question"]), []).append(
+            (bool(r["okq"]), _norm_ans(r["gold"])))
+    real_pairs = {k: v for k, v in pairs.items()
+                  if len(v) >= 2 and len({g for _ok, g in v}) >= 2}
+    n_pairs_ok = sum(1 for v in real_pairs.values() if all(ok for ok, _g in v))
+    return {
+        "n": n,
+        "acc": (hit / n if n else None),
+        "group_acc": (grp_ok / n if n else None),
+        "group_const_acc": (grp0_ok / n if n else None),
+        "ver_acc": (sum(v_ok) / n if n else None),
+        "ver_multi_acc": (sum(v_ok[i] for i in multi) / len(multi) if multi else None),
+        "ver_multi_n": len(multi),
+        # 常数基线：永远选"最新版"（= 当前状态）。不比它高 = 时间条件没起作用。
+        "ver_newest_acc": (sum(int(int(recs[i]["tgt_ver"])
+                                  == int(recs[i]["tgt_ver_n"]) - 1)
+                               for i in multi) / len(multi) if multi else None),
+        "evicted_n": sum(int(r["evicted"]) for r in recs),
+        "label_missing_n": sum(int(r["label_missing"] and not r["evicted"]) for r in recs),
+        "pair_acc": (n_pairs_ok / len(real_pairs) if real_pairs else None),
+        "pair_n": len(real_pairs),
+        "pair_dropped_n": len(pairs) - len(real_pairs),
+        "probes": {k: {"n": v["n"], "acc": (v["hit"] / v["n"] if v["n"] else None),
+                       "hit": v["hit"]} for k, v in sorted(probes.items())},
+        "n_soft": (int(sum(int(r["n_soft"]) for r in recs) / n) if n else 0),
+    }
+
+
 def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
                  system_prompt, layer, hist_max, limit=32, cache=None,
                  verbose=False, label="fst-eval", shuffle_order=False, seed=0,
@@ -1337,7 +1434,8 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
 
     只报答案准确率是不够的：答案对了可能是"没选对版本但那条刚好也能答对"
     （2021 与 2025 的雇主都可能出现在干扰事实里）。所以这里必须同时报
-    group_acc（选对属性了吗）与 ver_acc（选对时间版本了吗）。
+    group_acc（选对属性了吗）与 ver_multi_acc（选对时间版本了吗），
+    并且都带**常数基线**，否则"随机权重下 0.25"会被误读成"有点效果"。
     """
     comp.eval()
     bridge.eval()
@@ -1345,14 +1443,10 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
     cache = {} if cache is None else cache
     dev = torch.device(LM._model_device(model))
     rng = random.Random(seed + 991)
-    n = hit = grp_ok = ver_ok = 0
-    ver_n_multi = ver_ok_multi = 0
-    probes = {}
-    pairs = {}
-    n_soft_seen = []
+    recs = []
     order_same = order_n = 0
     fails = []
-    for item in data[:limit]:
+    for item in fst_eval_subset(data, limit):
         try:
             fi = build_fst_bank(encoder, item, hist_max, tag="val", grad=False,
                                 shuffle_order=shuffle_order, rng=rng)
@@ -1366,30 +1460,28 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
             fst_router=fst_router, max_new_tokens=16, layer=layer,
             query_time=(None if ignore_query_time else item.get("as_of")),
             device=dev, feat_cache=cache)
-        n += 1
-        n_soft_seen.append(int(meta["n_soft"]))
         gold = item["answer"]
         if isinstance(gold, (list, tuple)):
             gold = " ".join(str(g) for g in gold)
         okq = _norm_ans(pred) == _norm_ans(gold)
-        hit += int(okq)
-        g_ok = int(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"])
-        v_ok = int(meta["ver_picked"] == fi["tgt_ver"]) if fi["viable"] else 0
-        grp_ok += g_ok
-        ver_ok += v_ok
-        # 只有一个版本的目标组"选对版本"是恒真（没有可选项）——那种样本不能算进
-        # 版本级准确率，否则 ver_acc 会被大量单版本样本（如未改过的居住地）虚抬。
-        if int(fi["tgt_ver_n"]) > 1:
-            ver_n_multi += 1
-            ver_ok_multi += v_ok
         probe = item.get("probe") or ("history" if LM._norm_time(item.get("as_of"))
                                       else "current")
-        d = probes.setdefault(probe, {"n": 0, "hit": 0})
-        d["n"] += 1
-        d["hit"] += int(okq)
-        qk = _norm_ans(item["question"])
-        pairs.setdefault(qk, []).append(bool(okq))
-        if shuffle_order and order_n < 10 ** 9:
+        recs.append({
+            "okq": bool(okq),
+            "g_ok": bool(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"]),
+            "ver_picked": int(meta["ver_picked"]),
+            "tgt_ver": int(fi["tgt_ver"]),
+            "viable": bool(fi["viable"]),
+            "tgt_ver_n": int(fi["tgt_ver_n"]),
+            "tgt_group": int(fi["tgt_group"]),
+            "evicted": bool(fi["evicted"]),
+            "label_missing": bool(fi["label_missing"]),
+            "probe": probe,
+            "question": item["question"],
+            "gold": gold,
+            "n_soft": int(meta["n_soft"]),
+        })
+        if shuffle_order:
             # 顺序稳定性：同一库用另一种写入顺序，答案必须一致
             fi2 = build_fst_bank(encoder, item, hist_max, tag="val", grad=False,
                                  shuffle_order=False)
@@ -1405,19 +1497,8 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
             fails.append((item["question"], gold, str(pred)[:40],
                           meta["group_keys"][meta["group_picked"]],
                           meta["ver_time"], item.get("as_of")))
-    n_pairs_ok = sum(1 for v in pairs.values() if all(v))
-    res = {"n": n,
-           "acc": (hit / n if n else None),
-           "group_acc": (grp_ok / n if n else None),
-           "ver_acc": (ver_ok / n if n else None),
-           "ver_multi_acc": (ver_ok_multi / ver_n_multi if ver_n_multi else None),
-           "ver_multi_n": ver_n_multi,
-           "pair_acc": (n_pairs_ok / len(pairs) if pairs else None),
-           "pair_n": len(pairs),
-           "probes": {k: {"n": v["n"], "acc": (v["hit"] / v["n"] if v["n"] else None),
-                          "hit": v["hit"]} for k, v in sorted(probes.items())},
-           "n_soft": (int(sum(n_soft_seen) / len(n_soft_seen)) if n_soft_seen else 0),
-           "order_stable": (order_same / order_n if order_n else None)}
+    res = fst_scores(recs)
+    res["order_stable"] = (order_same / order_n if order_n else None)
     if verbose:
         for row in fails:
             print(f"  [{label}] ✗ q={row[0]!r} gold={row[1]!r} pred={row[2]!r} "
@@ -1520,6 +1601,7 @@ def train_fst(args):
     acc = []
     grad_seen = None
     skipped_evicted = 0
+    skipped_ver = 0
     t_start = time.time()
     for epoch in range(args.epochs):
         order = list(range(len(train_data)))
@@ -1528,11 +1610,19 @@ def train_fst(args):
             item = train_data[i]
             fi = build_fst_bank(encoder, item, args.hist_max, tag="fact",
                                 grad=not args.freeze_compressor)
-            if not fi["viable"]:
+            if fi["evicted"]:
                 # 目标版本已被容量淘汰：这条样本在当前 hist_max 下**无解**。
                 # 拿它算 CE 等于把 Router 往"选一个已经被删掉的版本"上训。
                 skipped_evicted += 1
                 continue
+            if fi["label_mismatch"]:
+                raise RuntimeError(
+                    f"答案时间戳与任何版本都不相等（数据/格式问题，不许静默当 0）："
+                    f"q={item['question']!r} answer_fact_time="
+                    f"{item.get('answer_fact_time')!r} 版本时间="
+                    f"{[v['time'] for v in fi['bank'].list_versions(fi['tgt_key'])]}")
+            # 没有时间戳 -> 只有版本级监督无法给出，QA 与组级监督照常训练
+            skipped_ver += int(not fi["viable"])
             e_feat, r_feat, ver_z, ver_mask, ver_t_feat = fst_build_inputs(
                 fi, model, tokenizer, args.layer, dev, cache)
             tq = (None if args.ignore_query_time else
@@ -1553,10 +1643,16 @@ def train_fst(args):
             t_g = torch.tensor([int(fi["tgt_group"])], device=out["logits_group"].device)
             # 版本监督打在**目标组**那一行：用 logits_ver（被选中组）会在选错组时
             # 监督到另一组的版本布局（甚至填充位），loss 瞬间到 1e4 量级。
-            t_v = torch.tensor([int(fi["tgt_ver"])], device=out["logits_ver"].device)
             loss_grp = F.cross_entropy(out["logits_group"], t_g)
-            loss_ver = F.cross_entropy(
-                out["logits_ver_all"][int(fi["tgt_group"]):int(fi["tgt_group"]) + 1], t_v)
+            if fi["viable"]:
+                t_v = torch.tensor([int(fi["tgt_ver"])],
+                                   device=out["logits_ver"].device)
+                loss_ver = F.cross_entropy(
+                    out["logits_ver_all"][int(fi["tgt_group"]):int(fi["tgt_group"]) + 1],
+                    t_v)
+            else:
+                # 没有可定位的目标版本：不能凭空造监督，也不能因此丢掉整条样本
+                loss_ver = out["logits_ver_all"].sum() * 0.0
             loss = loss_qa + args.addr_weight * loss_grp + args.ver_weight * loss_ver
             (loss / args.accum).backward()
             acc.append((float(loss_qa.detach()), float(loss_grp.detach()),
@@ -1592,6 +1688,7 @@ def train_fst(args):
                   f"compress={fi['info']['compression_ratio']} "
                   f"gnorm_comp={g_comp:.3e} gnorm_bridge={g_bridge:.3e} "
                   f"gnorm_fst={g_fst:.3e} skip_evicted={skipped_evicted} "
+                  f"skip_ver={skipped_ver} "
                   f"({time.time()-t_start:.0f}s)", flush=True)
             acc = []
             if args.eval_every > 0 and step % args.eval_every == 0 and not args.dry_run:
@@ -1690,10 +1787,13 @@ def _fmt_fst(res):
         return "n/a"
     pr = " ".join(f"{k}={_f3(v['acc'])}({v['hit']}/{v['n']})"
                   for k, v in res["probes"].items())
-    return (f"acc={_f3(res['acc'])} group={_f3(res['group_acc'])} "
-            f"ver={_f3(res['ver_acc'])} ver_multi={_f3(res['ver_multi_acc'])}"
-            f"({res['ver_multi_n']}) pair={_f3(res['pair_acc'])}"
+    return (f"acc={_f3(res['acc'])} group={_f3(res['group_acc'])}"
+            f"(const={_f3(res.get('group_const_acc'))}) "
+            f"ver={_f3(res['ver_acc'])} "
+            f"ver_multi={_f3(res['ver_multi_acc'])}({res['ver_multi_n']},"
+            f"newest={_f3(res.get('ver_newest_acc'))}) pair={_f3(res['pair_acc'])}"
             f"({res['pair_n']}) {pr} n_soft={res['n_soft']}"
+            f" ev={res.get('evicted_n')} nover={res.get('label_missing_n')}"
             + (f" order_stable={_f3(res['order_stable'])}"
                if res.get("order_stable") is not None else ""))
 

@@ -156,8 +156,16 @@ def test_fact_key():
     k1 = LM.fact_key("Zhang San", "Employer")
     k2 = LM.fact_key("  zhang   san ", "employer.")
     ok("F1 事实键规范化（大小写/空白/标点）", k1 == k2 == "zhang san||employer", extra=f"{k1!r}/{k2!r}")
-    ok("F2 事实键与值无关（同键不同值仍同键）",
-       LM.fact_key("Zhang", "employer") == LM.fact_key("Zhang", "employer"))
+    # F2 原先是 `fact_key("Zhang","employer") == fact_key("Zhang","employer")`：
+    # 同一函数同一参数自比，恒真，等于没测。真正的性质是"值变了键不变"，
+    # 只能通过**写入两条不同值**来验：同键两写 -> 仍然只有一组、两个版本。
+    _b = LM.LatentStateTrajectoryBank(hist_max=2)
+    _k = LM.fact_key("Zhang", "employer")
+    _b.write(_k, rand_payload(1), time="2023")
+    _b.write(_k, rand_payload(2), time="2025")
+    ok("F2 事实键与值无关（同键写两个不同值仍是一组两个版本）",
+       _b.group_keys() == [_k] and _b.count_versions(_k) == 2,
+       extra=f"{_b.group_keys()} {_b.count_versions(_k)}")
     e, r = LM.split_fact_key(k1)
     ok("F3 split_fact_key 往返", (e, r) == ("zhang san", "employer"), extra=f"{e!r},{r!r}")
     ok("F4 空实体/属性报错",
@@ -368,8 +376,34 @@ def test_fst_router():
        and router.state.ver_net[0].weight.grad is not None
        and router.key.q_net[0].weight.grad is not None
        and router.state.q_net[0].weight.grad is not None)
-    ok("I11 载荷本身不是被优化对象（z_read 对 ver_z 无梯度）",
-       ver_z.grad is None)
+    # I11 原先是 `ver_z.grad is None`，而这里的 ver_z 来自 torch.randn（非叶子，
+    # requires_grad=False），grad 必然为 None —— 恒真，且恰好掩盖了真正的毛病：
+    # 未 detach 的软期望会把梯度按 wg*wv 铺到**全部 G×V 条**载荷上（压缩器被迫同时
+    # 满足所有事实）。现在改成"叶子 + 检查梯度分布"：载荷只能经由硬选那一路拿梯度。
+    # 注意：载荷的梯度有**两个合法来源** —— (a) 硬选那一路（z_hard 直接取选中版本），
+    # (b) 版本打分那一路（TemporalStateSelector 的输入本身就是载荷）。所以"非选中版本
+    # 梯度为 0"是错的断言。要验的是第三条路（软期望混合）必须被 detach：
+    #   STE 前向后的载荷梯度 必须与 hard=True 前向的载荷梯度**逐位相同**。
+    def _grad_with(hard_mode):
+        leaf = ver_z.clone().requires_grad_(True)
+        router.zero_grad()
+        o = router(q_feat, e_feat, r_feat, leaf, ver_t_feat, None, mask, hard=hard_mode)
+        o["z_read"].sum().backward()
+        return leaf.grad.clone(), int(o["group"]), int(o["version"])
+
+    # 载荷还有**第三个**合法梯度来源：版本打分函数的输入本身就是载荷
+    # （TemporalStateSelector 吃 z.flatten(-2)），所以必须先把这一路切断才能单独
+    # 检查"软期望混合"有没有漏梯度——否则测的是三条路的和，什么都测不出来。
+    _orig_ver = router.state.encode_versions
+    _fixed_ver = _orig_ver(ver_z, ver_t_feat).detach()
+    router.state.encode_versions = lambda z, t: _fixed_ver
+    g_ste, gs, vs = _grad_with(False)
+    g_hard, gh, vh = _grad_with(True)
+    router.state.encode_versions = _orig_ver
+    ok("I11 STE 不给载荷额外梯度（与 hard=True 的载荷梯度逐位相同）",
+       g_ste is not None and g_hard is not None and (gs, vs) == (gh, vh)
+       and torch.allclose(g_ste, g_hard, atol=1e-6),
+       extra=f"max|Δ|={float((g_ste - g_hard).abs().max()):.4g}")
 
 
 # =====================================================================
@@ -389,7 +423,12 @@ def test_fst_readout():
     bank.write(K_EMP, rand_payload(1), time="2023")
     bank.write(K_EMP, rand_payload(2), time="2025")
     bank.write(K_HOME, rand_payload(3), time="2024")
-    VALUE = "ZQXKVV"            # 只出现在值里，绝不能进 tokenizer
+    # 值只可能存在于载荷/事实原文里。原来的 J4 断言 "VALUE 不在 tokenizer 文本中"，
+    # 但全文没有任何一处把 VALUE 送进管线 —— 恒真。现在改成**白名单集合断言**：
+    # 读出期 tokenizer 只能看到 {system, 问题, 实体名, 属性名, 版本时间, 查询时间}，
+    # 任何"把事实原文拼进去"的实现都会让集合多出元素而被抓住。
+    VALUE = "ZQXKVV"
+    fact_text = f"Zhang works at {VALUE}."
 
     n_before = len(tok.texts)
     pred, meta = LM.generate_latent_answer_fst(
@@ -402,11 +441,16 @@ def test_fst_readout():
     ok("J2 meta 记录了两级选择", isinstance(meta["group_picked"], int)
        and isinstance(meta["ver_picked"], int)
        and meta["n_groups"] == 2 and meta["n_versions"] > 0, extra=str(meta))
-    ok("J3 读出期 tokenizer 只看到 system/问题/键名/时间，且键名里没有值",
-       all("zhang" in t.lower() or "employer" in t.lower()
-           or "residence" in t.lower() or "2023" in t or "2024" in t or "2025" in t
-           or t.startswith("<|") for t in seen), extra=str(seen))
-    ok("J4 事实值从未进入 tokenizer", all(VALUE not in t for t in seen), extra=str(seen))
+    joined = " ".join(seen)
+    # 实质检查：任何事实原文被拼进 prompt 都会让 "works at"/"lives in"/"residence" 这类
+    # 事实句成分出现在文本里（问题文本是 "Where does Zhang work?"，不含这些搭配）。
+    # 同时反向确认问题与 system **确实**进过 tokenizer，否则这条断言是空转的。
+    ok("J3 没有事实原文进入 tokenizer（且问题/system 确实进过，不是空转）",
+       ("works at" not in joined) and ("lives in" not in joined)
+       and ("Where does Zhang work?" in joined) and ("Be brief." in joined),
+       extra=str(seen[:6]))
+    ok("J4 事实原文与事实值从未进入 tokenizer",
+       all(VALUE not in t for t in seen) and fact_text not in joined, extra=str(seen[:6]))
     ok("J5 decode 正常返回", isinstance(pred, str))
 
     # 时间条件影响被读的版本（结构层面：query_time 不同 -> 版本候选集不变但打分变）
@@ -481,6 +525,216 @@ def test_checkpoint_roundtrip():
     ok("K5 has_fst=True 但权重缺失 -> 报错", raised)
 
 
+# =====================================================================
+# L. 组序/版本序/掩码的**内容级**对齐（错了不报错，只会"读到另一条属性"）
+# =====================================================================
+def test_alignment():
+    """上一轮把 gather_all_versions 的返回顺序反转，67 项断言**全过**，而读出
+    实际读到了另一条属性的载荷、meta 却照样报对的键 —— 这类静默错位必须用
+    "载荷归属"级别的断言才能抓住，光测形状没用。
+    """
+    bank = LM.LatentStateTrajectoryBank(hist_max=3)
+    KA, KB = LM.fact_key("A", "x"), LM.fact_key("B", "y")
+    bank.write(KA, rand_payload(11), time="2020")
+    bank.write(KA, rand_payload(12), time="2021")
+    bank.write(KB, rand_payload(13), time="2022")
+    keys = bank.group_keys()
+    per = bank.gather_all_versions(keys)
+    ok("L1 组数与版本数", len(keys) == 2 and len(per) == 2
+       and len(per[0]) == 2 and len(per[1]) == 1, extra=f"{keys} {[len(x) for x in per]}")
+    aligned = all(torch.equal(per[i][j], bank.payload(v["slot_id"]))
+                  for i, k in enumerate(keys)
+                  for j, v in enumerate(bank.list_versions(k)))
+    ok("L2 gather_all_versions 与 list_versions/payload 逐条对齐（组序错位必被抓）",
+       aligned)
+    ok("L3 两组载荷本来就不同（否则 L2 抓不到交换）",
+       not torch.equal(per[0][0], per[1][0]))
+    # 内容级：第 0 组的版本时间顺序必须是 2020 -> 2021（旧->新），且当前=NULL
+    ok("L4 组内版本顺序为旧->新且当前在最后",
+       [v["time"] for v in bank.list_versions(KA)] == ["2020", "2021"]
+       and bank.list_versions(KA)[-1]["current"] is True)
+
+    # ---- 组标记载荷：z_read 必须来自被选中的那一组 ----
+    torch.manual_seed(1)
+    router = LM.FstRouter(D_MODEL, n_slots=M, d_key=D_KEY).eval()
+    G, V = 2, 2
+    vz = torch.zeros(G, V, M, D_MODEL)
+    vz[0, 0] = 1.0
+    vz[0, 1] = 3.0            # 组 0 的"填充位"：若被误选，z_read 会变成 3.0
+    vz[1] = 7.0
+    zt = torch.zeros(G, V, D_MODEL)
+    # 组 0 只有 1 个版本（第 2 个是填充位），组 1 有 2 个
+    mask = torch.tensor([[True, False], [True, True]])
+    o_g, o_v = router.key.scores, router.state.scores
+    try:
+        router.key.scores = lambda q, k: torch.tensor([[-9.0, 9.0]])
+        router.state.scores = lambda q, k: torch.full((1, int(k.shape[0])), 0.5)
+        out = router(torch.randn(1, 2 * D_MODEL), torch.randn(G, D_MODEL),
+                     torch.randn(G, D_MODEL), vz, zt, None, mask, hard=True)
+        ok("L5 z_read 来自被选中的那一组（组序错位会被抓住）",
+           int(out["group"]) == 1
+           and torch.allclose(out["z_read"], torch.full((1, M, D_MODEL), 7.0)),
+           extra=f"group={out['group']} mean={float(out['z_read'].mean()):.3f}")
+        # 掩码端到端：组 0 只有 1 个版本，第 2 个候选是填充位；即使打分偏爱它也不能被选中
+        # （填充位若被选中，z_read 会是 3.0 而不是 1.0，所以这条断言有分辨力）
+        router.key.scores = lambda q, k: torch.tensor([[9.0, -9.0]])
+        router.state.scores = lambda q, k: torch.tensor([[0.0, 99.0, -99.0, -99.0]])
+        out2 = router(torch.randn(1, 2 * D_MODEL), torch.randn(G, D_MODEL),
+                      torch.randn(G, D_MODEL), vz, zt, None, mask, hard=True)
+        ok("L6 掩码位（填充版本）即使分高也不会被选中",
+           int(out2["group"]) == 0 and int(out2["version"]) == 0
+           and torch.allclose(out2["z_read"], torch.full((1, M, D_MODEL), 1.0)),
+           extra=f"g={out2['group']} v={out2['version']}")
+    finally:
+        router.key.scores, router.state.scores = o_g, o_v
+
+
+# =====================================================================
+# M. 数据 -> 库 -> 张量：目标定位与"训练/读出同源"（真实 jsonl 驱动）
+# =====================================================================
+def test_data_pipeline():
+    import train_latent_memory as T
+
+    model = freeze(StubModel())
+    tok = StubTok()
+    comp = LM.LatentCompressor(model.config.hidden_size, n_slots=M, inner_dim=64,
+                              num_heads=4).eval()
+    bridge = LM.LatentBridge(model.config.hidden_size, bottleneck=16).eval()
+    router = LM.FstRouter(model.config.hidden_size, n_slots=M, d_key=D_KEY).eval()
+    encoder = LM.LatentEncoder(model, tok, comp, layer=2, max_unit_tokens=16)
+
+    path = os.path.join(ROOT, "synth", "fst_update_val.jsonl")
+    if not os.path.exists(path):
+        ok("M0 需要 synth/fst_update_val.jsonl（先生成数据）", False, extra=path)
+        return
+    rows = T.load_synth_jsonl(path, limit=8, seed=0)
+    hist = [r for r in rows if r.get("probe") == "history"][:1]
+    cur = [r for r in rows if r.get("probe") == "current"][:1]
+    ok("M1 数据里同时有 current 与 history 探针", bool(hist) and bool(cur))
+
+    fi = T.build_fst_bank(encoder, cur[0], 4, tag="val", grad=False)
+    item = cur[0]
+    ok("M2 目标组指向该行的 fact_key",
+       fi["keys"][int(fi["tgt_group"])] == fi["tgt_key"] == LM.fact_key(
+           item["entity"], item["relation"]), extra=str(fi["tgt_key"]))
+    vers = fi["bank"].list_versions(fi["tgt_key"])
+    ok("M3 tgt_ver 的时间 == answer_fact_time（当前版本）",
+       fi["viable"] and vers[int(fi["tgt_ver"])]["time"] == LM._norm_time(
+           item["answer_fact_time"]), extra=f"{vers} / {item['answer_fact_time']}")
+    ok("M4 tgt_ver 与 bank.read() 的选择一致（并列/兜底规则同源）",
+       fi["bank"].read(fi["tgt_key"], item["answer_fact_time"])
+       == vers[int(fi["tgt_ver"])]["slot_id"])
+    # 大小写：键是规范化过的（小写），readout 若从键反推就会拿到不同文本
+    k0 = fi["keys"][0]
+    ok("M5 库里存的是**原始大小写**实体名（与从键反推的规范化文本不同）",
+       fi["bank"].group_text(k0)[0] == item["entity"]
+       and fi["bank"].group_text(k0)[0] != LM.split_fact_key(k0)[0],
+       extra=f"{fi['bank'].group_text(k0)} vs {LM.split_fact_key(k0)}")
+
+    # 训练侧与读出侧必须把**同一份字符串**喂进编码器
+    # 两侧各用**独立**缓存：否则读出侧会命中训练侧留下的缓存，根本不 tokenize，
+    # 断言就退化成"缓存命中"（我第一版就这么写错了，M6 直接假失败）。
+    tok.texts = []
+    T.fst_build_inputs(fi, model, tok, 2, torch.device("cpu"), {})
+    train_txt = set(tok.texts)
+    tok.texts = []
+    LM.generate_latent_answer_fst(model=model, tokenizer=tok, bridge=bridge,
+                                  bank=fi["bank"], question=item["question"],
+                                  system_prompt="Be brief.", fst_router=router,
+                                  max_new_tokens=2, layer=2,
+                                  query_time=item.get("as_of"), feat_cache={})
+    read_txt = set(tok.texts)
+    want = {item["entity"], item["relation"]}
+    ok("M6 训练侧与读出侧用同一份实体/属性文本（原始大小写）",
+       want <= train_txt and want <= read_txt,
+       extra=f"train={sorted(train_txt)[:6]} read={sorted(read_txt)[:6]}")
+    # 反向确认缓存键口径一致：共享缓存时读出侧不应再 tokenize 实体/属性
+    shared = {}
+    T.fst_build_inputs(fi, model, tok, 2, torch.device("cpu"), shared)
+    tok.texts = []
+    LM.generate_latent_answer_fst(model=model, tokenizer=tok, bridge=bridge,
+                                  bank=fi["bank"], question=item["question"],
+                                  system_prompt="Be brief.", fst_router=router,
+                                  max_new_tokens=2, layer=2,
+                                  query_time=item.get("as_of"), feat_cache=shared)
+    ok("M6b 共享缓存时读出侧不再重算实体/属性特征（缓存键口径一致）",
+       not (want & set(tok.texts)), extra=str(sorted(set(tok.texts))[:6]))
+
+    if hist:
+        fh = T.build_fst_bank(encoder, hist[0], 4, tag="val", grad=False)
+        vh = fh["bank"].list_versions(fh["tgt_key"])
+        ok("M7 历史题指向旧版本（不是当前）",
+           fh["viable"] and vh[int(fh["tgt_ver"])]["time"]
+           == LM._norm_time(hist[0]["answer_fact_time"])
+           and int(fh["tgt_ver"]) < len(vh) - 1, extra=str(vh))
+        f0 = T.build_fst_bank(encoder, hist[0], 0, tag="val", grad=False)
+        ok("M8 hist_max=0 时历史题的目标版本被真正淘汰（evicted=True, viable=False）",
+           bool(f0["evicted"]) and not f0["viable"], extra=str(f0["tgt_ver"]))
+        ok("M9 hist_max=0 时不误判为'标签缺失'",
+           not f0["label_missing"] and not f0["label_mismatch"])
+
+
+# =====================================================================
+# N. 指标口径（纯函数 fst_scores）+ 并列时间戳的监督定位
+# =====================================================================
+def test_metrics_and_targets():
+    import train_latent_memory as T
+
+    def rec(**kw):
+        base = {"okq": False, "g_ok": True, "ver_picked": 0, "tgt_ver": 0,
+                "viable": True, "tgt_ver_n": 2, "tgt_group": 0, "evicted": False,
+                "label_missing": False, "probe": "current", "question": "q?", "gold": "a",
+                "n_soft": 4}
+        base.update(kw)
+        return base
+
+    # N1 版本命中必须绑组别：组选错但版本下标碰巧相同，不得算命中
+    bad = [rec(g_ok=False, ver_picked=0, tgt_ver=0)] * 4
+    m = T.fst_scores(bad)
+    ok("N1 组选错时版本级一律不计命中", m["ver_acc"] == 0.0 and m["ver_multi_acc"] == 0.0,
+       extra=str({k: m[k] for k in ("ver_acc", "ver_multi_acc")}))
+    # N2 单版本目标组不计入版本级分母（否则恒真样本虚抬）
+    mix = [rec(tgt_ver_n=1, ver_picked=0, tgt_ver=0) for _ in range(6)] + \
+          [rec(tgt_ver_n=2, ver_picked=1, tgt_ver=0)]
+    m2 = T.fst_scores(mix)
+    ok("N2 单版本样本不进版本级分母", m2["ver_multi_n"] == 1 and m2["ver_multi_acc"] == 0.0,
+       extra=str((m2["ver_multi_n"], m2["ver_multi_acc"])))
+    # N3 单成员配对不算通过；gold 相同的配对也不算反事实配对
+    m3 = T.fst_scores([rec(question="q1", gold="a", okq=True),
+                       rec(question="q2", gold="a", okq=True),
+                       rec(question="q2", gold="a", okq=True),
+                       rec(question="q3", gold="a", okq=True),
+                       rec(question="q3", gold="b", okq=False)])
+    ok("N3 单成员/同值配对不计入 pair_acc", m3["pair_n"] == 1 and m3["pair_acc"] == 0.0
+       and m3["pair_dropped_n"] == 2,
+       extra=str({k: m3[k] for k in ("pair_n", "pair_acc", "pair_dropped_n")}))
+    # N4 常数基线：永远选最新版
+    m4 = T.fst_scores([rec(tgt_ver_n=2, tgt_ver=1, ver_picked=1)] * 3)
+    ok("N4 最新版常数基线", m4["ver_newest_acc"] == 1.0 and m4["ver_multi_acc"] == 1.0)
+
+    # N5 并列时间戳：监督必须取**最新**那条，且与 bank.read() 的选择一致
+    model = freeze(StubModel())
+    tok = StubTok()
+    comp = LM.LatentCompressor(model.config.hidden_size, n_slots=M, inner_dim=64,
+                              num_heads=4).eval()
+    enc = LM.LatentEncoder(model, tok, comp, layer=2, max_unit_tokens=16)
+    item = {"units": ["A works at X.", "A works at Y."], "hops": 1,
+            "unit_meta": [{"entity": "A", "relation": "works at", "time": "2025",
+                           "fact": "A works at X.", "distractor": False},
+                          {"entity": "A", "relation": "works at", "time": "2025",
+                           "fact": "A works at Y.", "distractor": False}],
+            "question": "Where does A work?", "answer": "Y",
+            "evidence": ["A works at Y."], "entity": "A", "relation": "works at",
+            "fact_key": "a||works at", "as_of": "", "answer_fact_time": "2025",
+            "probe": "current", "timeline": []}
+    fi = T.build_fst_bank(enc, item, 4, tag="val", grad=False)
+    vers = fi["bank"].list_versions(fi["tgt_key"])
+    ok("N5 并列时间戳时监督取最新版本，且与 bank.read() 一致",
+       len(vers) == 2 and int(fi["tgt_ver"]) == 1
+       and fi["bank"].read(fi["tgt_key"], "2025") == vers[1]["slot_id"],
+       extra=f"tgt_ver={fi['tgt_ver']} read={fi['bank'].read(fi['tgt_key'], '2025')}")
+
+
 def main():
     test_fact_key()
     test_fact_key_encoder()
@@ -488,6 +742,9 @@ def main():
     test_fst_router()
     test_fst_readout()
     test_checkpoint_roundtrip()
+    test_alignment()
+    test_data_pipeline()
+    test_metrics_and_targets()
     print("=" * 70)
     if FAILS:
         print(f"FAILED {len(FAILS)}/{N_OK + len(FAILS)}: {FAILS}")

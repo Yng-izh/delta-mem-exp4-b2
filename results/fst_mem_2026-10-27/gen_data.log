@@ -1,3 +1,5 @@
+[validate] fst_update_train.jsonl OK：192 行，答案值无泄漏、干扰键无冲突、配对完整
+[validate] fst_update_val.jsonl OK：72 行，答案值无泄漏、干扰键无冲突、配对完整
 [out] train=192 -> /Users/yngizh/quant/deepseek/delta-mem-exp4/synth/fst_update_train.jsonl
 [out] val=72 -> /Users/yngizh/quant/deepseek/delta-mem-exp4/synth/fst_update_val.jsonl
 [out] 实体 train/val=32/12（不相交）+64 个只做干扰

@@ -78,8 +78,10 @@ finally:
 **位置**：`latent_memory.LatentFactKeyEncoder / LatentStateTrajectoryBank / FstRouter`、
 `train_latent_memory.py --fst`
 
-**现状**：三个机制**结构上都已做到**并有 67 项单测断言（键与值无关、改 A 不动 B 逐位相等、
-两级竞争隔离、前向硬选 + STE、ckpt 严格往返），但：
+**现状**：三个机制**结构上都已做到**并有 88 项单测断言（键与值无关、改 A 不动 B 逐位相等、
+两级竞争隔离、前向硬选 + STE、ckpt 严格往返、内容级对齐、指标口径、并列时间戳），
+且 `tools/audit_mutations.py` 用 6 个变异确认这些断言**真有约束力**（核查轮之前有 3 条恒真，
+让 4 个静默 bug 在 67 项断言下安然无恙，见 CHANGELOG v9.6.1）。但：
 - **一步真实训练都没跑** → 没有任何 `acc / group_acc / ver_multi_acc` 的可用数字；
 - `--fst --smoke-model` 的 smoke 指标是**随机权重下的噪声**，不能引用；
 - 没有与"直接拼接潜槽位 / 阶段 A Router / 硬覆写"的对照跑分。
@@ -89,7 +91,11 @@ finally:
 
 **怎么修**：按 `ARCHITECTURE.md §6.5` 的消融矩阵在 v100-2 上依次跑
 （`--router` → `--fst --hist-max 0` → `--fst --hist-max 2` → `--fst --ignore-query-time`），
-每档至少 3 个 seed，报 `acc + group_acc + ver_multi_acc + 三探针 + pair_acc + order_stable`。
+每档至少 3 个 seed，报 `acc + group_acc + ver_multi_acc + 三探针 + pair_acc + order_stable`，
+并且**必须同时报两个常数基线**（`group_const_acc` = 永远选第一组、`ver_newest_acc` = 永远选最新版），
+否则"随机权重下 0.33"会被误读成有信号 —— 核查轮 smoke 里基线其实是 0.667。
+另：评估集必须**按整组问题**截断（`fst_eval_subset`），按行截断会把反事实配对切两半，
+`pair_n` 直接变 0。
 
 ### 3.6 FST 没有多跳、没有接进线上管线
 
@@ -116,6 +122,11 @@ finally:
 **一个都没测**。
 
 **影响**：`hist_max` 目前是拍的常数，不是实验结论。审稿人会问"历史很长怎么办"。
+
+**已修的相关数据坑**：`hist_max=0` 时"目标版本被淘汰"与"数据缺时间戳"此前共用一个
+`viable=False` 标志，导致无法区分"容量机制在起作用"和"数据有洞"。现已拆成
+`evicted / label_missing / label_mismatch`，训练只跳过 `evicted`（日志 `skip_evicted`），
+遇到 `label_mismatch`（答案不在库里）直接报错。
 
 **怎么修**：造 `hist_max ∈ {0,1,2,4,8}` × 时间跨度 ∈ {3,6,12} 的网格，
 报 `history` 探针准确率与 `n_versions` 的关系曲线。

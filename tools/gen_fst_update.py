@@ -15,12 +15,20 @@
 
 反事实配对的口径与 exp2 一致：同一实体、同一问题文本，两个变体的雇主值互换
 （A→B 与 B→A）。只有真的读了**当前版本**才能两组都答对；背 Question→Answer 必错。
+**注意配对只对 current / history 两个探针成立**：unrelated 探针问的是居住地，
+居住地在两个变体里是同一个值，两个变体的 gold 相同 —— 那种"对"不含任何反事实信息，
+评估侧必须把它排除在 pair_acc 之外（`evaluate_fst` 按"同问题且 gold 不同"筛）。
 
 刻意不做的事：
   - 不 shuffle memory 顺序。时间线顺序本身是"追加式记忆"最强的形态，故意留给
     "全部历史追加"基线；FST 不依赖顺序（版本由 time 字段索引），这样对比才公平。
   - 不制造"两条事实同时间戳"的样本：那种样本的正确读法本身有歧义，
     混进来只会让指标无法归因。
+  - **干扰事实的值不与本行任何答案值重合**。旧版从同一个 VALUES 池随机取，
+    结果 21.9% 的训练行里答案字符串直接出现在干扰事实中 —— 那等于"值在场即可答"，
+    不需要正确读目标槽位/版本，准确率被系统性虚高（与 exp2 的 22.5% 缺陷同一类）。
+  - 干扰事实的实体**只从本侧实体池取**，否则"train/val 实体不重叠"只对目标键成立，
+    干扰文本里仍会出现对侧实体名，"未见实体泛化"这个说法就站不住。
 """
 from __future__ import annotations
 
@@ -58,7 +66,10 @@ def build_timeline(rng, entity, emp_values, home_value, years):
 
 
 def make_rows(rng, entity, other_entities, years, n_distractors=2):
-    """一个实体 -> 2 个反事实变体 × 3 个问题 = 6 行。"""
+    """一个实体 -> 2 个反事实变体 × 3 个问题 = 6 行。
+
+    other_entities 必须是**同侧**实体池（train 行的干扰实体不能来自 val，反之亦然）。
+    """
     emp_a, emp_b = rng.sample(VALUES[REL_EMP], 2)
     home = rng.choice(VALUES[REL_HOME])
     rows = []
@@ -70,11 +81,21 @@ def make_rows(rng, entity, other_entities, years, n_distractors=2):
         # 干扰事实：**同关系不同实体**（逼模型做实体绑定）+ 其他随机事实
         dis, dis_meta, used_keys = [], [], {f"{entity.lower()}||{REL_EMP}",
                                            f"{entity.lower()}||{REL_HOME}"}
+        # 三个答案值都不能出现在干扰事实里（两个变体的当前/历史雇主 + 居住地）
+        forbid = {emp_a, emp_b, home}
+        tries = 0
         while len(dis) < n_distractors:
+            tries += 1
+            if tries > 200:
+                raise SystemExit(f"干扰事实生成失败（值池太小？）：entity={entity} "
+                                 f"forbid={sorted(forbid)}")
             e2 = rng.choice(other_entities)
             r2 = rng.choice([REL_EMP, REL_HOME])
             k2 = f"{e2.lower()}||{r2}"
-            f = SENT[r2].format(s=e2, v=rng.choice(VALUES[r2]))
+            pool = [v for v in VALUES[r2] if v not in forbid]
+            if not pool:
+                raise SystemExit(f"VALUES[{r2}] 去掉答案值后为空：{sorted(VALUES[r2])}")
+            f = SENT[r2].format(s=e2, v=rng.choice(pool))
             # 干扰事实的 (实体,属性) 键必须与已有键互不冲突：
             # 同一个键被写成"两条同时刻版本"会让"该读哪个版本"本身有歧义，
             # 这种样本混进来会让指标无法归因（分不清是机制错还是数据歧义）。
@@ -114,6 +135,64 @@ def make_rows(rng, entity, other_entities, years, n_distractors=2):
     return rows
 
 
+def validate(rows, label=""):
+    """生成后立刻自检。任何一条不成立就 SystemExit —— 数据缺陷必须在生成时炸，
+    而不是等到训练完发现准确率虚高再回头怀疑方法。"""
+    bad = []
+
+    def norm(x):
+        return " ".join(str(x).lower().split())
+
+    for i, r in enumerate(rows):
+        ums = r.get("unit_meta") or []
+        units = r.get("units") or []
+        if len(ums) != len(units):
+            bad.append((i, f"unit_meta {len(ums)} != units {len(units)}"))
+            continue
+        for um, u in zip(ums, units):
+            if norm(um.get("fact")) != norm(u):
+                bad.append((i, f"unit_meta.fact != units: {um.get('fact')!r} vs {u!r}"))
+        # ① 答案值不得出现在**任何非目标单元**里（否则"值在场就能答对"）
+        ans = norm(r.get("answer"))
+        ev = {norm(e) for e in (r.get("evidence") or [])}
+        for um, u in zip(ums, units):
+            if norm(u) in ev:
+                continue
+            if ans and ans in norm(u):
+                bad.append((i, f"答案值出现在非目标单元：answer={r.get('answer')!r} "
+                               f"unit={u!r}"))
+        # ② 干扰项的事实键不得与目标键冲突，也不得互相重复
+        tgt_key = f"{str(r.get('entity')).lower()}||{r.get('relation')}"
+        seen = set()
+        for um in ums:
+            if not um.get("distractor"):
+                continue
+            k = f"{str(um.get('entity')).lower()}||{um.get('relation')}"
+            if k == tgt_key:
+                bad.append((i, f"干扰项键与目标键相同：{k}"))
+            if k in seen:
+                bad.append((i, f"干扰项键重复：{k}"))
+            seen.add(k)
+    # ③ 反事实配对：current/history 探针必须同问题两行且 gold 不同
+    groups = {}
+    for r in rows:
+        groups.setdefault((norm(r.get("question")), r.get("probe")), []).append(
+            norm(r.get("answer")))
+    for (q, probe), golds in groups.items():
+        if probe in ("current", "history"):
+            if len(golds) != 2:
+                bad.append((-1, f"配对行数不是 2：probe={probe} q={q!r} n={len(golds)}"))
+            elif len(set(golds)) != 2:
+                bad.append((-1, f"配对两行 gold 相同（不含反事实信息）：q={q!r}"))
+        if probe == "unrelated" and len(set(golds)) != 1:
+            bad.append((-1, f"unrelated 探针两变体 gold 应相同：q={q!r} {set(golds)}"))
+    if bad:
+        for b in bad[:10]:
+            print(f"[validate][FAIL] {label} 行{b[0]}: {b[1]}", file=sys.stderr)
+        raise SystemExit(f"[validate] {label} 共 {len(bad)} 处不成立，拒绝落盘")
+    print(f"[validate] {label} OK：{len(rows)} 行，答案值无泄漏、干扰键无冲突、配对完整")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-out", default=os.path.join(ROOT, "synth", "fst_update_train.jsonl"))
@@ -139,8 +218,10 @@ def main():
     def dump(entities, path):
         rows = []
         for e in entities:
-            others = [x for x in all_names if x != e]
+            # 同侧实体池：干扰事实的实体也不跨侧（见文件头"刻意不做的事"）
+            others = [x for x in list(entities) + list(extra) if x != e]
             rows.extend(make_rows(rng, e, others, years, args.n_distractors))
+        validate(rows, label=os.path.basename(path))
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             for r in rows:
@@ -153,6 +234,14 @@ def main():
     leak = set(train_ent) & set(val_ent)
     if leak:
         raise SystemExit(f"训练/验证实体重叠：{sorted(leak)[:5]}")
+    # 目标键不重叠还不够：干扰文本里出现对侧实体名，"未见实体"就不是真的未见
+    def texts(rows):
+        return " ".join(" ".join(r.get("units") or []) for r in rows)
+    tr_txt, va_txt = texts(tr), texts(va)
+    cross = sorted({e for e in val_ent if e in tr_txt} |
+                   {e for e in train_ent if e in va_txt})
+    if cross:
+        raise SystemExit(f"对侧实体名出现在记忆文本里（{len(cross)} 个）：{cross[:5]}")
     probes = {}
     for r in tr:
         probes[r["probe"]] = probes.get(r["probe"], 0) + 1
