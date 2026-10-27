@@ -13,8 +13,8 @@
 | text BM25 top-4（Text-RAG） | 36.0 | 97.0 | 150.5 | 2002 |
 | text BM25 top-16 | 47.0 | 100.0 | 558.1 | 4928 |
 | oracle（仅支持事实，上界） | 58.0 | 100.0 | 94.1 | 1506 |
-| Compressor+Bridge（潜层） | 17.5 | 35.0 | 9.0 | 2824 |
-| Compressor+Router+Bridge（潜层） | 17.5 | 27.5 | 9.0 | 2901 |
+| Compressor+Bridge（潜层，ckpt@300） | 17.5 | 35.0 | 9.0 | 2824 |
+| Compressor+Router+Bridge（潜层，最终 ckpt） | 17.5 | 50.0 | 9.0 | 4151 |
 | FST-Mem | —（两跳链式读出未接入，见 KNOWN_ISSUES） | | | |
 
 ## 表 2：MemoryAgentBench Conflict Resolution（val，基线 100 题 / 潜层 40 题，cap=32）

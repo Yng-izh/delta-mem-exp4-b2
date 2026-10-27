@@ -27,7 +27,7 @@
 | `bridge` dis0（0 干扰段，训练 ckpt@300） | 40 | **20.0** | 75.0 | n/a | n/a | n/a | 9.0 | 9.0 | 1604 |
 | `bridge` dis4（4 干扰段，同一 ckpt） | 40 | **17.5** | 35.0 | n/a | n/a | n/a | 9.0 | 9.0 | 2824 |
 | `bridge` dis4-shuffled（同题同干扰，顺序打乱） | 40 | **17.5** | 35.0 | n/a | n/a | n/a | 9.0 | 9.0 | 2808 |
-| `router`（Compressor+Router+Bridge） | — | 训练中 | — | — | — | — | 4 | — | — |
+| `router`（Compressor+Router+Bridge，最终 ckpt） | 40 | 17.5 | 50.0 | n/a | n/a | n/a | 9.0 | 9.0 | 4151 |
 | `fst`（FST-Mem） | — | 在 MAB-CR 上，见 mab_cr_2026-10-27 | — | — | — | — | 4 | — | — |
 
 ### 抗干扰扫描的第一组对照（bridge 消融，同 40 题）
