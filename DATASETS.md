@@ -31,7 +31,19 @@ MemoryAgentBench Conflict Resolution（冲突覆盖）、LongMemEval cleaned（�
 3. **96% 是 2 跳（bridge/comparison 全为 multi-hop）**：`hops=2` 的链式选槽必须开，
    否则两跳题永远不可能对。
 
-### 0.2 MAB-CR 的容量限制（写进报告，不许隐瞒）
+### 0.2 MAB-CR 转换结果（实测，`tools/prep_mab.py --cap 32`）
+
+| 项 | 值 |
+|---|---|
+| 样本数 | 800（8 个 context 组 × 100 问，0 条丢弃） |
+| 每问可见事实 | 固定 32（`--cap`，写入 `meta.cap`；原始 context 有几百条） |
+| **含冲突版本样本** | **76.8%**（同一 `(entity, relation)` 有 ≥2 个不同取值 → "用最新值覆盖旧值"真正被考到） |
+| 关系解析失败率 | 0.2%（模板表解析，不是 LLM 抽取） |
+| 训练 / 验证切分 | 500 / 300，按 context 源切（`{sh,mh}_{6k,32k,64k}` 训练，`{sh,mh}_262k` + `mh_6k` 验证） |
+| FST 字段 | `unit_meta[i] = {fact, entity, relation, time=事实编号, distractor}`；`entity/relation`（金标那条）与 `answer_fact_time` 供两级寻址监督 |
+| 时间轴 | **事实编号**（MAB 没有时间戳，编号越大越新） |
+
+### 0.3 MAB-CR 的容量限制（写进报告，不许隐瞒）
 
 CR 的一条 6k context 有几百条事实，而槽位记忆**一条事实一个槽、每槽一次编码前向**
 → 每问几十秒。因此按 `--cap` 限定每问可见事实数（默认 32），选法是

@@ -205,13 +205,25 @@ def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
         "memory": " ".join(units),
         "units": units,
         # 时间轴用事实编号：CR 的"新"就是编号更大（数据集没有时间戳）
-        "unit_meta": [{"entity": f["entity"], "relation": f["relation"],
+        # unit_meta 必须与 units 逐条对齐，且 `fact` 字段要**逐字**等于对应 unit：
+        # build_fst_bank 用它校验对齐，缺字段会在训练第一步直接报错（比静默错键好）。
+        "unit_meta": [{"fact": f["text"], "entity": f["entity"], "relation": f["relation"],
                        "time": f["idx"], "distractor": f["idx"] not in gold_idx}
                       for f in sel],
         "question": question,
         "answer": gold_val,
         "evidence": ev,
         "hops": 1,
+        # CR 只考"当前值"（答案是覆盖后的最新值）；MAB 没有"访问历史旧值"的题，
+        # 所以 probe 固定 current，历史访问准确率这一列在 CR 上是 n/a（在 FST 合成集与
+        # 后续 LME knowledge-update 上才报）。
+        "probe": "current",
+        # 目标事实键（FST 两级寻址的监督目标）：取金标那条事实的 entity/relation。
+        # 缺了它 build_fst_bank 会直接报 "entity/relation 都为空" —— 这是好事，
+        # 静默给个默认键会让所有样本一起挤到同一个组里，指标看着还正常。
+        "entity": next(f["entity"] for f in sel if f["idx"] in gold_idx),
+        "relation": next(f["relation"] for f in sel if f["idx"] in gold_idx),
+        "answer_fact_time": gold_idx[0],
         "as_of": max(keep),
         "meta": dict(meta, qid=qid, n_units=len(units), n_kept=len(keep),
                      n_gold=len(ev), max_versions=n_conflict,

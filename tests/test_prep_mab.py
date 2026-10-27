@@ -94,8 +94,9 @@ def test_item():
     it = M.build_item(facts, keep, "Where was Thomas Kyd born?", [["Norwich"]],
                       gold, val, {"source": "t", "cap": 5,
                                   "n_facts_total": len(facts)}, "q0")
-    ok("M3 unit_meta 与 units 逐条对齐",
-       len(it["unit_meta"]) == len(it["units"]) == len(keep))
+    ok("M3 unit_meta 与 units 逐条对齐（含 fact 字段逐字相等，FST 训练第一步就会校验它）",
+       len(it["unit_meta"]) == len(it["units"]) == len(keep)
+       and all(m["fact"] == u for m, u in zip(it["unit_meta"], it["units"])))
     ok("M3b evidence 是金标事实原文且都在 units 里",
        it["evidence"] == ["Thomas Kyd was born in the city of Norwich."]
        and all(e in it["units"] for e in it["evidence"]))
@@ -104,6 +105,10 @@ def test_item():
     ok("M3d time 用事实编号（CR 无时间戳，越靠后越新）",
        [m["time"] for m in it["unit_meta"]] == sorted(m["time"] for m in it["unit_meta"]))
     ok("M3e answer 取的是最新值对应的答案串", it["answer"] == "Norwich")
+    ok("M3f probe=current 且 answer_fact_time=金标编号（FST 目标版本靠它）",
+       it["probe"] == "current" and it["answer_fact_time"] == gold[0])
+    ok("M3g 目标事实键 = 金标那条的 entity/relation（缺了 build_fst_bank 会报错）",
+       it["entity"] == "Thomas Kyd" and it["relation"] == "born_in_city")
 
 
 def test_layout_compat():
