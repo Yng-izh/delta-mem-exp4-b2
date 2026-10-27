@@ -1,0 +1,29 @@
+/share/exp4group/tests/test_latent_readout.py:516: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  ok("H2 全 padding 行输出被置零", float(z[1].abs().sum()) == 0.0)
+======================================================================
+tests/test_latent_readout.py — 潜层读出机制验证（CPU / 无模型）
+======================================================================
+
+--- test_no_plaintext_interface ---
+
+--- test_soft_token_placement ---
+
+--- test_gradients ---
+
+--- test_chunking ---
+
+--- test_bank_semantics ---
+
+--- test_cr_path_budget ---
+
+--- test_manifest_fingerprint ---
+
+--- test_empty_rows ---
+
+--- test_checkpoint_roundtrip ---
+
+--- test_budget_math ---
+
+======================================================================
+ALL PASS (89 checks)

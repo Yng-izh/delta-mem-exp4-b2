@@ -128,6 +128,7 @@ z_read = z_hard + (z_soft - z_soft.detach())
 | `smoke_chunk.log` | `--max-unit-tokens 8` 强制多块 | **暴露问题 2/3**；修复后 `soft_tokens=4`（槽边界保住） |
 | `smoke_final.log` | 端到端（多块+router+recon+eval） | `[params] 14.375M (compressor=4.994M, bridge=2.630M, router=6.752M)`、`soft_tokens=4`、eval-reload/after-reset 均走含 router 的重载 reader |
 | `smoke_evidence.log` | evidence 修复后 25 步 | `loss_addr` 0.66~1.62 波动、`gnorm_router` 非零、`recon token-acc=0.241` |
+| `test_latent_readout_89.log` | 机制单测全量 | `ALL PASS (89 checks)`（成功项不逐条打印，只计数；86 → 89 即新增 A8/A9/A10 已生效） |
 
 单元测试：`tests/test_latent_readout.py` 由 86 项扩到 **89 项全过**
 （A1 白名单纳入 `router/q_feat/layer/hops` 并保留明文参数禁令；
