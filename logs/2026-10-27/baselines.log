@@ -1,0 +1,26 @@
++ cd /share/exp4group
+++ nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits
+++ sort -t, -k2 -n
+++ head -1
+++ cut -d, -f1
++ G=2
++ echo gpu=2
+gpu=2
++ export CUDA_VISIBLE_DEVICES=2 HF_HOME=/share/hf_home HF_HUB_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
++ CUDA_VISIBLE_DEVICES=2
++ HF_HOME=/share/hf_home
++ HF_HUB_OFFLINE=1
++ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
++ export DELTA_MEM_SCAN_IMPL=torch PYTHONPATH=/share/exp4group/shim19:/share/exp4group:/share/delta-Mem
++ DELTA_MEM_SCAN_IMPL=torch
++ PYTHONPATH=/share/exp4group/shim19:/share/exp4group:/share/delta-Mem
++ D=synth/hotpot_sweep/hotpot_validation_dis4_natural.jsonl
++ for M in none oracle
++ /share/conda/envs/latent2/bin/python eval_latent_table.py --method none --data synth/hotpot_sweep/hotpot_validation_dis4_natural.jsonl --limit 100 --label none --save-json results/hotpot_none.json
+| 方法 | n | acc% | 读对槽位% | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|
+| none | 100 | 12.0 | n/a | n/a | n/a | n/a | 0.0 | 22.3 | 1219 |
+{"label": "none", "n": 100, "acc": 0.12, "pair_acc": null, "pair_n": 0, "mem_tokens": 0.0, "prompt_tokens": 22.26, "ms_mean": 1218.5059, "ms_p50": 1056.8323, "pre_ms_mean": 0.0, "read_acc": null}
+[out] -> results/hotpot_none.json
++ for M in none oracle
++ /share/conda/envs/latent2/bin/python eval_latent_table.py --method oracle --data synth/hotpot_sweep/hotpot_validation_dis4_natural.jsonl --limit 100 --label oracle --save-json results/hotpot_oracle.json

@@ -1,0 +1,22 @@
+gpu=7
+| 方法 | n | acc% | 读对槽位% | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|
+| cr-none | 100 | 4.0 | n/a | n/a | n/a | n/a | 0.0 | 15.7 | 759 |
+{"label": "cr-none", "n": 100, "acc": 0.04, "pair_acc": null, "pair_n": 0, "mem_tokens": 0.0, "prompt_tokens": 15.74, "ms_mean": 759.3665, "ms_p50": 557.6558, "pre_ms_mean": 0.0, "read_acc": null}
+[out] -> results/mab_cr_none.json
+| 方法 | n | acc% | 读对槽位% | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|
+| cr-oracle | 100 | 32.0 | 100.0 | n/a | n/a | n/a | 14.7 | 43.4 | 1058 |
+{"label": "cr-oracle", "n": 100, "acc": 0.32, "pair_acc": null, "pair_n": 0, "mem_tokens": 14.7, "prompt_tokens": 43.44, "ms_mean": 1057.5011, "ms_p50": 772.7752, "pre_ms_mean": 1056.4693, "read_acc": 1.0}
+[out] -> results/mab_cr_oracle.json
+| 方法 | n | acc% | 读对槽位% | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|
+| cr-text-top4 | 100 | 17.0 | 95.0 | n/a | n/a | n/a | 45.1 | 73.9 | 1460 |
+{"label": "cr-text-top4", "n": 100, "acc": 0.17, "pair_acc": null, "pair_n": 0, "mem_tokens": 45.15, "prompt_tokens": 73.89, "ms_mean": 1460.3345, "ms_p50": 1191.8757, "pre_ms_mean": 1458.9516, "read_acc": 0.95}
+[out] -> results/mab_cr_text_top4.json
+| 方法 | n | acc% | 读对槽位% | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|
+| cr-text-top32 | 100 | 14.0 | 100.0 | n/a | n/a | n/a | 375.8 | 404.6 | 3663 |
+{"label": "cr-text-top32", "n": 100, "acc": 0.14, "pair_acc": null, "pair_n": 0, "mem_tokens": 375.82, "prompt_tokens": 404.56, "ms_mean": 3662.9656, "ms_p50": 3495.8265, "pre_ms_mean": 3659.7624, "read_acc": 1.0}
+[out] -> results/mab_cr_text_top32.json
+[mab-baselines] done

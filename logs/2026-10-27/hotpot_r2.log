@@ -1,0 +1,590 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0002 accum=4 kl=0.0 recon=0.3 smoke=False dry_run=False
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+/share/exp4group/train_latent_memory.py:892: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+[router] LatentRouter 启用：d_key=256 τ0=0.0700 addr_weight=1.0
+[params] 可训练 14.375M (compressor=4.994M, bridge=2.630M, router=6.752M)
+[data] synth/hotpot_train.jsonl: train=2500 val=120 hops={2: 2500} 平均记忆单元=32.2
+[data] 例：units=['James Henry Miller (25 January 1915 – 22 October 1989), better known by his stage name Ewan MacColl, was an English folk singer, songwriter, communist, labour activist, actor, poet, playwright and record producer.', 'Margaret "Peggy" Seeger (born June 17, 1935) is an American folksinger.', 'She is also well known in Britain, where she has lived for more than 30 years, and was married to the singer and songwriter Ewan MacColl until his death in 1989.'] q="What nationality was James Henry Miller's wife?" a='American'
+  [eval@0] ✗ q='What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?' gold='Animorphs' pred='The Broken Earth trilogy'
+  [eval@0] ✗ q='2014 S/S is the debut album of a South Korean boy group that was formed by who?' gold='YG Entertainment' pred='SM Entertainment'
+  [eval@0] ✗ q='Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?' gold='Eenasul Fateh' pred='Aladin was the stage name of **John C. Maxwell**.'
+  [eval@0] ✓ q='Are Local H and For Against both from the United States?' gold='yes' pred='Yes'
+  [eval@0] ✗ q='What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?' gold='Kansas Song' pred='"KU Fight Song"'
+  [eval@0] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?' gold='1999' pred='1991'
+  [eval@0] ✗ q="The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?" gold='the North Atlantic Conference' pred="The Vermont Catamounts men's soccer team currently competes "
+  [eval@0] ✗ q='Which writer was from England, Henry Roth or Robert Erskine Childers?' gold='Robert Erskine Childers DSC' pred='Robert Erskine Childers'
+  [eval@0] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?' gold="World's Best Goalkeeper" pred='The father of Kasper Schmeichel, Peter Schmeichel, was voted'
+  [eval@0] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in 2007?" gold='Barton Lee Hazlewood' pred='The writer of "These Boots Are Made for Walkin\'" who died in'
+  [eval@0] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?" gold='1838' pred='1969'
+  [eval@0] ✗ q='What is the name for the adventure in "Tunnels and Trolls", a game designed by Ken St. Andre?' gold='Arena of Khazan' pred='The name for the adventure in "Tunnels and Trolls" is "'
+  [eval@0] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?' gold='2000' pred='2008'
+  [eval@0] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
+  [eval@0] ✗ q='Which band, Letters to Cleo or Screaming Trees, had more members?' gold='Letters to Cleo' pred='Screaming Trees had more members.'
+  [eval@0] ✗ q='Alexander Kerensky was defeated and destroyed by the Bolsheviks in the course of a civil war that ended when ?' gold='October 1922' pred='1922'
+  [eval@0] ✗ q='Seven Brief Lessons on Physics was written by an Italian physicist that has worked in France since what year?' gold='2000' pred='1970'
+  [eval@0] ✗ q='The Livesey Hal War Memorial commemorates the fallen of which war, that had over 60 million casualties?' gold='World War II' pred='World War I'
+  [eval@0] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
+  [eval@0] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Ralph Hefferline was a psychology professor at the Universit'
+  [eval@0] ✓ q="Which dog's ancestors include Gordon and Irish Setters: the Manchester Terrier or the Scotch Collie?" gold='Scotch Collie' pred='Scotch Collie'
+  [eval@0] ✗ q='A Japanese manga series based on a 16 year old high school student Ichitaka Seto, is written and illustrated by someone born in what year?' gold='1962' pred='1975'
+  [eval@0] ✗ q='Which British first-generation jet-powered medium bomber was used in the South West Pacific theatre of World War II?' gold='English Electric Canberra' pred='Avro Lancaster'
+  [eval@0] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='2007, Mountain West Conference'
+  [eval@0] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
+  [eval@0] ✗ q='Ellie Goulding worked with what other writers on her third studio album, Delirium?' gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh' pred='The other writers Ellie Goulding worked with on her third st'
+  [eval@0] ✗ q='Which Australian city founded in 1838 contains a boarding school opened by a Prime Minister of Australia and named after a school in London of the same name.' gold='Marion, South Australia' pred='Adelaide'
+  [eval@0] ✗ q='D1NZ is a series based on what oversteering technique?' gold='Drifting' pred='D1NZ is not a known series related to oversteering technique'
+  [eval@0] ✗ q='who is younger Keith Bostic or Jerry Glanville ?' gold='Keith Bostic' pred='Jerry Glanville is younger than Keith Bostic.'
+  [eval@0] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?' gold='more than 70 countries' pred='100'
+  [eval@0] ✗ q='Vince Phillips held a junior welterweight title by an organization recognized by what larger Hall of Fame?' gold='International Boxing Hall of Fame' pred='U.S. Boxing Hall of Fame'
+  [eval@0] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
+  [eval@0] ✗ q='Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the "Teen Titans"?' gold='Teen Titans Go!' pred='Bumblebee'
+  [eval@0] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no known 1996 loose adaptation of William Shakespea'
+  [eval@0] ✗ q='What American professional Hawaiian surfer born 18 October 1992 won the Rip Curl Pro Portugal?' gold='John John Florence' pred='Kai Lenny'
+  [eval@0] ✗ q='What is the middle name of the actress who plays Bobbi Bacha in Suburban Madness?' gold='Ann' pred='There is no actress who plays Bobbi Bacha in Suburban Madnes'
+  [eval@0] ✗ q='In which year was the King who made the 1925 Birthday Honours born?' gold='1865' pred='1868'
+  [eval@0] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Hillsborough'
+  [eval@0] ✗ q='The Album Against the Wind was the 11th Album of a Rock singer Robert C Seger born may 6 1945. What was the Rock singers stage name ?' gold='Bob Seger' pred='Grand Funk Railroad'
+  [eval@0] ✗ q='Rostker v. Goldberg held that the practice of what way of filling armed forces vacancies was consitutional?' gold='Conscription' pred='Rostker v. Goldberg held that the practice of filling armed '
+[eval@0] pair-acc=3/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.075 (n=40)
+[ckpt] step 0 已保存 -> ckpt/hotpot_r2.pt
+  [eval@0] ✗ q='What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?' gold='Animorphs' pred='The Broken Earth trilogy'
+  [eval@0] ✗ q='2014 S/S is the debut album of a South Korean boy group that was formed by who?' gold='YG Entertainment' pred='SM Entertainment'
+  [eval@0] ✗ q='Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?' gold='Eenasul Fateh' pred='Aladin was the stage name of **John C. Maxwell**.'
+  [eval@0] ✓ q='Are Local H and For Against both from the United States?' gold='yes' pred='Yes'
+  [eval@0] ✗ q='What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?' gold='Kansas Song' pred='The fight song is "The Lawrence Fighting Illini."'
+  [eval@0] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?' gold='1999' pred='1991'
+  [eval@0] ✗ q="The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?" gold='the North Atlantic Conference' pred="The Vermont Catamounts men's soccer team currently competes "
+  [eval@0] ✗ q='Which writer was from England, Henry Roth or Robert Erskine Childers?' gold='Robert Erskine Childers DSC' pred='Robert Erskine Childers'
+  [eval@0] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?' gold="World's Best Goalkeeper" pred='The father of Kasper Schmeichel, Peter Schmeichel, was voted'
+  [eval@0] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in 2007?" gold='Barton Lee Hazlewood' pred='The writer of "These Boots Are Made for Walkin\'" who died in'
+  [eval@0] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?" gold='1838' pred='1969'
+  [eval@0] ✗ q='What is the name for the adventure in "Tunnels and Trolls", a game designed by Ken St. Andre?' gold='Arena of Khazan' pred='The name for the adventure in "Tunnels and Trolls" is "'
+  [eval@0] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?' gold='2000' pred='1989'
+  [eval@0] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
+  [eval@0] ✗ q='Which band, Letters to Cleo or Screaming Trees, had more members?' gold='Letters to Cleo' pred='Screaming Trees'
+  [eval@0] ✗ q='Alexander Kerensky was defeated and destroyed by the Bolsheviks in the course of a civil war that ended when ?' gold='October 1922' pred='1922'
+  [eval@0] ✗ q='Seven Brief Lessons on Physics was written by an Italian physicist that has worked in France since what year?' gold='2000' pred='1970'
+  [eval@0] ✗ q='The Livesey Hal War Memorial commemorates the fallen of which war, that had over 60 million casualties?' gold='World War II' pred='World War I'
+  [eval@0] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
+  [eval@0] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Ralph Hefferline was a psychology professor at the Universit'
+  [eval@0] ✓ q="Which dog's ancestors include Gordon and Irish Setters: the Manchester Terrier or the Scotch Collie?" gold='Scotch Collie' pred='Scotch Collie'
+  [eval@0] ✗ q='A Japanese manga series based on a 16 year old high school student Ichitaka Seto, is written and illustrated by someone born in what year?' gold='1962' pred='1973'
+  [eval@0] ✗ q='Which British first-generation jet-powered medium bomber was used in the South West Pacific theatre of World War II?' gold='English Electric Canberra' pred='Avro Lancaster'
+  [eval@0] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='2007, Mountain West Conference'
+  [eval@0] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
+  [eval@0] ✗ q='Ellie Goulding worked with what other writers on her third studio album, Delirium?' gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh' pred='Dan Wilson'
+  [eval@0] ✗ q='Which Australian city founded in 1838 contains a boarding school opened by a Prime Minister of Australia and named after a school in London of the same name.' gold='Marion, South Australia' pred='Adelaide'
+  [eval@0] ✗ q='D1NZ is a series based on what oversteering technique?' gold='Drifting' pred='D1NZ is a series based on the oversteering technique known a'
+  [eval@0] ✗ q='who is younger Keith Bostic or Jerry Glanville ?' gold='Keith Bostic' pred='Jerry Glanville is younger than Keith Bostic.'
+  [eval@0] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?' gold='more than 70 countries' pred='100'
+  [eval@0] ✗ q='Vince Phillips held a junior welterweight title by an organization recognized by what larger Hall of Fame?' gold='International Boxing Hall of Fame' pred='U.S. Boxing Hall of Fame'
+  [eval@0] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
+  [eval@0] ✗ q='Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the "Teen Titans"?' gold='Teen Titans Go!' pred='Bumblebee'
+  [eval@0] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no known 1996 loose adaptation of William Shakespea'
+  [eval@0] ✗ q='What American professional Hawaiian surfer born 18 October 1992 won the Rip Curl Pro Portugal?' gold='John John Florence' pred='Kai Lenny'
+  [eval@0] ✗ q='What is the middle name of the actress who plays Bobbi Bacha in Suburban Madness?' gold='Ann' pred='There is no actress who plays Bobbi Bacha in Suburban Madnes'
+  [eval@0] ✗ q='In which year was the King who made the 1925 Birthday Honours born?' gold='1865' pred='1868'
+  [eval@0] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Hillsborough'
+  [eval@0] ✗ q='The Album Against the Wind was the 11th Album of a Rock singer Robert C Seger born may 6 1945. What was the Rock singers stage name ?' gold='Bob Seger' pred='Grand Funk Railroad'
+  [eval@0] ✗ q='Rostker v. Goldberg held that the practice of what way of filling armed forces vacancies was consitutional?' gold='Conscription' pred='Rostker v. Goldberg held that the practice of filling armed '
+[eval@0] pair-acc=3/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.075 (n=40) gnorm_comp=1.650e+02 gnorm_bridge=5.655e+01 gnorm_router=2.142e+01
+[step 1] loss_qa=6.3555 loss_kl=n/a loss_addr=1.2289 soft_tokens=4 compress=0.128 gnorm_comp=1.650e+02 gnorm_bridge=5.655e+01 gnorm_router=2.142e+01 peakmem=9293MiB (256s)
+[step 2] loss_qa=3.0586 loss_kl=n/a loss_addr=1.4525 soft_tokens=4 compress=0.125728 gnorm_comp=5.490e+01 gnorm_bridge=1.898e+01 gnorm_router=1.762e+01 peakmem=9293MiB (269s)
+[step 3] loss_qa=3.1309 loss_kl=n/a loss_addr=0.8220 soft_tokens=4 compress=0.139985 gnorm_comp=1.026e+01 gnorm_bridge=4.501e+00 gnorm_router=3.837e+00 peakmem=9303MiB (284s)
+[step 4] loss_qa=4.6689 loss_kl=n/a loss_addr=1.8108 soft_tokens=4 compress=0.139883 gnorm_comp=3.817e+01 gnorm_bridge=6.022e+00 gnorm_router=1.094e+01 peakmem=9303MiB (298s)
+[step 5] loss_qa=3.2285 loss_kl=n/a loss_addr=1.5014 soft_tokens=4 compress=0.141304 gnorm_comp=1.333e+01 gnorm_bridge=3.833e+00 gnorm_router=2.058e+00 peakmem=9303MiB (313s)
+[step 6] loss_qa=7.4883 loss_kl=n/a loss_addr=2.1303 soft_tokens=4 compress=0.136821 gnorm_comp=1.896e+01 gnorm_bridge=5.504e+00 gnorm_router=2.185e+01 peakmem=9303MiB (330s)
+[step 7] loss_qa=2.4971 loss_kl=n/a loss_addr=1.1665 soft_tokens=4 compress=0.131723 gnorm_comp=4.017e+00 gnorm_bridge=9.535e-01 gnorm_router=1.309e+00 peakmem=9303MiB (344s)
+[step 8] loss_qa=2.3693 loss_kl=n/a loss_addr=1.7989 soft_tokens=4 compress=0.137931 gnorm_comp=5.219e+00 gnorm_bridge=1.385e+00 gnorm_router=1.138e+01 peakmem=9303MiB (358s)
+[step 9] loss_qa=4.8047 loss_kl=n/a loss_addr=1.3557 soft_tokens=4 compress=0.127168 gnorm_comp=3.480e+00 gnorm_bridge=1.752e+00 gnorm_router=1.546e+00 peakmem=9368MiB (372s)
+[step 10] loss_qa=4.4985 loss_kl=n/a loss_addr=1.7333 soft_tokens=4 compress=0.143541 gnorm_comp=8.916e+00 gnorm_bridge=7.649e+00 gnorm_router=3.829e+00 peakmem=9368MiB (385s)
+[step 11] loss_qa=5.2581 loss_kl=n/a loss_addr=1.1933 soft_tokens=4 compress=0.130879 gnorm_comp=6.653e+00 gnorm_bridge=3.307e+00 gnorm_router=8.028e+00 peakmem=9368MiB (397s)
+[step 12] loss_qa=5.8555 loss_kl=n/a loss_addr=0.8799 soft_tokens=4 compress=0.125 gnorm_comp=1.387e+01 gnorm_bridge=8.481e+00 gnorm_router=3.094e-01 peakmem=9368MiB (410s)
+[step 13] loss_qa=1.9873 loss_kl=n/a loss_addr=1.4100 soft_tokens=4 compress=0.125379 gnorm_comp=3.755e+00 gnorm_bridge=2.925e+00 gnorm_router=4.141e-01 peakmem=9368MiB (424s)
+[step 14] loss_qa=3.0117 loss_kl=n/a loss_addr=1.3044 soft_tokens=4 compress=0.130366 gnorm_comp=6.417e+00 gnorm_bridge=4.083e+00 gnorm_router=3.726e-01 peakmem=9368MiB (439s)
+[step 15] loss_qa=6.2715 loss_kl=n/a loss_addr=1.9486 soft_tokens=4 compress=0.146699 gnorm_comp=5.473e+00 gnorm_bridge=4.659e+00 gnorm_router=1.697e+00 peakmem=9368MiB (453s)
+[step 16] loss_qa=1.3459 loss_kl=n/a loss_addr=1.6675 soft_tokens=4 compress=0.141935 gnorm_comp=5.274e+00 gnorm_bridge=4.506e+00 gnorm_router=5.202e+00 peakmem=9368MiB (467s)
+[step 17] loss_qa=6.9897 loss_kl=n/a loss_addr=1.3053 soft_tokens=4 compress=0.128728 gnorm_comp=6.200e+00 gnorm_bridge=2.812e+00 gnorm_router=2.069e+00 peakmem=9382MiB (481s)
+[step 18] loss_qa=5.4531 loss_kl=n/a loss_addr=1.3570 soft_tokens=4 compress=0.137931 gnorm_comp=1.275e+01 gnorm_bridge=1.075e+01 gnorm_router=5.846e-01 peakmem=9382MiB (494s)
+[step 19] loss_qa=3.1992 loss_kl=n/a loss_addr=1.3617 soft_tokens=4 compress=0.142857 gnorm_comp=1.618e+00 gnorm_bridge=9.540e-01 gnorm_router=4.675e-01 peakmem=9382MiB (506s)
+[step 20] loss_qa=5.5117 loss_kl=n/a loss_addr=1.4741 soft_tokens=4 compress=0.13801 gnorm_comp=2.087e+01 gnorm_bridge=1.410e+01 gnorm_router=5.330e-01 peakmem=9382MiB (524s)
+[step 21] loss_qa=2.1250 loss_kl=n/a loss_addr=1.8708 soft_tokens=4 compress=0.127049 gnorm_comp=5.281e+00 gnorm_bridge=4.511e+00 gnorm_router=1.778e+00 peakmem=9382MiB (540s)
+[step 22] loss_qa=3.5381 loss_kl=n/a loss_addr=1.1463 soft_tokens=4 compress=0.131424 gnorm_comp=7.869e+00 gnorm_bridge=1.154e+01 gnorm_router=3.558e+00 peakmem=9382MiB (555s)
+[step 23] loss_qa=5.6660 loss_kl=n/a loss_addr=1.4717 soft_tokens=4 compress=0.104257 gnorm_comp=3.608e+00 gnorm_bridge=7.022e+00 gnorm_router=5.734e-01 peakmem=9382MiB (569s)
+[step 24] loss_qa=2.0371 loss_kl=n/a loss_addr=1.1740 soft_tokens=4 compress=0.113495 gnorm_comp=2.415e+00 gnorm_bridge=2.855e+00 gnorm_router=2.959e+00 peakmem=9382MiB (585s)
+[step 25] loss_qa=1.4382 loss_kl=n/a loss_addr=1.5119 soft_tokens=4 compress=0.152866 gnorm_comp=2.693e+00 gnorm_bridge=5.010e+00 gnorm_router=7.034e-01 peakmem=9382MiB (600s)
+[step 26] loss_qa=1.2403 loss_kl=n/a loss_addr=1.2373 soft_tokens=4 compress=0.15942 gnorm_comp=1.268e+00 gnorm_bridge=1.837e+00 gnorm_router=2.867e+00 peakmem=9382MiB (613s)
+[step 27] loss_qa=3.5420 loss_kl=n/a loss_addr=1.6672 soft_tokens=4 compress=0.122378 gnorm_comp=3.350e+00 gnorm_bridge=3.597e+00 gnorm_router=3.198e+00 peakmem=9382MiB (627s)
+[step 28] loss_qa=2.7988 loss_kl=n/a loss_addr=1.2650 soft_tokens=4 compress=0.148997 gnorm_comp=3.357e+00 gnorm_bridge=6.348e+00 gnorm_router=2.661e-01 peakmem=9382MiB (639s)
+[step 29] loss_qa=4.7357 loss_kl=n/a loss_addr=1.4258 soft_tokens=4 compress=0.128761 gnorm_comp=3.053e+00 gnorm_bridge=5.118e+00 gnorm_router=2.082e+00 peakmem=9382MiB (654s)
+[step 30] loss_qa=7.9492 loss_kl=n/a loss_addr=1.6649 soft_tokens=4 compress=0.128627 gnorm_comp=1.305e+01 gnorm_bridge=2.146e+01 gnorm_router=2.472e+00 peakmem=9675MiB (670s)
+[step 31] loss_qa=4.5469 loss_kl=n/a loss_addr=1.4527 soft_tokens=4 compress=0.11828 gnorm_comp=3.583e+01 gnorm_bridge=4.486e+01 gnorm_router=6.414e+00 peakmem=9744MiB (687s)
+[step 32] loss_qa=3.3203 loss_kl=n/a loss_addr=1.0426 soft_tokens=4 compress=0.123651 gnorm_comp=4.020e+00 gnorm_bridge=6.476e+00 gnorm_router=3.355e+00 peakmem=9797MiB (702s)
+[step 33] loss_qa=3.2930 loss_kl=n/a loss_addr=1.4587 soft_tokens=4 compress=0.138947 gnorm_comp=5.693e+00 gnorm_bridge=1.195e+01 gnorm_router=2.796e+00 peakmem=9797MiB (717s)
+[step 34] loss_qa=4.1025 loss_kl=n/a loss_addr=1.3776 soft_tokens=4 compress=0.14922 gnorm_comp=4.320e+00 gnorm_bridge=1.102e+01 gnorm_router=5.268e-01 peakmem=9797MiB (733s)
+[step 35] loss_qa=3.0410 loss_kl=n/a loss_addr=1.1246 soft_tokens=4 compress=0.127839 gnorm_comp=3.348e+00 gnorm_bridge=9.434e+00 gnorm_router=8.173e-01 peakmem=9797MiB (748s)
+[step 36] loss_qa=4.7637 loss_kl=n/a loss_addr=1.5149 soft_tokens=4 compress=0.121519 gnorm_comp=4.193e+00 gnorm_bridge=1.257e+01 gnorm_router=1.130e+00 peakmem=9797MiB (761s)
+[step 37] loss_qa=2.1230 loss_kl=n/a loss_addr=1.4505 soft_tokens=4 compress=0.124861 gnorm_comp=3.330e+00 gnorm_bridge=5.515e+00 gnorm_router=6.234e-01 peakmem=9797MiB (777s)
+[step 38] loss_qa=1.9810 loss_kl=n/a loss_addr=0.8594 soft_tokens=4 compress=0.13806 gnorm_comp=1.153e+00 gnorm_bridge=2.133e+00 gnorm_router=2.663e+00 peakmem=9797MiB (791s)
+[step 39] loss_qa=3.8809 loss_kl=n/a loss_addr=1.5487 soft_tokens=4 compress=0.119225 gnorm_comp=5.289e+00 gnorm_bridge=5.654e+00 gnorm_router=1.342e+00 peakmem=9797MiB (806s)
+[step 40] loss_qa=4.1230 loss_kl=n/a loss_addr=1.7287 soft_tokens=4 compress=0.142012 gnorm_comp=3.314e+00 gnorm_bridge=9.138e+00 gnorm_router=6.933e-01 peakmem=9797MiB (820s)
+[step 41] loss_qa=6.2154 loss_kl=n/a loss_addr=1.5054 soft_tokens=4 compress=0.123656 gnorm_comp=4.332e+01 gnorm_bridge=1.279e+02 gnorm_router=4.431e-01 peakmem=9797MiB (834s)
+[step 42] loss_qa=2.1961 loss_kl=n/a loss_addr=1.7283 soft_tokens=4 compress=0.150376 gnorm_comp=1.845e+00 gnorm_bridge=4.564e+00 gnorm_router=2.166e+00 peakmem=9797MiB (849s)
+[step 43] loss_qa=5.8809 loss_kl=n/a loss_addr=1.7039 soft_tokens=4 compress=0.140127 gnorm_comp=1.440e+00 gnorm_bridge=1.891e+00 gnorm_router=4.033e+00 peakmem=9797MiB (862s)
+[step 44] loss_qa=2.8164 loss_kl=n/a loss_addr=1.7417 soft_tokens=4 compress=0.112903 gnorm_comp=1.645e+00 gnorm_bridge=4.436e+00 gnorm_router=1.809e+00 peakmem=9797MiB (877s)
+[step 45] loss_qa=5.1789 loss_kl=n/a loss_addr=1.7343 soft_tokens=4 compress=0.148681 gnorm_comp=1.138e+00 gnorm_bridge=2.800e+00 gnorm_router=5.138e-01 peakmem=9797MiB (890s)
+[step 46] loss_qa=2.5820 loss_kl=n/a loss_addr=1.3825 soft_tokens=4 compress=0.119329 gnorm_comp=1.173e+00 gnorm_bridge=3.646e+00 gnorm_router=8.700e-01 peakmem=9797MiB (908s)
+[step 47] loss_qa=5.8479 loss_kl=n/a loss_addr=1.2197 soft_tokens=4 compress=0.128049 gnorm_comp=1.481e+00 gnorm_bridge=3.612e+00 gnorm_router=7.305e-01 peakmem=9797MiB (920s)
+[step 48] loss_qa=4.4462 loss_kl=n/a loss_addr=1.2653 soft_tokens=4 compress=0.148738 gnorm_comp=1.358e+00 gnorm_bridge=3.481e+00 gnorm_router=2.114e+00 peakmem=9797MiB (934s)
+[step 49] loss_qa=4.5735 loss_kl=n/a loss_addr=1.4042 soft_tokens=4 compress=0.125436 gnorm_comp=7.106e-01 gnorm_bridge=1.818e+00 gnorm_router=7.594e-01 peakmem=9797MiB (949s)
+[step 50] loss_qa=2.2605 loss_kl=n/a loss_addr=1.4370 soft_tokens=4 compress=0.133652 gnorm_comp=9.978e-01 gnorm_bridge=2.407e+00 gnorm_router=9.827e-01 peakmem=9797MiB (964s)
+[step 51] loss_qa=3.4167 loss_kl=n/a loss_addr=1.3394 soft_tokens=4 compress=0.122663 gnorm_comp=1.627e+00 gnorm_bridge=4.832e+00 gnorm_router=1.142e+00 peakmem=9797MiB (978s)
+[step 52] loss_qa=3.3682 loss_kl=n/a loss_addr=1.4805 soft_tokens=4 compress=0.151286 gnorm_comp=1.455e+00 gnorm_bridge=5.406e+00 gnorm_router=1.705e+00 peakmem=9797MiB (991s)
+[step 53] loss_qa=6.6768 loss_kl=n/a loss_addr=1.5681 soft_tokens=4 compress=0.132974 gnorm_comp=3.524e+00 gnorm_bridge=1.035e+01 gnorm_router=9.556e-02 peakmem=9797MiB (1005s)
+[step 54] loss_qa=7.4580 loss_kl=n/a loss_addr=1.6936 soft_tokens=4 compress=0.134367 gnorm_comp=7.198e+00 gnorm_bridge=1.189e+01 gnorm_router=1.064e+00 peakmem=9797MiB (1017s)
+[step 55] loss_qa=4.0938 loss_kl=n/a loss_addr=1.5151 soft_tokens=4 compress=0.13321 gnorm_comp=1.210e+00 gnorm_bridge=2.163e+00 gnorm_router=9.284e-01 peakmem=9797MiB (1030s)
+[step 56] loss_qa=8.0664 loss_kl=n/a loss_addr=1.5879 soft_tokens=4 compress=0.125 gnorm_comp=9.617e+00 gnorm_bridge=2.646e+01 gnorm_router=3.747e-01 peakmem=9797MiB (1045s)
+[step 57] loss_qa=4.1641 loss_kl=n/a loss_addr=1.4603 soft_tokens=4 compress=0.167401 gnorm_comp=8.343e+00 gnorm_bridge=3.193e+01 gnorm_router=3.359e-01 peakmem=9797MiB (1057s)
+[step 58] loss_qa=5.3203 loss_kl=n/a loss_addr=1.9686 soft_tokens=4 compress=0.119601 gnorm_comp=4.171e+01 gnorm_bridge=1.719e+02 gnorm_router=2.561e-01 peakmem=9797MiB (1071s)
+[step 59] loss_qa=3.7666 loss_kl=n/a loss_addr=1.2748 soft_tokens=4 compress=0.115548 gnorm_comp=2.151e+01 gnorm_bridge=8.162e+01 gnorm_router=1.657e-01 peakmem=9797MiB (1086s)
+[step 60] loss_qa=5.8047 loss_kl=n/a loss_addr=1.6052 soft_tokens=4 compress=0.130634 gnorm_comp=1.300e+01 gnorm_bridge=4.883e+01 gnorm_router=3.443e-01 peakmem=9797MiB (1101s)
+[step 61] loss_qa=7.7188 loss_kl=n/a loss_addr=1.4569 soft_tokens=4 compress=0.140442 gnorm_comp=4.330e+01 gnorm_bridge=1.174e+02 gnorm_router=9.179e-01 peakmem=9797MiB (1113s)
+[step 62] loss_qa=8.5078 loss_kl=n/a loss_addr=1.5001 soft_tokens=4 compress=0.137445 gnorm_comp=5.512e+01 gnorm_bridge=1.213e+02 gnorm_router=1.183e+00 peakmem=9797MiB (1127s)
+[step 63] loss_qa=6.9102 loss_kl=n/a loss_addr=1.0420 soft_tokens=4 compress=0.129424 gnorm_comp=6.694e+01 gnorm_bridge=2.682e+02 gnorm_router=1.268e-01 peakmem=9797MiB (1140s)
+[step 64] loss_qa=5.2188 loss_kl=n/a loss_addr=1.8792 soft_tokens=4 compress=0.16273 gnorm_comp=4.632e+01 gnorm_bridge=7.750e+01 gnorm_router=1.172e-01 peakmem=9797MiB (1153s)
+[step 65] loss_qa=7.7500 loss_kl=n/a loss_addr=1.6985 soft_tokens=4 compress=0.113333 gnorm_comp=2.204e+01 gnorm_bridge=8.490e+01 gnorm_router=7.473e-01 peakmem=9797MiB (1166s)
+[step 66] loss_qa=5.1172 loss_kl=n/a loss_addr=1.5216 soft_tokens=4 compress=0.157303 gnorm_comp=2.574e+01 gnorm_bridge=1.194e+02 gnorm_router=4.755e-01 peakmem=9797MiB (1179s)
+[step 67] loss_qa=5.2695 loss_kl=n/a loss_addr=1.6984 soft_tokens=4 compress=0.142132 gnorm_comp=1.872e+01 gnorm_bridge=5.780e+01 gnorm_router=2.647e-01 peakmem=9797MiB (1192s)
+[step 68] loss_qa=10.4453 loss_kl=n/a loss_addr=1.6410 soft_tokens=4 compress=0.124177 gnorm_comp=1.228e+01 gnorm_bridge=5.066e+01 gnorm_router=1.390e+00 peakmem=9797MiB (1206s)
+[step 69] loss_qa=8.7109 loss_kl=n/a loss_addr=1.4945 soft_tokens=4 compress=0.133333 gnorm_comp=1.831e+01 gnorm_bridge=9.697e+01 gnorm_router=3.551e-01 peakmem=9797MiB (1218s)
+[step 70] loss_qa=6.4883 loss_kl=n/a loss_addr=1.7084 soft_tokens=4 compress=0.13859 gnorm_comp=4.284e+01 gnorm_bridge=1.349e+02 gnorm_router=3.529e-01 peakmem=9797MiB (1232s)
+[step 71] loss_qa=4.9844 loss_kl=n/a loss_addr=1.9819 soft_tokens=4 compress=0.137423 gnorm_comp=3.655e+01 gnorm_bridge=1.521e+02 gnorm_router=1.962e+00 peakmem=9797MiB (1246s)
+[step 72] loss_qa=5.5078 loss_kl=n/a loss_addr=1.3982 soft_tokens=4 compress=0.136235 gnorm_comp=2.426e+01 gnorm_bridge=1.104e+02 gnorm_router=1.195e+00 peakmem=9797MiB (1261s)
+[step 73] loss_qa=3.6348 loss_kl=n/a loss_addr=1.5077 soft_tokens=4 compress=0.108967 gnorm_comp=7.925e+00 gnorm_bridge=3.005e+01 gnorm_router=1.597e+00 peakmem=9797MiB (1276s)
+[step 74] loss_qa=5.0469 loss_kl=n/a loss_addr=1.6418 soft_tokens=4 compress=0.133865 gnorm_comp=2.546e+01 gnorm_bridge=7.893e+01 gnorm_router=9.902e-01 peakmem=9797MiB (1290s)
+[step 75] loss_qa=3.2227 loss_kl=n/a loss_addr=1.1271 soft_tokens=4 compress=0.114754 gnorm_comp=1.919e+01 gnorm_bridge=8.939e+01 gnorm_router=1.666e+00 peakmem=9797MiB (1307s)
+[step 76] loss_qa=3.4277 loss_kl=n/a loss_addr=1.3746 soft_tokens=4 compress=0.146699 gnorm_comp=1.833e+01 gnorm_bridge=6.933e+01 gnorm_router=7.491e-02 peakmem=9797MiB (1321s)
+[step 77] loss_qa=3.0664 loss_kl=n/a loss_addr=1.3366 soft_tokens=4 compress=0.122977 gnorm_comp=3.277e+01 gnorm_bridge=1.087e+02 gnorm_router=1.287e-01 peakmem=9797MiB (1334s)
+[step 78] loss_qa=3.9180 loss_kl=n/a loss_addr=1.9453 soft_tokens=4 compress=0.131968 gnorm_comp=1.872e+01 gnorm_bridge=5.844e+01 gnorm_router=9.496e-01 peakmem=9797MiB (1346s)
+[step 79] loss_qa=4.0625 loss_kl=n/a loss_addr=1.6912 soft_tokens=4 compress=0.120248 gnorm_comp=9.738e+00 gnorm_bridge=3.486e+01 gnorm_router=5.143e-01 peakmem=9797MiB (1361s)
+[step 80] loss_qa=4.0820 loss_kl=n/a loss_addr=1.3115 soft_tokens=4 compress=0.127022 gnorm_comp=8.498e+01 gnorm_bridge=3.168e+02 gnorm_router=7.596e-02 peakmem=9797MiB (1375s)
+[step 81] loss_qa=4.1958 loss_kl=n/a loss_addr=1.4467 soft_tokens=4 compress=0.106667 gnorm_comp=2.902e+01 gnorm_bridge=8.603e+01 gnorm_router=1.313e-01 peakmem=9797MiB (1389s)
+[step 82] loss_qa=4.2151 loss_kl=n/a loss_addr=1.2388 soft_tokens=4 compress=0.130719 gnorm_comp=2.422e+01 gnorm_bridge=9.996e+01 gnorm_router=1.155e+00 peakmem=9797MiB (1401s)
+[step 83] loss_qa=5.2022 loss_kl=n/a loss_addr=0.9797 soft_tokens=4 compress=0.140351 gnorm_comp=4.251e+01 gnorm_bridge=1.129e+02 gnorm_router=1.665e+00 peakmem=9797MiB (1414s)
+[step 84] loss_qa=1.3970 loss_kl=n/a loss_addr=1.3228 soft_tokens=4 compress=0.115875 gnorm_comp=4.131e+00 gnorm_bridge=1.280e+01 gnorm_router=1.701e+00 peakmem=9797MiB (1428s)
+[step 85] loss_qa=2.2344 loss_kl=n/a loss_addr=1.6810 soft_tokens=4 compress=0.124551 gnorm_comp=8.073e+01 gnorm_bridge=2.225e+02 gnorm_router=1.720e-01 peakmem=9797MiB (1441s)
+[step 86] loss_qa=1.6680 loss_kl=n/a loss_addr=1.3202 soft_tokens=4 compress=0.168919 gnorm_comp=2.846e+00 gnorm_bridge=7.497e+00 gnorm_router=8.265e-02 peakmem=10960MiB (1454s)
+[step 87] loss_qa=5.7936 loss_kl=n/a loss_addr=1.3349 soft_tokens=4 compress=0.14742 gnorm_comp=6.083e+01 gnorm_bridge=1.276e+02 gnorm_router=1.203e+00 peakmem=10960MiB (1470s)
+[step 88] loss_qa=3.2607 loss_kl=n/a loss_addr=1.7825 soft_tokens=4 compress=0.131621 gnorm_comp=5.030e+01 gnorm_bridge=1.061e+02 gnorm_router=2.809e+00 peakmem=10960MiB (1485s)
+[step 89] loss_qa=3.9091 loss_kl=n/a loss_addr=1.3082 soft_tokens=4 compress=0.132867 gnorm_comp=8.521e+00 gnorm_bridge=1.949e+01 gnorm_router=8.110e-01 peakmem=10960MiB (1501s)
+[step 90] loss_qa=4.8477 loss_kl=n/a loss_addr=1.1064 soft_tokens=4 compress=0.148966 gnorm_comp=1.545e+01 gnorm_bridge=3.342e+01 gnorm_router=5.551e-01 peakmem=10960MiB (1516s)
+[step 91] loss_qa=3.7988 loss_kl=n/a loss_addr=1.5289 soft_tokens=4 compress=0.122449 gnorm_comp=2.775e+01 gnorm_bridge=6.511e+01 gnorm_router=9.915e-01 peakmem=10960MiB (1528s)
+[step 92] loss_qa=2.7129 loss_kl=n/a loss_addr=1.3785 soft_tokens=4 compress=0.115016 gnorm_comp=1.007e+02 gnorm_bridge=2.590e+02 gnorm_router=1.284e-01 peakmem=10960MiB (1543s)
+[step 93] loss_qa=6.1523 loss_kl=n/a loss_addr=1.5175 soft_tokens=4 compress=0.127854 gnorm_comp=4.807e+00 gnorm_bridge=1.223e+01 gnorm_router=1.569e+00 peakmem=10960MiB (1558s)
+[step 94] loss_qa=6.7148 loss_kl=n/a loss_addr=1.4141 soft_tokens=4 compress=0.130108 gnorm_comp=3.962e+01 gnorm_bridge=9.531e+01 gnorm_router=4.860e-01 peakmem=10960MiB (1575s)
+[step 95] loss_qa=1.9512 loss_kl=n/a loss_addr=1.4845 soft_tokens=4 compress=0.114907 gnorm_comp=7.395e+00 gnorm_bridge=2.097e+01 gnorm_router=1.861e+00 peakmem=10960MiB (1590s)
+[step 96] loss_qa=2.8107 loss_kl=n/a loss_addr=1.0707 soft_tokens=4 compress=0.133206 gnorm_comp=6.997e+00 gnorm_bridge=2.053e+01 gnorm_router=2.074e+00 peakmem=10960MiB (1608s)
+[step 97] loss_qa=3.1250 loss_kl=n/a loss_addr=1.4562 soft_tokens=4 compress=0.128079 gnorm_comp=2.924e+01 gnorm_bridge=7.554e+01 gnorm_router=4.698e-01 peakmem=10960MiB (1622s)
+[step 98] loss_qa=4.1348 loss_kl=n/a loss_addr=0.7875 soft_tokens=4 compress=0.148556 gnorm_comp=5.587e+01 gnorm_bridge=1.209e+02 gnorm_router=7.609e-01 peakmem=10960MiB (1636s)
+[step 99] loss_qa=5.4434 loss_kl=n/a loss_addr=1.7301 soft_tokens=4 compress=0.131148 gnorm_comp=1.386e+01 gnorm_bridge=3.760e+01 gnorm_router=8.605e-02 peakmem=10960MiB (1649s)
+[step 100] loss_qa=1.1758 loss_kl=n/a loss_addr=1.4810 soft_tokens=4 compress=0.14994 gnorm_comp=4.281e+00 gnorm_bridge=1.217e+01 gnorm_router=5.717e-01 peakmem=10960MiB (1663s)
+  [eval@100] ✗ q='What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?' gold='Animorphs' pred='The Expanse'
+  [eval@100] ✗ q='2014 S/S is the debut album of a South Korean boy group that was formed by who?' gold='YG Entertainment' pred='SM Entertainment'
+  [eval@100] ✗ q='Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?' gold='Eenasul Fateh' pred='Aladin was the stage name of John C. Maxwell.'
+  [eval@100] ✗ q='Are Local H and For Against both from the United States?' gold='yes' pred='No'
+  [eval@100] ✗ q='What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?' gold='Kansas Song' pred='The fight song of the University of Kansas is "The Kansas Ma'
+  [eval@100] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?' gold='1999' pred='2000'
+  [eval@100] ✗ q="The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?" gold='the North Atlantic Conference' pred='The conference was formerly known as the **New England Confe'
+  [eval@100] ✗ q='Which writer was from England, Henry Roth or Robert Erskine Childers?' gold='Robert Erskine Childers DSC' pred='Robert Erskine Childers'
+  [eval@100] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?' gold="World's Best Goalkeeper" pred="Kasper Schmeichel's father is not a known footballer, and th"
+  [eval@100] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in 2007?" gold='Barton Lee Hazlewood' pred='The writer of "These Boots Are Made for Walkin\'" is Lee Hazl'
+  [eval@100] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?" gold='1838' pred='1969'
+  [eval@100] ✗ q='What is the name for the adventure in "Tunnels and Trolls", a game designed by Ken St. Andre?' gold='Arena of Khazan' pred='The name for the adventure in "Tunnels and Trolls" is "'
+  [eval@100] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?' gold='2000' pred='2018'
+  [eval@100] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
+  [eval@100] ✗ q='Which band, Letters to Cleo or Screaming Trees, had more members?' gold='Letters to Cleo' pred='Screaming Trees'
+  [eval@100] ✗ q='Alexander Kerensky was defeated and destroyed by the Bolsheviks in the course of a civil war that ended when ?' gold='October 1922' pred='1922'
+  [eval@100] ✗ q='Seven Brief Lessons on Physics was written by an Italian physicist that has worked in France since what year?' gold='2000' pred='1970'
+  [eval@100] ✗ q='The Livesey Hal War Memorial commemorates the fallen of which war, that had over 60 million casualties?' gold='World War II' pred='World War I'
+  [eval@100] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
+  [eval@100] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Ralph Hefner was a psychology professor at the University of'
+  [eval@100] ✓ q="Which dog's ancestors include Gordon and Irish Setters: the Manchester Terrier or the Scotch Collie?" gold='Scotch Collie' pred='Scotch Collie'
+  [eval@100] ✗ q='A Japanese manga series based on a 16 year old high school student Ichitaka Seto, is written and illustrated by someone born in what year?' gold='1962' pred='1978'
+  [eval@100] ✗ q='Which British first-generation jet-powered medium bomber was used in the South West Pacific theatre of World War II?' gold='English Electric Canberra' pred='Avro Lancaster'
+  [eval@100] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='1988, Mountain West Conference, NCAA Division I'
+  [eval@100] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
+  [eval@100] ✗ q='Ellie Goulding worked with what other writers on her third studio album, Delirium?' gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh' pred='Ellie Goulding worked with **Max Martin** and **Dr. Luke**'
+  [eval@100] ✗ q='Which Australian city founded in 1838 contains a boarding school opened by a Prime Minister of Australia and named after a school in London of the same name.' gold='Marion, South Australia' pred='Sydney'
+  [eval@100] ✗ q='D1NZ is a series based on what oversteering technique?' gold='Drifting' pred='D1NZ is a series based on the oversteering technique known a'
+  [eval@100] ✗ q='who is younger Keith Bostic or Jerry Glanville ?' gold='Keith Bostic' pred='Jerry Glanville'
+  [eval@100] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?' gold='more than 70 countries' pred='100'
+  [eval@100] ✗ q='Vince Phillips held a junior welterweight title by an organization recognized by what larger Hall of Fame?' gold='International Boxing Hall of Fame' pred='U.S. Boxing Hall of Fame'
+  [eval@100] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
+  [eval@100] ✗ q='Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the "Teen Titans"?' gold='Teen Titans Go!' pred='Teen Titans'
+  [eval@100] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='The name of the 1996 loose adaptation of William Shakespeare'
+  [eval@100] ✗ q='What American professional Hawaiian surfer born 18 October 1992 won the Rip Curl Pro Portugal?' gold='John John Florence' pred='Kai Lenny'
+  [eval@100] ✗ q='What is the middle name of the actress who plays Bobbi Bacha in Suburban Madness?' gold='Ann' pred='Linda'
+  [eval@100] ✗ q='In which year was the King who made the 1925 Birthday Honours born?' gold='1865' pred='1850'
+  [eval@100] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Hillsborough'
+  [eval@100] ✗ q='The Album Against the Wind was the 11th Album of a Rock singer Robert C Seger born may 6 1945. What was the Rock singers stage name ?' gold='Bob Seger' pred='Grand Funk Railroad'
+  [eval@100] ✗ q='Rostker v. Goldberg held that the practice of what way of filling armed forces vacancies was consitutional?' gold='Conscription' pred='Rostker v. Goldberg held that the practice of filling armed '
+[eval@100] pair-acc=2/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=100 full-match=0.05 (n=40) gnorm_comp=6.327e+00 gnorm_bridge=1.723e+01 gnorm_router=7.142e-02
+[step 101] loss_qa=1.9280 loss_kl=n/a loss_addr=1.3698 soft_tokens=4 compress=0.170012 gnorm_comp=6.327e+00 gnorm_bridge=1.723e+01 gnorm_router=7.142e-02 peakmem=10960MiB (1798s)
+[step 102] loss_qa=6.3362 loss_kl=n/a loss_addr=1.2431 soft_tokens=4 compress=0.148855 gnorm_comp=3.296e+00 gnorm_bridge=4.501e+00 gnorm_router=1.227e-01 peakmem=10960MiB (1811s)
+[step 103] loss_qa=2.9629 loss_kl=n/a loss_addr=1.5098 soft_tokens=4 compress=0.125984 gnorm_comp=2.152e+01 gnorm_bridge=2.357e+01 gnorm_router=1.818e-01 peakmem=10960MiB (1828s)
+[step 104] loss_qa=2.1738 loss_kl=n/a loss_addr=1.5315 soft_tokens=4 compress=0.134579 gnorm_comp=4.474e+00 gnorm_bridge=5.842e+00 gnorm_router=2.832e-01 peakmem=10960MiB (1842s)
+[step 105] loss_qa=1.6865 loss_kl=n/a loss_addr=1.4058 soft_tokens=4 compress=0.133685 gnorm_comp=1.328e+01 gnorm_bridge=1.360e+01 gnorm_router=7.326e-01 peakmem=10960MiB (1857s)
+[step 106] loss_qa=6.5469 loss_kl=n/a loss_addr=1.0275 soft_tokens=4 compress=0.139483 gnorm_comp=1.564e+01 gnorm_bridge=2.860e+01 gnorm_router=3.724e+00 peakmem=10960MiB (1872s)
+[step 107] loss_qa=1.2887 loss_kl=n/a loss_addr=1.3488 soft_tokens=4 compress=0.144665 gnorm_comp=1.731e+00 gnorm_bridge=5.894e+00 gnorm_router=7.841e-01 peakmem=10960MiB (1883s)
+[step 108] loss_qa=2.7263 loss_kl=n/a loss_addr=1.6508 soft_tokens=4 compress=0.140921 gnorm_comp=2.883e+00 gnorm_bridge=7.865e+00 gnorm_router=6.434e-01 peakmem=10960MiB (1898s)
+[step 109] loss_qa=3.0005 loss_kl=n/a loss_addr=1.7618 soft_tokens=4 compress=0.138692 gnorm_comp=2.052e+00 gnorm_bridge=3.446e+00 gnorm_router=3.110e+00 peakmem=10960MiB (1914s)
+[step 110] loss_qa=1.3838 loss_kl=n/a loss_addr=1.5151 soft_tokens=4 compress=0.119342 gnorm_comp=2.730e+00 gnorm_bridge=5.018e+00 gnorm_router=5.652e-01 peakmem=10960MiB (1926s)
+[step 111] loss_qa=5.7441 loss_kl=n/a loss_addr=1.6977 soft_tokens=4 compress=0.130366 gnorm_comp=2.425e+01 gnorm_bridge=3.776e+01 gnorm_router=1.268e-01 peakmem=10960MiB (1940s)
+[step 112] loss_qa=4.0664 loss_kl=n/a loss_addr=1.6571 soft_tokens=4 compress=0.145587 gnorm_comp=2.369e+00 gnorm_bridge=4.506e+00 gnorm_router=1.105e-01 peakmem=10960MiB (1954s)
+[step 113] loss_qa=4.1143 loss_kl=n/a loss_addr=1.3771 soft_tokens=4 compress=0.120438 gnorm_comp=6.480e+00 gnorm_bridge=1.104e+01 gnorm_router=1.589e+00 peakmem=10960MiB (1971s)
+[step 114] loss_qa=2.5781 loss_kl=n/a loss_addr=1.2240 soft_tokens=4 compress=0.135864 gnorm_comp=2.104e+00 gnorm_bridge=2.939e+00 gnorm_router=5.813e-01 peakmem=10960MiB (1986s)
+[step 115] loss_qa=3.2432 loss_kl=n/a loss_addr=1.1179 soft_tokens=4 compress=0.140704 gnorm_comp=3.320e+00 gnorm_bridge=5.914e+00 gnorm_router=5.239e-01 peakmem=10960MiB (2000s)
+[step 116] loss_qa=0.9194 loss_kl=n/a loss_addr=1.8645 soft_tokens=4 compress=0.147157 gnorm_comp=2.027e+00 gnorm_bridge=2.839e+00 gnorm_router=2.264e+00 peakmem=10960MiB (2014s)
+[step 117] loss_qa=6.2480 loss_kl=n/a loss_addr=1.5326 soft_tokens=4 compress=0.115632 gnorm_comp=6.090e-01 gnorm_bridge=9.184e-01 gnorm_router=2.080e-01 peakmem=10960MiB (2028s)
+[step 118] loss_qa=1.8193 loss_kl=n/a loss_addr=1.6071 soft_tokens=4 compress=0.128364 gnorm_comp=1.896e+00 gnorm_bridge=4.180e+00 gnorm_router=1.279e+00 peakmem=10960MiB (2041s)
+[step 119] loss_qa=3.0176 loss_kl=n/a loss_addr=1.6060 soft_tokens=4 compress=0.140948 gnorm_comp=1.285e+00 gnorm_bridge=1.734e+00 gnorm_router=9.688e-01 peakmem=10960MiB (2057s)
+[step 120] loss_qa=2.5742 loss_kl=n/a loss_addr=1.9989 soft_tokens=4 compress=0.151659 gnorm_comp=2.715e+00 gnorm_bridge=2.450e+00 gnorm_router=1.075e-01 peakmem=10960MiB (2069s)
+[step 121] loss_qa=4.8926 loss_kl=n/a loss_addr=1.6436 soft_tokens=4 compress=0.129472 gnorm_comp=9.033e-01 gnorm_bridge=1.760e+00 gnorm_router=1.133e+00 peakmem=10960MiB (2085s)
+[step 122] loss_qa=4.3398 loss_kl=n/a loss_addr=1.8326 soft_tokens=4 compress=0.137931 gnorm_comp=2.264e+00 gnorm_bridge=2.687e+00 gnorm_router=2.291e+00 peakmem=10960MiB (2101s)
+[step 123] loss_qa=3.3438 loss_kl=n/a loss_addr=1.0188 soft_tokens=4 compress=0.106989 gnorm_comp=3.487e+00 gnorm_bridge=4.057e+00 gnorm_router=9.840e-01 peakmem=10960MiB (2117s)
+[step 124] loss_qa=3.3789 loss_kl=n/a loss_addr=1.4918 soft_tokens=4 compress=0.149712 gnorm_comp=1.611e+00 gnorm_bridge=2.699e+00 gnorm_router=8.209e-01 peakmem=10960MiB (2131s)
+[step 125] loss_qa=5.7930 loss_kl=n/a loss_addr=1.8315 soft_tokens=4 compress=0.155963 gnorm_comp=9.626e-01 gnorm_bridge=2.790e+00 gnorm_router=9.557e-01 peakmem=10960MiB (2146s)
+[step 126] loss_qa=2.6973 loss_kl=n/a loss_addr=1.8632 soft_tokens=4 compress=0.116054 gnorm_comp=1.227e+00 gnorm_bridge=4.040e+00 gnorm_router=1.493e+00 peakmem=10960MiB (2159s)
+[step 127] loss_qa=3.6743 loss_kl=n/a loss_addr=1.1790 soft_tokens=4 compress=0.140641 gnorm_comp=1.897e+00 gnorm_bridge=4.491e+00 gnorm_router=6.902e-01 peakmem=10960MiB (2174s)
+[step 128] loss_qa=5.3789 loss_kl=n/a loss_addr=1.5326 soft_tokens=4 compress=0.131635 gnorm_comp=1.119e+00 gnorm_bridge=2.900e+00 gnorm_router=6.920e-01 peakmem=10960MiB (2187s)
+[step 129] loss_qa=5.3789 loss_kl=n/a loss_addr=1.0836 soft_tokens=4 compress=0.153477 gnorm_comp=1.554e+00 gnorm_bridge=4.311e+00 gnorm_router=1.066e+00 peakmem=10960MiB (2199s)
+[step 130] loss_qa=3.6973 loss_kl=n/a loss_addr=1.5435 soft_tokens=4 compress=0.115942 gnorm_comp=1.739e+00 gnorm_bridge=4.088e+00 gnorm_router=1.465e-01 peakmem=10960MiB (2215s)
+[step 131] loss_qa=4.4669 loss_kl=n/a loss_addr=1.3221 soft_tokens=4 compress=0.116331 gnorm_comp=1.595e+00 gnorm_bridge=2.756e+00 gnorm_router=2.553e+00 peakmem=10960MiB (2229s)
+[step 132] loss_qa=1.2744 loss_kl=n/a loss_addr=1.0119 soft_tokens=4 compress=0.10325 gnorm_comp=7.412e-01 gnorm_bridge=2.224e+00 gnorm_router=6.059e-01 peakmem=10960MiB (2243s)
+[step 133] loss_qa=3.0107 loss_kl=n/a loss_addr=1.4390 soft_tokens=4 compress=0.129711 gnorm_comp=2.053e+00 gnorm_bridge=4.777e+00 gnorm_router=1.182e+00 peakmem=10960MiB (2256s)
+[step 134] loss_qa=3.9580 loss_kl=n/a loss_addr=1.0310 soft_tokens=4 compress=0.141454 gnorm_comp=1.540e+00 gnorm_bridge=2.626e+00 gnorm_router=9.488e-01 peakmem=10960MiB (2269s)
+[step 135] loss_qa=4.2644 loss_kl=n/a loss_addr=1.1910 soft_tokens=4 compress=0.118343 gnorm_comp=8.823e-01 gnorm_bridge=2.552e+00 gnorm_router=5.794e-01 peakmem=10960MiB (2282s)
+[step 136] loss_qa=1.7911 loss_kl=n/a loss_addr=1.4814 soft_tokens=4 compress=0.191529 gnorm_comp=1.038e+00 gnorm_bridge=2.817e+00 gnorm_router=1.452e-01 peakmem=10960MiB (2296s)
+[step 137] loss_qa=2.0344 loss_kl=n/a loss_addr=1.4959 soft_tokens=4 compress=0.127413 gnorm_comp=2.008e+00 gnorm_bridge=5.885e+00 gnorm_router=1.436e-01 peakmem=10960MiB (2310s)
+[step 138] loss_qa=1.9360 loss_kl=n/a loss_addr=1.7161 soft_tokens=4 compress=0.109552 gnorm_comp=1.806e+00 gnorm_bridge=6.162e+00 gnorm_router=7.189e-01 peakmem=10960MiB (2326s)
+[step 139] loss_qa=2.6953 loss_kl=n/a loss_addr=1.5736 soft_tokens=4 compress=0.152381 gnorm_comp=2.458e+00 gnorm_bridge=7.593e+00 gnorm_router=4.988e-02 peakmem=10960MiB (2340s)
+[step 140] loss_qa=6.4016 loss_kl=n/a loss_addr=1.3232 soft_tokens=4 compress=0.127327 gnorm_comp=5.086e+00 gnorm_bridge=1.059e+01 gnorm_router=3.920e-01 peakmem=10960MiB (2356s)
+[step 141] loss_qa=1.8086 loss_kl=n/a loss_addr=1.7670 soft_tokens=4 compress=0.123906 gnorm_comp=1.451e+00 gnorm_bridge=2.269e+00 gnorm_router=3.826e-01 peakmem=10960MiB (2372s)
+[step 142] loss_qa=2.4961 loss_kl=n/a loss_addr=1.7041 soft_tokens=4 compress=0.148796 gnorm_comp=9.362e-01 gnorm_bridge=2.120e+00 gnorm_router=5.437e-01 peakmem=10960MiB (2390s)
+[step 143] loss_qa=3.9141 loss_kl=n/a loss_addr=1.8389 soft_tokens=4 compress=0.136852 gnorm_comp=3.363e+00 gnorm_bridge=5.817e+00 gnorm_router=3.021e-01 peakmem=10960MiB (2404s)
+[step 144] loss_qa=2.0666 loss_kl=n/a loss_addr=1.3513 soft_tokens=4 compress=0.142012 gnorm_comp=8.088e+00 gnorm_bridge=1.678e+01 gnorm_router=5.887e-02 peakmem=10960MiB (2417s)
+[step 145] loss_qa=2.5010 loss_kl=n/a loss_addr=1.4169 soft_tokens=4 compress=0.114286 gnorm_comp=4.587e+00 gnorm_bridge=1.436e+01 gnorm_router=8.891e-01 peakmem=10960MiB (2431s)
+[step 146] loss_qa=3.6924 loss_kl=n/a loss_addr=1.3181 soft_tokens=4 compress=0.126984 gnorm_comp=1.353e+00 gnorm_bridge=4.878e+00 gnorm_router=6.878e-01 peakmem=10960MiB (2445s)
+[step 147] loss_qa=3.8320 loss_kl=n/a loss_addr=1.3378 soft_tokens=4 compress=0.145133 gnorm_comp=3.741e+00 gnorm_bridge=1.514e+01 gnorm_router=3.008e-02 peakmem=10960MiB (2461s)
+[step 148] loss_qa=3.0000 loss_kl=n/a loss_addr=1.5232 soft_tokens=4 compress=0.119074 gnorm_comp=1.320e+00 gnorm_bridge=5.051e+00 gnorm_router=4.144e-01 peakmem=10960MiB (2474s)
+[step 149] loss_qa=1.2935 loss_kl=n/a loss_addr=1.4404 soft_tokens=4 compress=0.129524 gnorm_comp=5.787e-01 gnorm_bridge=1.886e+00 gnorm_router=5.917e-02 peakmem=10960MiB (2489s)
+[step 150] loss_qa=2.7854 loss_kl=n/a loss_addr=1.3997 soft_tokens=4 compress=0.131579 gnorm_comp=6.797e-01 gnorm_bridge=2.487e+00 gnorm_router=1.937e-01 peakmem=10960MiB (2504s)
+[ckpt] step 150 已保存 -> ckpt/hotpot_r2.pt
+[step 151] loss_qa=2.2256 loss_kl=n/a loss_addr=1.3882 soft_tokens=4 compress=0.105379 gnorm_comp=1.156e+01 gnorm_bridge=2.981e+01 gnorm_router=8.237e-01 peakmem=10960MiB (2520s)
+[step 152] loss_qa=2.8271 loss_kl=n/a loss_addr=1.3190 soft_tokens=4 compress=0.11398 gnorm_comp=5.879e+00 gnorm_bridge=1.546e+01 gnorm_router=9.073e-01 peakmem=10960MiB (2534s)
+[step 153] loss_qa=5.8633 loss_kl=n/a loss_addr=1.7263 soft_tokens=4 compress=0.131495 gnorm_comp=1.277e+01 gnorm_bridge=1.230e+01 gnorm_router=3.272e+00 peakmem=10960MiB (2547s)
+[step 154] loss_qa=3.8516 loss_kl=n/a loss_addr=1.0155 soft_tokens=4 compress=0.13363 gnorm_comp=2.099e+00 gnorm_bridge=8.296e+00 gnorm_router=1.481e-01 peakmem=10960MiB (2561s)
+[step 155] loss_qa=6.7109 loss_kl=n/a loss_addr=1.4353 soft_tokens=4 compress=0.157156 gnorm_comp=6.289e+00 gnorm_bridge=1.156e+01 gnorm_router=1.841e+00 peakmem=10960MiB (2574s)
+[step 156] loss_qa=5.8184 loss_kl=n/a loss_addr=0.7477 soft_tokens=4 compress=0.126367 gnorm_comp=2.830e+00 gnorm_bridge=1.068e+01 gnorm_router=2.379e-01 peakmem=10960MiB (2589s)
+[step 157] loss_qa=4.2394 loss_kl=n/a loss_addr=1.7128 soft_tokens=4 compress=0.118519 gnorm_comp=2.198e+00 gnorm_bridge=8.254e+00 gnorm_router=7.059e-01 peakmem=10960MiB (2604s)
+[step 158] loss_qa=9.1172 loss_kl=n/a loss_addr=1.2452 soft_tokens=4 compress=0.142292 gnorm_comp=1.735e+00 gnorm_bridge=6.902e+00 gnorm_router=5.487e-02 peakmem=10960MiB (2616s)
+[step 159] loss_qa=3.6699 loss_kl=n/a loss_addr=1.3033 soft_tokens=4 compress=0.109637 gnorm_comp=6.700e-01 gnorm_bridge=2.259e+00 gnorm_router=4.447e-01 peakmem=10960MiB (2632s)
+[step 160] loss_qa=3.5664 loss_kl=n/a loss_addr=1.4677 soft_tokens=4 compress=0.141176 gnorm_comp=8.958e+00 gnorm_bridge=1.703e+01 gnorm_router=5.196e-02 peakmem=10960MiB (2645s)
+[step 161] loss_qa=1.9219 loss_kl=n/a loss_addr=1.5384 soft_tokens=4 compress=0.168478 gnorm_comp=1.339e+00 gnorm_bridge=2.376e+00 gnorm_router=1.421e+00 peakmem=10960MiB (2658s)
+[step 162] loss_qa=2.9033 loss_kl=n/a loss_addr=1.6379 soft_tokens=4 compress=0.1341 gnorm_comp=2.915e+00 gnorm_bridge=4.741e+00 gnorm_router=1.084e-01 peakmem=10960MiB (2671s)
+[step 163] loss_qa=3.4517 loss_kl=n/a loss_addr=1.4280 soft_tokens=4 compress=0.137931 gnorm_comp=1.523e+00 gnorm_bridge=3.280e+00 gnorm_router=5.557e-01 peakmem=10960MiB (2684s)
+[step 164] loss_qa=3.1055 loss_kl=n/a loss_addr=1.6807 soft_tokens=4 compress=0.134078 gnorm_comp=4.934e-01 gnorm_bridge=1.574e+00 gnorm_router=4.306e-02 peakmem=10960MiB (2698s)
+[step 165] loss_qa=2.2051 loss_kl=n/a loss_addr=1.4732 soft_tokens=4 compress=0.145513 gnorm_comp=8.274e-01 gnorm_bridge=2.570e+00 gnorm_router=3.419e-02 peakmem=10960MiB (2712s)
+[step 166] loss_qa=5.3105 loss_kl=n/a loss_addr=1.9501 soft_tokens=4 compress=0.125145 gnorm_comp=1.667e+00 gnorm_bridge=4.823e+00 gnorm_router=1.726e+00 peakmem=10960MiB (2726s)
+[step 167] loss_qa=3.3263 loss_kl=n/a loss_addr=1.1976 soft_tokens=4 compress=0.151376 gnorm_comp=3.045e+00 gnorm_bridge=8.877e+00 gnorm_router=1.380e+00 peakmem=10960MiB (2739s)
+[step 168] loss_qa=1.2737 loss_kl=n/a loss_addr=1.5958 soft_tokens=4 compress=0.130769 gnorm_comp=2.525e+00 gnorm_bridge=7.537e+00 gnorm_router=7.051e-02 peakmem=10960MiB (2755s)
+[step 169] loss_qa=4.5312 loss_kl=n/a loss_addr=1.2003 soft_tokens=4 compress=0.147965 gnorm_comp=7.218e+00 gnorm_bridge=1.957e+01 gnorm_router=1.824e-01 peakmem=10960MiB (2769s)
+[step 170] loss_qa=6.6426 loss_kl=n/a loss_addr=1.6466 soft_tokens=4 compress=0.122396 gnorm_comp=1.638e+00 gnorm_bridge=6.118e+00 gnorm_router=4.364e-01 peakmem=10960MiB (2784s)
+[step 171] loss_qa=4.3906 loss_kl=n/a loss_addr=1.0056 soft_tokens=4 compress=0.133695 gnorm_comp=4.097e+00 gnorm_bridge=1.503e+01 gnorm_router=3.132e-02 peakmem=10960MiB (2797s)
+[step 172] loss_qa=3.5420 loss_kl=n/a loss_addr=1.3080 soft_tokens=4 compress=0.153355 gnorm_comp=1.839e+00 gnorm_bridge=4.319e+00 gnorm_router=4.036e-02 peakmem=10960MiB (2812s)
+[step 173] loss_qa=2.4756 loss_kl=n/a loss_addr=1.7940 soft_tokens=4 compress=0.156986 gnorm_comp=1.714e+00 gnorm_bridge=5.547e+00 gnorm_router=7.851e-01 peakmem=10960MiB (2825s)
+[step 174] loss_qa=4.6641 loss_kl=n/a loss_addr=1.5538 soft_tokens=4 compress=0.171812 gnorm_comp=4.190e+00 gnorm_bridge=1.432e+01 gnorm_router=7.541e-02 peakmem=10960MiB (2837s)
+[step 175] loss_qa=4.0078 loss_kl=n/a loss_addr=1.6722 soft_tokens=4 compress=0.129032 gnorm_comp=5.166e+00 gnorm_bridge=1.766e+01 gnorm_router=6.237e-01 peakmem=10960MiB (2851s)
+[step 176] loss_qa=1.9272 loss_kl=n/a loss_addr=1.4960 soft_tokens=4 compress=0.126629 gnorm_comp=3.230e+01 gnorm_bridge=3.619e+01 gnorm_router=2.237e+01 peakmem=10960MiB (2865s)
+[step 177] loss_qa=4.6250 loss_kl=n/a loss_addr=1.4604 soft_tokens=4 compress=0.144778 gnorm_comp=2.511e+00 gnorm_bridge=9.233e+00 gnorm_router=1.019e+00 peakmem=10960MiB (2881s)
+[step 178] loss_qa=3.5049 loss_kl=n/a loss_addr=1.5776 soft_tokens=4 compress=0.127119 gnorm_comp=2.603e+00 gnorm_bridge=8.482e+00 gnorm_router=1.501e+00 peakmem=10960MiB (2894s)
+[step 179] loss_qa=1.2468 loss_kl=n/a loss_addr=1.4996 soft_tokens=4 compress=0.133195 gnorm_comp=3.091e+00 gnorm_bridge=1.170e+01 gnorm_router=1.487e-01 peakmem=10960MiB (2906s)
+[step 180] loss_qa=2.8353 loss_kl=n/a loss_addr=1.6660 soft_tokens=4 compress=0.140598 gnorm_comp=3.782e+00 gnorm_bridge=1.079e+01 gnorm_router=2.347e+00 peakmem=10960MiB (2921s)
+[step 181] loss_qa=4.0527 loss_kl=n/a loss_addr=1.5168 soft_tokens=4 compress=0.132308 gnorm_comp=2.766e+00 gnorm_bridge=8.854e+00 gnorm_router=1.117e+00 peakmem=10960MiB (2935s)
+[step 182] loss_qa=5.3082 loss_kl=n/a loss_addr=1.7130 soft_tokens=4 compress=0.130049 gnorm_comp=2.234e+00 gnorm_bridge=9.702e+00 gnorm_router=7.631e-02 peakmem=10960MiB (2950s)
+[step 183] loss_qa=1.4849 loss_kl=n/a loss_addr=1.1856 soft_tokens=4 compress=0.132701 gnorm_comp=1.543e+00 gnorm_bridge=5.315e+00 gnorm_router=7.903e-01 peakmem=10960MiB (2962s)
+[step 184] loss_qa=1.8223 loss_kl=n/a loss_addr=1.5295 soft_tokens=4 compress=0.109739 gnorm_comp=3.526e+00 gnorm_bridge=8.976e+00 gnorm_router=1.194e+00 peakmem=10960MiB (2980s)
+[step 185] loss_qa=3.8617 loss_kl=n/a loss_addr=1.0707 soft_tokens=4 compress=0.153091 gnorm_comp=1.375e+00 gnorm_bridge=5.563e+00 gnorm_router=4.818e-02 peakmem=10960MiB (2991s)
+[step 186] loss_qa=2.8398 loss_kl=n/a loss_addr=1.3981 soft_tokens=4 compress=0.117759 gnorm_comp=7.482e+00 gnorm_bridge=3.203e+01 gnorm_router=3.808e-02 peakmem=10960MiB (3006s)
+[step 187] loss_qa=0.7360 loss_kl=n/a loss_addr=1.2417 soft_tokens=4 compress=0.139332 gnorm_comp=2.345e+00 gnorm_bridge=1.147e+01 gnorm_router=2.506e-02 peakmem=10960MiB (3021s)
+[step 188] loss_qa=3.3164 loss_kl=n/a loss_addr=1.5645 soft_tokens=4 compress=0.119029 gnorm_comp=3.265e+00 gnorm_bridge=3.891e+00 gnorm_router=1.671e+00 peakmem=10960MiB (3036s)
+[step 189] loss_qa=3.4492 loss_kl=n/a loss_addr=1.4845 soft_tokens=4 compress=0.155268 gnorm_comp=9.232e+00 gnorm_bridge=4.197e+01 gnorm_router=2.007e-02 peakmem=10960MiB (3049s)
+[step 190] loss_qa=4.1172 loss_kl=n/a loss_addr=1.2634 soft_tokens=4 compress=0.106614 gnorm_comp=7.915e+01 gnorm_bridge=2.388e+02 gnorm_router=5.576e-01 peakmem=10960MiB (3063s)
+[step 191] loss_qa=2.6099 loss_kl=n/a loss_addr=1.7769 soft_tokens=4 compress=0.14827 gnorm_comp=9.139e+00 gnorm_bridge=4.489e+01 gnorm_router=7.941e-02 peakmem=10960MiB (3077s)
+[step 192] loss_qa=1.9121 loss_kl=n/a loss_addr=1.6690 soft_tokens=4 compress=0.15122 gnorm_comp=6.003e+00 gnorm_bridge=1.826e+01 gnorm_router=5.389e-02 peakmem=10960MiB (3090s)
+[step 193] loss_qa=2.0716 loss_kl=n/a loss_addr=1.6000 soft_tokens=4 compress=0.136622 gnorm_comp=4.337e+01 gnorm_bridge=1.545e+02 gnorm_router=1.773e+00 peakmem=10960MiB (3105s)
+[step 194] loss_qa=3.6748 loss_kl=n/a loss_addr=1.4827 soft_tokens=4 compress=0.137552 gnorm_comp=2.476e+01 gnorm_bridge=9.111e+01 gnorm_router=2.143e-01 peakmem=10960MiB (3117s)
+[step 195] loss_qa=1.2277 loss_kl=n/a loss_addr=1.8195 soft_tokens=4 compress=0.125382 gnorm_comp=6.477e+00 gnorm_bridge=2.030e+01 gnorm_router=1.124e+00 peakmem=10960MiB (3131s)
+[step 196] loss_qa=4.6602 loss_kl=n/a loss_addr=1.0676 soft_tokens=4 compress=0.135693 gnorm_comp=4.094e+01 gnorm_bridge=1.153e+02 gnorm_router=2.947e-02 peakmem=10960MiB (3145s)
+[step 197] loss_qa=3.0723 loss_kl=n/a loss_addr=1.4351 soft_tokens=4 compress=0.123596 gnorm_comp=2.424e+00 gnorm_bridge=7.202e+00 gnorm_router=5.613e-02 peakmem=10960MiB (3160s)
+[step 198] loss_qa=4.0664 loss_kl=n/a loss_addr=1.0959 soft_tokens=4 compress=0.129167 gnorm_comp=5.764e+00 gnorm_bridge=2.448e+01 gnorm_router=1.163e-01 peakmem=10960MiB (3173s)
+[step 199] loss_qa=6.3076 loss_kl=n/a loss_addr=1.3680 soft_tokens=4 compress=0.131291 gnorm_comp=9.333e+00 gnorm_bridge=3.514e+01 gnorm_router=3.850e-02 peakmem=10960MiB (3187s)
+[step 200] loss_qa=3.8301 loss_kl=n/a loss_addr=1.1825 soft_tokens=4 compress=0.123314 gnorm_comp=1.015e+00 gnorm_bridge=5.599e+00 gnorm_router=7.358e-01 peakmem=10960MiB (3199s)
+  [eval@200] ✗ q='What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?' gold='Animorphs' pred='The Broken Earth trilogy'
+  [eval@200] ✗ q='2014 S/S is the debut album of a South Korean boy group that was formed by who?' gold='YG Entertainment' pred='SM Entertainment'
+  [eval@200] ✗ q='Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?' gold='Eenasul Fateh' pred='Aladin was the stage name of the consultant known as Aladin.'
+  [eval@200] ✗ q='Are Local H and For Against both from the United States?' gold='yes' pred='no'
+  [eval@200] ✗ q='What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?' gold='Kansas Song' pred='The fight song of the university is "The Lawrence Song."'
+  [eval@200] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?' gold='1999' pred='1989'
+  [eval@200] ✗ q="The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?" gold='the North Atlantic Conference' pred='The conference was formerly known as the New England Confere'
+  [eval@200] ✗ q='Which writer was from England, Henry Roth or Robert Erskine Childers?' gold='Robert Erskine Childers DSC' pred='Robert Erskine Childers'
+  [eval@200] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?' gold="World's Best Goalkeeper" pred='Peter Schmeichel'
+  [eval@200] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in 2007?" gold='Barton Lee Hazlewood' pred='The writer of "These Boots Are Made for Walkin\'" is Lee Hazl'
+  [eval@200] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?" gold='1838' pred='1969'
+  [eval@200] ✗ q='What is the name for the adventure in "Tunnels and Trolls", a game designed by Ken St. Andre?' gold='Arena of Khazan' pred='The name for the adventure in "Tunnels and Trolls" is "'
+  [eval@200] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?' gold='2000' pred='2013'
+  [eval@200] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
+  [eval@200] ✗ q='Which band, Letters to Cleo or Screaming Trees, had more members?' gold='Letters to Cleo' pred='Screaming Trees'
+  [eval@200] ✗ q='Alexander Kerensky was defeated and destroyed by the Bolsheviks in the course of a civil war that ended when ?' gold='October 1922' pred='1922'
+  [eval@200] ✗ q='Seven Brief Lessons on Physics was written by an Italian physicist that has worked in France since what year?' gold='2000' pred='1964'
+  [eval@200] ✗ q='The Livesey Hal War Memorial commemorates the fallen of which war, that had over 60 million casualties?' gold='World War II' pred='World War I'
+  [eval@200] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='no'
+  [eval@200] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Ralph Hefferline was a psychology professor at the Universit'
+  [eval@200] ✗ q="Which dog's ancestors include Gordon and Irish Setters: the Manchester Terrier or the Scotch Collie?" gold='Scotch Collie' pred='Manchester Terrier'
+  [eval@200] ✗ q='A Japanese manga series based on a 16 year old high school student Ichitaka Seto, is written and illustrated by someone born in what year?' gold='1962' pred='1978'
+  [eval@200] ✗ q='Which British first-generation jet-powered medium bomber was used in the South West Pacific theatre of World War II?' gold='English Electric Canberra' pred='Avro Lancaster'
+  [eval@200] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='1988, Big 12'
+  [eval@200] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
+  [eval@200] ✗ q='Ellie Goulding worked with what other writers on her third studio album, Delirium?' gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh' pred='The other writers Ellie Goulding worked with on her third st'
+  [eval@200] ✗ q='Which Australian city founded in 1838 contains a boarding school opened by a Prime Minister of Australia and named after a school in London of the same name.' gold='Marion, South Australia' pred='Adelaide'
+  [eval@200] ✗ q='D1NZ is a series based on what oversteering technique?' gold='Drifting' pred='D1NZ is a series based on the oversteering technique known a'
+  [eval@200] ✓ q='who is younger Keith Bostic or Jerry Glanville ?' gold='Keith Bostic' pred='Keith Bostic'
+  [eval@200] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?' gold='more than 70 countries' pred='10'
+  [eval@200] ✗ q='Vince Phillips held a junior welterweight title by an organization recognized by what larger Hall of Fame?' gold='International Boxing Hall of Fame' pred='U.S. Boxing Hall of Fame'
+  [eval@200] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
+  [eval@200] ✗ q='Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the "Teen Titans"?' gold='Teen Titans Go!' pred='Teen Titans'
+  [eval@200] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='The name of the 1996 loose adaptation of William Shakespeare'
+  [eval@200] ✗ q='What American professional Hawaiian surfer born 18 October 1992 won the Rip Curl Pro Portugal?' gold='John John Florence' pred='Kai Lenny'
+  [eval@200] ✗ q='What is the middle name of the actress who plays Bobbi Bacha in Suburban Madness?' gold='Ann' pred='Bobbi Bacha is a fictional character. There is no actress wh'
+  [eval@200] ✗ q='In which year was the King who made the 1925 Birthday Honours born?' gold='1865' pred='1848'
+  [eval@200] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Lempster'
+  [eval@200] ✗ q='The Album Against the Wind was the 11th Album of a Rock singer Robert C Seger born may 6 1945. What was the Rock singers stage name ?' gold='Bob Seger' pred='Grand Funk Railroad'
+  [eval@200] ✗ q='Rostker v. Goldberg held that the practice of what way of filling armed forces vacancies was consitutional?' gold='Conscription' pred='Rostker v. Goldberg held that the practice of filling armed '
+[eval@200] pair-acc=2/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=200 full-match=0.05 (n=40) gnorm_comp=2.397e+00 gnorm_bridge=8.464e+00 gnorm_router=4.509e-01
+[step 201] loss_qa=3.6953 loss_kl=n/a loss_addr=1.5392 soft_tokens=4 compress=0.116788 gnorm_comp=2.397e+00 gnorm_bridge=8.464e+00 gnorm_router=4.509e-01 peakmem=10960MiB (3333s)
+[step 202] loss_qa=5.6396 loss_kl=n/a loss_addr=1.2480 soft_tokens=4 compress=0.125 gnorm_comp=7.550e+00 gnorm_bridge=4.450e+01 gnorm_router=2.336e-01 peakmem=10960MiB (3346s)
+[step 203] loss_qa=0.8835 loss_kl=n/a loss_addr=1.3535 soft_tokens=4 compress=0.123796 gnorm_comp=1.590e+00 gnorm_bridge=9.466e+00 gnorm_router=2.226e-02 peakmem=10960MiB (3359s)
+[step 204] loss_qa=6.2351 loss_kl=n/a loss_addr=1.3379 soft_tokens=4 compress=0.102326 gnorm_comp=2.831e+00 gnorm_bridge=9.712e+00 gnorm_router=2.623e+00 peakmem=10960MiB (3372s)
+[step 205] loss_qa=0.8664 loss_kl=n/a loss_addr=1.1933 soft_tokens=4 compress=0.11416 gnorm_comp=2.032e+00 gnorm_bridge=1.140e+01 gnorm_router=3.261e-01 peakmem=10960MiB (3388s)
+[step 206] loss_qa=3.4824 loss_kl=n/a loss_addr=1.1932 soft_tokens=4 compress=0.107759 gnorm_comp=1.499e+00 gnorm_bridge=7.604e+00 gnorm_router=1.286e+00 peakmem=10960MiB (3401s)
+[step 207] loss_qa=1.6587 loss_kl=n/a loss_addr=1.1226 soft_tokens=4 compress=0.13587 gnorm_comp=7.506e-01 gnorm_bridge=3.028e+00 gnorm_router=3.865e-02 peakmem=10960MiB (3415s)
+[step 208] loss_qa=1.6357 loss_kl=n/a loss_addr=1.1800 soft_tokens=4 compress=0.146843 gnorm_comp=1.065e+00 gnorm_bridge=4.937e+00 gnorm_router=3.219e-02 peakmem=10960MiB (3428s)
+[step 209] loss_qa=3.3086 loss_kl=n/a loss_addr=1.4197 soft_tokens=4 compress=0.172455 gnorm_comp=2.581e+00 gnorm_bridge=8.397e+00 gnorm_router=2.096e-02 peakmem=10960MiB (3442s)
+[step 210] loss_qa=0.4246 loss_kl=n/a loss_addr=1.5103 soft_tokens=4 compress=0.124411 gnorm_comp=2.952e-01 gnorm_bridge=2.061e+00 gnorm_router=2.771e-02 peakmem=10960MiB (3457s)
+[step 211] loss_qa=3.2549 loss_kl=n/a loss_addr=1.5336 soft_tokens=4 compress=0.12766 gnorm_comp=5.206e+00 gnorm_bridge=1.954e+01 gnorm_router=4.333e-01 peakmem=10960MiB (3472s)
+[step 212] loss_qa=0.9478 loss_kl=n/a loss_addr=1.2401 soft_tokens=4 compress=0.110687 gnorm_comp=5.755e-01 gnorm_bridge=3.806e+00 gnorm_router=3.744e-02 peakmem=10960MiB (3487s)
+[step 213] loss_qa=5.5854 loss_kl=n/a loss_addr=1.3836 soft_tokens=4 compress=0.187793 gnorm_comp=1.745e+00 gnorm_bridge=9.256e+00 gnorm_router=3.787e-01 peakmem=10960MiB (3501s)
+[step 214] loss_qa=3.2773 loss_kl=n/a loss_addr=1.9869 soft_tokens=4 compress=0.149688 gnorm_comp=2.475e+00 gnorm_bridge=1.249e+01 gnorm_router=1.024e+00 peakmem=10960MiB (3512s)
+[step 215] loss_qa=2.0057 loss_kl=n/a loss_addr=1.5103 soft_tokens=4 compress=0.132597 gnorm_comp=1.781e+00 gnorm_bridge=1.114e+01 gnorm_router=5.923e-01 peakmem=10960MiB (3528s)
+[step 216] loss_qa=0.8622 loss_kl=n/a loss_addr=1.5145 soft_tokens=4 compress=0.139918 gnorm_comp=1.383e+00 gnorm_bridge=5.510e+00 gnorm_router=8.559e-01 peakmem=10960MiB (3543s)
+[step 217] loss_qa=2.2795 loss_kl=n/a loss_addr=1.3860 soft_tokens=4 compress=0.130132 gnorm_comp=1.833e+00 gnorm_bridge=6.624e+00 gnorm_router=8.089e-01 peakmem=10960MiB (3557s)
+[step 218] loss_qa=1.9276 loss_kl=n/a loss_addr=1.3213 soft_tokens=4 compress=0.11497 gnorm_comp=2.248e+00 gnorm_bridge=9.844e+00 gnorm_router=2.268e-01 peakmem=10960MiB (3574s)
+[step 219] loss_qa=2.7285 loss_kl=n/a loss_addr=1.3853 soft_tokens=4 compress=0.138047 gnorm_comp=4.151e+00 gnorm_bridge=1.556e+01 gnorm_router=1.824e-02 peakmem=10960MiB (3592s)
+[step 220] loss_qa=2.2617 loss_kl=n/a loss_addr=1.9002 soft_tokens=4 compress=0.129151 gnorm_comp=1.197e+00 gnorm_bridge=6.175e+00 gnorm_router=8.848e-01 peakmem=10960MiB (3606s)
+[step 221] loss_qa=3.5000 loss_kl=n/a loss_addr=1.9634 soft_tokens=4 compress=0.122213 gnorm_comp=3.495e+00 gnorm_bridge=1.648e+01 gnorm_router=2.334e-02 peakmem=10960MiB (3621s)
+[step 222] loss_qa=3.8809 loss_kl=n/a loss_addr=1.4303 soft_tokens=4 compress=0.122966 gnorm_comp=1.362e+00 gnorm_bridge=4.222e+00 gnorm_router=1.069e+00 peakmem=10960MiB (3636s)
+[step 223] loss_qa=2.9807 loss_kl=n/a loss_addr=1.8273 soft_tokens=4 compress=0.154696 gnorm_comp=2.363e+00 gnorm_bridge=9.836e+00 gnorm_router=2.502e-01 peakmem=10960MiB (3648s)
+[step 224] loss_qa=1.4480 loss_kl=n/a loss_addr=0.9754 soft_tokens=4 compress=0.123671 gnorm_comp=3.302e+01 gnorm_bridge=7.335e+01 gnorm_router=5.449e-01 peakmem=10960MiB (3662s)
+[step 225] loss_qa=5.5957 loss_kl=n/a loss_addr=1.2489 soft_tokens=4 compress=0.122231 gnorm_comp=4.168e+00 gnorm_bridge=1.486e+01 gnorm_router=4.496e-01 peakmem=10960MiB (3680s)
+[step 226] loss_qa=5.1680 loss_kl=n/a loss_addr=1.4106 soft_tokens=4 compress=0.141844 gnorm_comp=7.039e+00 gnorm_bridge=3.555e+01 gnorm_router=4.897e-02 peakmem=10960MiB (3695s)
+[step 227] loss_qa=2.2896 loss_kl=n/a loss_addr=1.4742 soft_tokens=4 compress=0.11856 gnorm_comp=4.647e+00 gnorm_bridge=1.695e+01 gnorm_router=7.391e-01 peakmem=10960MiB (3710s)
+[step 228] loss_qa=1.3134 loss_kl=n/a loss_addr=1.4101 soft_tokens=4 compress=0.133721 gnorm_comp=1.304e+00 gnorm_bridge=7.280e+00 gnorm_router=2.954e-01 peakmem=10960MiB (3724s)
+[step 229] loss_qa=3.2599 loss_kl=n/a loss_addr=1.7913 soft_tokens=4 compress=0.143737 gnorm_comp=3.570e+00 gnorm_bridge=1.741e+01 gnorm_router=1.654e-01 peakmem=10960MiB (3738s)
+[step 230] loss_qa=2.0000 loss_kl=n/a loss_addr=1.8068 soft_tokens=4 compress=0.125 gnorm_comp=1.406e+00 gnorm_bridge=8.019e+00 gnorm_router=4.156e-01 peakmem=10960MiB (3751s)
+[step 231] loss_qa=2.1401 loss_kl=n/a loss_addr=1.3207 soft_tokens=4 compress=0.14511 gnorm_comp=6.521e+00 gnorm_bridge=1.517e+01 gnorm_router=9.372e-01 peakmem=10960MiB (3764s)
+[step 232] loss_qa=4.6367 loss_kl=n/a loss_addr=1.4159 soft_tokens=4 compress=0.125843 gnorm_comp=4.215e+00 gnorm_bridge=1.509e+01 gnorm_router=1.955e-01 peakmem=10960MiB (3779s)
+[step 233] loss_qa=2.8675 loss_kl=n/a loss_addr=1.1395 soft_tokens=4 compress=0.132576 gnorm_comp=1.081e+01 gnorm_bridge=2.424e+01 gnorm_router=7.928e-01 peakmem=10960MiB (3791s)
+[step 234] loss_qa=3.6035 loss_kl=n/a loss_addr=1.6569 soft_tokens=4 compress=0.10385 gnorm_comp=2.134e+00 gnorm_bridge=1.342e+01 gnorm_router=3.403e-01 peakmem=10960MiB (3806s)
+[step 235] loss_qa=1.1836 loss_kl=n/a loss_addr=1.3280 soft_tokens=4 compress=0.107324 gnorm_comp=8.580e-01 gnorm_bridge=7.771e+00 gnorm_router=6.107e-01 peakmem=10960MiB (3821s)
+[step 236] loss_qa=2.1362 loss_kl=n/a loss_addr=1.2425 soft_tokens=4 compress=0.143852 gnorm_comp=6.665e+00 gnorm_bridge=4.252e+01 gnorm_router=8.247e-03 peakmem=10960MiB (3835s)
+[step 237] loss_qa=3.1953 loss_kl=n/a loss_addr=1.2709 soft_tokens=4 compress=0.133721 gnorm_comp=8.439e-01 gnorm_bridge=5.994e+00 gnorm_router=1.090e+00 peakmem=10960MiB (3850s)
+[step 238] loss_qa=3.8799 loss_kl=n/a loss_addr=1.3703 soft_tokens=4 compress=0.125348 gnorm_comp=1.721e+00 gnorm_bridge=1.346e+01 gnorm_router=2.571e-02 peakmem=10960MiB (3864s)
+[step 239] loss_qa=1.9846 loss_kl=n/a loss_addr=1.2685 soft_tokens=4 compress=0.149176 gnorm_comp=4.216e-01 gnorm_bridge=3.198e+00 gnorm_router=3.880e-02 peakmem=10960MiB (3878s)
+[step 240] loss_qa=1.5749 loss_kl=n/a loss_addr=1.5513 soft_tokens=4 compress=0.164021 gnorm_comp=6.330e-01 gnorm_bridge=3.004e+00 gnorm_router=5.275e-01 peakmem=10960MiB (3893s)
+[step 241] loss_qa=2.4065 loss_kl=n/a loss_addr=1.0057 soft_tokens=4 compress=0.141176 gnorm_comp=2.005e+00 gnorm_bridge=1.266e+01 gnorm_router=1.812e-02 peakmem=10960MiB (3906s)
+[step 242] loss_qa=3.7305 loss_kl=n/a loss_addr=1.6655 soft_tokens=4 compress=0.131646 gnorm_comp=1.749e+00 gnorm_bridge=1.181e+01 gnorm_router=2.974e-01 peakmem=10960MiB (3922s)
+[step 243] loss_qa=0.4993 loss_kl=n/a loss_addr=1.1083 soft_tokens=4 compress=0.127389 gnorm_comp=7.167e-01 gnorm_bridge=5.173e+00 gnorm_router=4.056e-01 peakmem=10960MiB (3939s)
+[step 244] loss_qa=3.1655 loss_kl=n/a loss_addr=1.2978 soft_tokens=4 compress=0.119403 gnorm_comp=1.427e+00 gnorm_bridge=1.041e+01 gnorm_router=1.905e-02 peakmem=10960MiB (3952s)
+[step 245] loss_qa=2.9727 loss_kl=n/a loss_addr=1.6843 soft_tokens=4 compress=0.115768 gnorm_comp=9.244e-01 gnorm_bridge=6.884e+00 gnorm_router=2.701e-01 peakmem=10960MiB (3968s)
+[step 246] loss_qa=0.8997 loss_kl=n/a loss_addr=1.3374 soft_tokens=4 compress=0.124277 gnorm_comp=1.476e+00 gnorm_bridge=1.015e+01 gnorm_router=9.966e-01 peakmem=10960MiB (3984s)
+[step 247] loss_qa=2.3330 loss_kl=n/a loss_addr=0.9853 soft_tokens=4 compress=0.142111 gnorm_comp=1.661e+00 gnorm_bridge=1.298e+01 gnorm_router=1.167e+00 peakmem=10960MiB (3996s)
+[step 248] loss_qa=1.6055 loss_kl=n/a loss_addr=1.0331 soft_tokens=4 compress=0.131796 gnorm_comp=1.457e+00 gnorm_bridge=1.039e+01 gnorm_router=7.232e-01 peakmem=10960MiB (4010s)
+[step 249] loss_qa=1.6470 loss_kl=n/a loss_addr=1.1787 soft_tokens=4 compress=0.133754 gnorm_comp=1.068e+00 gnorm_bridge=7.691e+00 gnorm_router=2.739e-02 peakmem=10960MiB (4024s)
+[step 250] loss_qa=1.3497 loss_kl=n/a loss_addr=1.5272 soft_tokens=4 compress=0.125693 gnorm_comp=8.191e-01 gnorm_bridge=4.789e+00 gnorm_router=6.593e-03 peakmem=10960MiB (4037s)
+[step 251] loss_qa=2.2422 loss_kl=n/a loss_addr=1.7050 soft_tokens=4 compress=0.10728 gnorm_comp=2.274e+00 gnorm_bridge=1.690e+01 gnorm_router=2.956e-01 peakmem=10960MiB (4053s)
+[step 252] loss_qa=2.5440 loss_kl=n/a loss_addr=1.5756 soft_tokens=4 compress=0.134078 gnorm_comp=9.001e-01 gnorm_bridge=5.391e+00 gnorm_router=2.689e-01 peakmem=10960MiB (4067s)
+[step 253] loss_qa=2.2285 loss_kl=n/a loss_addr=1.7263 soft_tokens=4 compress=0.12069 gnorm_comp=2.809e+00 gnorm_bridge=2.464e+01 gnorm_router=2.322e-02 peakmem=10960MiB (4080s)
+[step 254] loss_qa=3.4648 loss_kl=n/a loss_addr=0.9031 soft_tokens=4 compress=0.122571 gnorm_comp=1.231e+00 gnorm_bridge=1.002e+01 gnorm_router=3.727e-01 peakmem=10960MiB (4096s)
+[step 255] loss_qa=1.7704 loss_kl=n/a loss_addr=1.4863 soft_tokens=4 compress=0.117073 gnorm_comp=4.327e-01 gnorm_bridge=3.380e+00 gnorm_router=1.226e-01 peakmem=10960MiB (4109s)
+[step 256] loss_qa=3.8285 loss_kl=n/a loss_addr=0.8892 soft_tokens=4 compress=0.171617 gnorm_comp=1.190e+00 gnorm_bridge=8.510e+00 gnorm_router=2.114e-01 peakmem=10960MiB (4124s)
+[step 257] loss_qa=2.6016 loss_kl=n/a loss_addr=1.5866 soft_tokens=4 compress=0.133333 gnorm_comp=8.586e-01 gnorm_bridge=6.118e+00 gnorm_router=2.372e-01 peakmem=10960MiB (4137s)
+[step 258] loss_qa=1.1051 loss_kl=n/a loss_addr=1.7781 soft_tokens=4 compress=0.152848 gnorm_comp=5.466e-01 gnorm_bridge=4.806e+00 gnorm_router=2.836e-01 peakmem=10960MiB (4150s)
+[step 259] loss_qa=1.4824 loss_kl=n/a loss_addr=1.6074 soft_tokens=4 compress=0.116935 gnorm_comp=8.440e-01 gnorm_bridge=5.004e+00 gnorm_router=4.991e-01 peakmem=10960MiB (4165s)
+[step 260] loss_qa=3.0437 loss_kl=n/a loss_addr=1.8387 soft_tokens=4 compress=0.122164 gnorm_comp=7.031e+01 gnorm_bridge=3.217e+01 gnorm_router=7.086e+00 peakmem=10960MiB (4181s)
+[step 261] loss_qa=2.5312 loss_kl=n/a loss_addr=1.5578 soft_tokens=4 compress=0.123077 gnorm_comp=8.424e-01 gnorm_bridge=5.648e+00 gnorm_router=2.068e-01 peakmem=10960MiB (4195s)
+[step 262] loss_qa=1.1388 loss_kl=n/a loss_addr=1.2849 soft_tokens=4 compress=0.133333 gnorm_comp=2.069e-01 gnorm_bridge=1.844e+00 gnorm_router=3.123e-01 peakmem=10960MiB (4208s)
+[step 263] loss_qa=2.2841 loss_kl=n/a loss_addr=1.4707 soft_tokens=4 compress=0.113695 gnorm_comp=7.406e-01 gnorm_bridge=5.125e+00 gnorm_router=2.217e-02 peakmem=10960MiB (4222s)
+[step 264] loss_qa=1.5375 loss_kl=n/a loss_addr=1.5566 soft_tokens=4 compress=0.150943 gnorm_comp=3.779e-01 gnorm_bridge=2.433e+00 gnorm_router=4.909e-01 peakmem=10960MiB (4238s)
+[step 265] loss_qa=1.5674 loss_kl=n/a loss_addr=1.4539 soft_tokens=4 compress=0.129032 gnorm_comp=2.339e+00 gnorm_bridge=1.537e+01 gnorm_router=1.421e-02 peakmem=10960MiB (4252s)
+[step 266] loss_qa=0.9282 loss_kl=n/a loss_addr=1.5100 soft_tokens=4 compress=0.11902 gnorm_comp=2.340e+00 gnorm_bridge=1.757e+01 gnorm_router=2.203e-01 peakmem=10960MiB (4267s)
+[step 267] loss_qa=1.2925 loss_kl=n/a loss_addr=1.8309 soft_tokens=4 compress=0.121931 gnorm_comp=2.016e+00 gnorm_bridge=9.833e+00 gnorm_router=5.156e-01 peakmem=10960MiB (4281s)
+[step 268] loss_qa=1.1631 loss_kl=n/a loss_addr=1.2142 soft_tokens=4 compress=0.139774 gnorm_comp=2.085e+00 gnorm_bridge=1.611e+01 gnorm_router=1.458e-01 peakmem=10960MiB (4294s)
+[step 269] loss_qa=2.6055 loss_kl=n/a loss_addr=1.4005 soft_tokens=4 compress=0.107728 gnorm_comp=1.004e+00 gnorm_bridge=6.089e+00 gnorm_router=1.935e-01 peakmem=10960MiB (4307s)
+[step 270] loss_qa=1.4355 loss_kl=n/a loss_addr=1.6599 soft_tokens=4 compress=0.137552 gnorm_comp=3.246e+00 gnorm_bridge=8.419e+00 gnorm_router=1.473e-01 peakmem=10960MiB (4321s)
+[step 271] loss_qa=1.0032 loss_kl=n/a loss_addr=1.4178 soft_tokens=4 compress=0.13179 gnorm_comp=1.420e+00 gnorm_bridge=6.391e+00 gnorm_router=5.270e-01 peakmem=10960MiB (4336s)
+[step 272] loss_qa=1.2384 loss_kl=n/a loss_addr=1.6651 soft_tokens=4 compress=0.153425 gnorm_comp=1.118e+00 gnorm_bridge=7.895e+00 gnorm_router=8.969e-02 peakmem=10960MiB (4350s)
+[step 273] loss_qa=2.2285 loss_kl=n/a loss_addr=1.4203 soft_tokens=4 compress=0.141356 gnorm_comp=1.102e+00 gnorm_bridge=8.436e+00 gnorm_router=2.190e-01 peakmem=10960MiB (4365s)
+[step 274] loss_qa=1.5852 loss_kl=n/a loss_addr=1.6125 soft_tokens=4 compress=0.127389 gnorm_comp=3.772e+00 gnorm_bridge=5.944e+00 gnorm_router=4.463e-01 peakmem=10960MiB (4379s)
+[step 275] loss_qa=2.5891 loss_kl=n/a loss_addr=1.5915 soft_tokens=4 compress=0.113721 gnorm_comp=3.353e+00 gnorm_bridge=1.371e+01 gnorm_router=3.730e-01 peakmem=10960MiB (4393s)
+[step 276] loss_qa=2.7285 loss_kl=n/a loss_addr=1.1977 soft_tokens=4 compress=0.164948 gnorm_comp=1.603e+00 gnorm_bridge=1.424e+01 gnorm_router=1.560e-02 peakmem=10960MiB (4407s)
+[step 277] loss_qa=1.1143 loss_kl=n/a loss_addr=1.5138 soft_tokens=4 compress=0.106809 gnorm_comp=5.457e-01 gnorm_bridge=5.205e+00 gnorm_router=5.266e-02 peakmem=10960MiB (4419s)
+[step 278] loss_qa=2.7019 loss_kl=n/a loss_addr=1.7347 soft_tokens=4 compress=0.141225 gnorm_comp=2.598e+00 gnorm_bridge=2.119e+01 gnorm_router=7.304e-02 peakmem=10960MiB (4432s)
+[step 279] loss_qa=1.9473 loss_kl=n/a loss_addr=0.9976 soft_tokens=4 compress=0.113166 gnorm_comp=1.504e+00 gnorm_bridge=1.109e+01 gnorm_router=8.215e-03 peakmem=10960MiB (4445s)
+[step 280] loss_qa=2.4165 loss_kl=n/a loss_addr=1.3465 soft_tokens=4 compress=0.10711 gnorm_comp=1.779e+01 gnorm_bridge=1.961e+01 gnorm_router=6.109e+00 peakmem=10960MiB (4458s)
+[step 281] loss_qa=1.3679 loss_kl=n/a loss_addr=1.4190 soft_tokens=4 compress=0.126357 gnorm_comp=1.148e+00 gnorm_bridge=1.159e+01 gnorm_router=2.087e-01 peakmem=10960MiB (4473s)
+[step 282] loss_qa=0.7631 loss_kl=n/a loss_addr=1.6798 soft_tokens=4 compress=0.131474 gnorm_comp=4.914e-01 gnorm_bridge=3.489e+00 gnorm_router=6.559e-02 peakmem=10960MiB (4486s)
+[step 283] loss_qa=1.3936 loss_kl=n/a loss_addr=1.3154 soft_tokens=4 compress=0.116592 gnorm_comp=7.286e-01 gnorm_bridge=4.860e+00 gnorm_router=2.287e-02 peakmem=10960MiB (4500s)
+[step 284] loss_qa=1.2259 loss_kl=n/a loss_addr=0.9062 soft_tokens=4 compress=0.120032 gnorm_comp=3.548e+00 gnorm_bridge=7.857e+00 gnorm_router=8.138e-01 peakmem=10960MiB (4515s)
+[step 285] loss_qa=2.9131 loss_kl=n/a loss_addr=1.8045 soft_tokens=4 compress=0.14553 gnorm_comp=2.235e+00 gnorm_bridge=1.576e+01 gnorm_router=3.975e-01 peakmem=10960MiB (4530s)
+[step 286] loss_qa=2.5166 loss_kl=n/a loss_addr=1.6907 soft_tokens=4 compress=0.128637 gnorm_comp=1.549e+00 gnorm_bridge=9.886e+00 gnorm_router=1.404e-01 peakmem=10960MiB (4543s)
+[step 287] loss_qa=2.5361 loss_kl=n/a loss_addr=1.4303 soft_tokens=4 compress=0.136136 gnorm_comp=1.405e+00 gnorm_bridge=2.971e+00 gnorm_router=3.856e-01 peakmem=10960MiB (4559s)
+[step 288] loss_qa=2.0547 loss_kl=n/a loss_addr=1.4251 soft_tokens=4 compress=0.142506 gnorm_comp=4.113e+00 gnorm_bridge=1.438e+01 gnorm_router=7.269e-01 peakmem=10960MiB (4572s)
+[step 289] loss_qa=2.4649 loss_kl=n/a loss_addr=1.9153 soft_tokens=4 compress=0.11236 gnorm_comp=3.547e+00 gnorm_bridge=3.986e+00 gnorm_router=2.273e-01 peakmem=10960MiB (4584s)
+[step 290] loss_qa=1.7432 loss_kl=n/a loss_addr=1.6273 soft_tokens=4 compress=0.144718 gnorm_comp=1.004e+00 gnorm_bridge=6.932e+00 gnorm_router=1.141e-02 peakmem=10960MiB (4597s)
+[step 291] loss_qa=1.9886 loss_kl=n/a loss_addr=1.6020 soft_tokens=4 compress=0.142857 gnorm_comp=1.904e+00 gnorm_bridge=4.157e+00 gnorm_router=2.088e-01 peakmem=10960MiB (4611s)
+[step 292] loss_qa=3.0312 loss_kl=n/a loss_addr=1.3338 soft_tokens=4 compress=0.125 gnorm_comp=6.573e+00 gnorm_bridge=9.880e+00 gnorm_router=1.406e+00 peakmem=10960MiB (4627s)
+[step 293] loss_qa=1.8438 loss_kl=n/a loss_addr=1.2425 soft_tokens=4 compress=0.114901 gnorm_comp=8.465e-01 gnorm_bridge=7.869e+00 gnorm_router=7.120e-03 peakmem=10960MiB (4640s)
+[step 294] loss_qa=0.8414 loss_kl=n/a loss_addr=1.4539 soft_tokens=4 compress=0.119782 gnorm_comp=1.184e+00 gnorm_bridge=1.038e+01 gnorm_router=4.097e-01 peakmem=10960MiB (4657s)
+[step 295] loss_qa=3.5723 loss_kl=n/a loss_addr=1.6489 soft_tokens=4 compress=0.136286 gnorm_comp=1.320e+00 gnorm_bridge=1.494e+01 gnorm_router=2.351e-01 peakmem=10960MiB (4670s)
+[step 296] loss_qa=1.7794 loss_kl=n/a loss_addr=1.4233 soft_tokens=4 compress=0.134021 gnorm_comp=8.217e-01 gnorm_bridge=6.220e+00 gnorm_router=4.055e-01 peakmem=10960MiB (4683s)
+[step 297] loss_qa=1.2437 loss_kl=n/a loss_addr=1.4715 soft_tokens=4 compress=0.155844 gnorm_comp=5.221e-01 gnorm_bridge=5.217e+00 gnorm_router=6.339e-03 peakmem=10960MiB (4698s)
+[step 298] loss_qa=1.9603 loss_kl=n/a loss_addr=1.6715 soft_tokens=4 compress=0.142626 gnorm_comp=1.309e+00 gnorm_bridge=1.295e+01 gnorm_router=1.630e-02 peakmem=10960MiB (4711s)
+[step 299] loss_qa=0.8994 loss_kl=n/a loss_addr=1.6672 soft_tokens=4 compress=0.126629 gnorm_comp=9.213e-01 gnorm_bridge=7.837e+00 gnorm_router=9.719e-01 peakmem=10960MiB (4726s)
+[step 300] loss_qa=1.0439 loss_kl=n/a loss_addr=1.0466 soft_tokens=4 compress=0.130577 gnorm_comp=6.048e-01 gnorm_bridge=7.338e+00 gnorm_router=4.441e-01 peakmem=10960MiB (4739s)
+[ckpt] step 300 已保存 -> ckpt/hotpot_r2.pt
+  [eval@300] ✗ q='What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?' gold='Animorphs' pred='The Expanse'
+  [eval@300] ✗ q='2014 S/S is the debut album of a South Korean boy group that was formed by who?' gold='YG Entertainment' pred='SM Entertainment'
+  [eval@300] ✗ q='Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?' gold='Eenasul Fateh' pred='Aladin (consultant)'
+  [eval@300] ✓ q='Are Local H and For Against both from the United States?' gold='yes' pred='yes'
+  [eval@300] ✗ q='What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?' gold='Kansas Song' pred='The University of Kansas'
+  [eval@300] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?' gold='1999' pred='1991'
+  [eval@300] ✗ q="The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?" gold='the North Atlantic Conference' pred='New England Conference'
+  [eval@300] ✗ q='Which writer was from England, Henry Roth or Robert Erskine Childers?' gold='Robert Erskine Childers DSC' pred='Robert Erskine Childers'
+  [eval@300] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?' gold="World's Best Goalkeeper" pred='Kasper Schmeichel'
+  [eval@300] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in 2007?" gold='Barton Lee Hazlewood' pred='Burt Bacharach'
+  [eval@300] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?" gold='1838' pred='1969'
+  [eval@300] ✗ q='What is the name for the adventure in "Tunnels and Trolls", a game designed by Ken St. Andre?' gold='Arena of Khazan' pred='The Adventure of the Black Tower'
+  [eval@300] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?' gold='2000' pred='1989'
+  [eval@300] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
+  [eval@300] ✗ q='Which band, Letters to Cleo or Screaming Trees, had more members?' gold='Letters to Cleo' pred='Screaming Trees'
+  [eval@300] ✗ q='Alexander Kerensky was defeated and destroyed by the Bolsheviks in the course of a civil war that ended when ?' gold='October 1922' pred='the October Revolution'
+  [eval@300] ✗ q='Seven Brief Lessons on Physics was written by an Italian physicist that has worked in France since what year?' gold='2000' pred='1980'
+  [eval@300] ✗ q='The Livesey Hal War Memorial commemorates the fallen of which war, that had over 60 million casualties?' gold='World War II' pred='World War I'
+  [eval@300] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='no'
+  [eval@300] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Cincinnati'
+  [eval@300] ✗ q="Which dog's ancestors include Gordon and Irish Setters: the Manchester Terrier or the Scotch Collie?" gold='Scotch Collie' pred='Manchester Terrier'
+  [eval@300] ✗ q='A Japanese manga series based on a 16 year old high school student Ichitaka Seto, is written and illustrated by someone born in what year?' gold='1962' pred='1978'
+  [eval@300] ✗ q='Which British first-generation jet-powered medium bomber was used in the South West Pacific theatre of World War II?' gold='English Electric Canberra' pred='Avro Lancaster'
+  [eval@300] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='1988 Rocky Mountain Conference'
+  [eval@300] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
+  [eval@300] ✗ q='Ellie Goulding worked with what other writers on her third studio album, Delirium?' gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh' pred='Damon Albarn'
+  [eval@300] ✗ q='Which Australian city founded in 1838 contains a boarding school opened by a Prime Minister of Australia and named after a school in London of the same name.' gold='Marion, South Australia' pred='Melbourne'
+  [eval@300] ✗ q='D1NZ is a series based on what oversteering technique?' gold='Drifting' pred='oversteering'
+  [eval@300] ✗ q='who is younger Keith Bostic or Jerry Glanville ?' gold='Keith Bostic' pred='Jerry Glanville'
+  [eval@300] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?' gold='more than 70 countries' pred='100'
+  [eval@300] ✓ q='Vince Phillips held a junior welterweight title by an organization recognized by what larger Hall of Fame?' gold='International Boxing Hall of Fame' pred='International Boxing Hall of Fame'
+  [eval@300] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
+  [eval@300] ✗ q='Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the "Teen Titans"?' gold='Teen Titans Go!' pred='Starfire'
+  [eval@300] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='The 1996 loose adaptation of William Shakespeare\'s "Romeo'
+  [eval@300] ✗ q='What American professional Hawaiian surfer born 18 October 1992 won the Rip Curl Pro Portugal?' gold='John John Florence' pred='Kai Lenny'
+  [eval@300] ✗ q='What is the middle name of the actress who plays Bobbi Bacha in Suburban Madness?' gold='Ann' pred='Linda'
+  [eval@300] ✗ q='In which year was the King who made the 1925 Birthday Honours born?' gold='1865' pred='1872'
+  [eval@300] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Lempster'
+  [eval@300] ✗ q='The Album Against the Wind was the 11th Album of a Rock singer Robert C Seger born may 6 1945. What was the Rock singers stage name ?' gold='Bob Seger' pred='Robert C Seger'
+  [eval@300] ✗ q='Rostker v. Goldberg held that the practice of what way of filling armed forces vacancies was consitutional?' gold='Conscription' pred='random selection'
+[eval@300] pair-acc=3/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=300 full-match=0.075 (n=40) gnorm_comp=8.976e-01 gnorm_bridge=9.548e+00 gnorm_router=2.199e-01
+[step 301] loss_qa=0.9714 loss_kl=n/a loss_addr=1.2943 soft_tokens=4 compress=0.144649 gnorm_comp=8.976e-01 gnorm_bridge=9.548e+00 gnorm_router=2.199e-01 peakmem=10960MiB (4866s)
+[step 302] loss_qa=0.8127 loss_kl=n/a loss_addr=1.2545 soft_tokens=4 compress=0.116883 gnorm_comp=1.051e+00 gnorm_bridge=6.997e+00 gnorm_router=7.122e-01 peakmem=10960MiB (4880s)
+[step 303] loss_qa=2.1807 loss_kl=n/a loss_addr=1.3189 soft_tokens=4 compress=0.128571 gnorm_comp=1.026e+00 gnorm_bridge=1.192e+01 gnorm_router=3.283e-01 peakmem=10960MiB (4895s)
+[step 304] loss_qa=1.7920 loss_kl=n/a loss_addr=1.3350 soft_tokens=4 compress=0.130144 gnorm_comp=6.956e-01 gnorm_bridge=4.416e+00 gnorm_router=8.912e-02 peakmem=10960MiB (4908s)
+[step 305] loss_qa=2.2617 loss_kl=n/a loss_addr=1.5631 soft_tokens=4 compress=0.110823 gnorm_comp=2.258e+00 gnorm_bridge=1.556e+01 gnorm_router=1.116e-01 peakmem=10960MiB (4922s)
+[step 306] loss_qa=2.2988 loss_kl=n/a loss_addr=1.0955 soft_tokens=4 compress=0.135785 gnorm_comp=1.262e+00 gnorm_bridge=9.366e+00 gnorm_router=9.999e-03 peakmem=10960MiB (4934s)
+[step 307] loss_qa=0.9600 loss_kl=n/a loss_addr=1.3646 soft_tokens=4 compress=0.141321 gnorm_comp=2.945e-01 gnorm_bridge=2.569e+00 gnorm_router=5.081e-01 peakmem=10960MiB (4948s)
+[step 308] loss_qa=0.9131 loss_kl=n/a loss_addr=1.3701 soft_tokens=4 compress=0.120063 gnorm_comp=3.165e-01 gnorm_bridge=2.931e+00 gnorm_router=3.250e-02 peakmem=10960MiB (4962s)
+[step 309] loss_qa=2.9727 loss_kl=n/a loss_addr=1.9650 soft_tokens=4 compress=0.139456 gnorm_comp=8.355e-01 gnorm_bridge=8.248e+00 gnorm_router=1.418e+00 peakmem=10960MiB (4976s)
+[step 310] loss_qa=1.3271 loss_kl=n/a loss_addr=1.3966 soft_tokens=4 compress=0.146982 gnorm_comp=5.267e-01 gnorm_bridge=5.246e+00 gnorm_router=1.747e-01 peakmem=10960MiB (4989s)
+[step 311] loss_qa=2.7715 loss_kl=n/a loss_addr=1.4842 soft_tokens=4 compress=0.123125 gnorm_comp=1.266e+00 gnorm_bridge=8.568e+00 gnorm_router=2.275e-01 peakmem=10960MiB (5005s)
+[step 312] loss_qa=1.6533 loss_kl=n/a loss_addr=1.1706 soft_tokens=4 compress=0.104046 gnorm_comp=5.241e-01 gnorm_bridge=5.382e+00 gnorm_router=4.299e-02 peakmem=10960MiB (5020s)
+[step 313] loss_qa=0.8750 loss_kl=n/a loss_addr=1.5102 soft_tokens=4 compress=0.140606 gnorm_comp=5.565e-01 gnorm_bridge=4.481e+00 gnorm_router=3.523e-02 peakmem=10960MiB (5034s)
+[step 314] loss_qa=2.0684 loss_kl=n/a loss_addr=1.2102 soft_tokens=4 compress=0.136461 gnorm_comp=2.857e+00 gnorm_bridge=1.810e+01 gnorm_router=7.711e-01 peakmem=10960MiB (5048s)
+[step 315] loss_qa=2.2800 loss_kl=n/a loss_addr=1.3107 soft_tokens=4 compress=0.134031 gnorm_comp=1.626e+00 gnorm_bridge=6.799e+00 gnorm_router=3.874e-02 peakmem=10960MiB (5063s)
+[step 316] loss_qa=1.7222 loss_kl=n/a loss_addr=1.2129 soft_tokens=4 compress=0.125828 gnorm_comp=1.706e+00 gnorm_bridge=6.165e+00 gnorm_router=3.843e-02 peakmem=10960MiB (5075s)
+[step 317] loss_qa=3.2266 loss_kl=n/a loss_addr=1.3468 soft_tokens=4 compress=0.148492 gnorm_comp=1.153e+00 gnorm_bridge=6.846e+00 gnorm_router=3.054e-01 peakmem=10960MiB (5087s)
+[step 318] loss_qa=1.5999 loss_kl=n/a loss_addr=1.5056 soft_tokens=4 compress=0.142466 gnorm_comp=8.465e-01 gnorm_bridge=6.432e+00 gnorm_router=4.311e-01 peakmem=10960MiB (5101s)
+[step 319] loss_qa=1.3293 loss_kl=n/a loss_addr=1.1078 soft_tokens=4 compress=0.148713 gnorm_comp=1.151e+00 gnorm_bridge=7.612e+00 gnorm_router=2.171e-02 peakmem=10960MiB (5116s)
+[step 320] loss_qa=0.8951 loss_kl=n/a loss_addr=1.1248 soft_tokens=4 compress=0.149095 gnorm_comp=6.441e-01 gnorm_bridge=4.964e+00 gnorm_router=3.218e-02 peakmem=10960MiB (5130s)
+[step 321] loss_qa=2.3320 loss_kl=n/a loss_addr=1.4276 soft_tokens=4 compress=0.12 gnorm_comp=8.272e-01 gnorm_bridge=1.233e+01 gnorm_router=1.260e+00 peakmem=10960MiB (5145s)
+[step 322] loss_qa=1.7939 loss_kl=n/a loss_addr=1.6122 soft_tokens=4 compress=0.146423 gnorm_comp=5.754e-01 gnorm_bridge=5.542e+00 gnorm_router=4.192e-01 peakmem=10960MiB (5161s)
+[step 323] loss_qa=1.3828 loss_kl=n/a loss_addr=1.7658 soft_tokens=4 compress=0.154465 gnorm_comp=9.797e-01 gnorm_bridge=1.122e+01 gnorm_router=2.217e-01 peakmem=10960MiB (5175s)
+[step 324] loss_qa=2.0176 loss_kl=n/a loss_addr=1.1518 soft_tokens=4 compress=0.141079 gnorm_comp=1.235e+00 gnorm_bridge=1.199e+01 gnorm_router=6.790e-01 peakmem=10960MiB (5191s)
+[step 325] loss_qa=1.2764 loss_kl=n/a loss_addr=1.5778 soft_tokens=4 compress=0.126172 gnorm_comp=5.413e-01 gnorm_bridge=5.075e+00 gnorm_router=2.508e-01 peakmem=10960MiB (5206s)
+[step 326] loss_qa=3.2432 loss_kl=n/a loss_addr=1.1967 soft_tokens=4 compress=0.138318 gnorm_comp=1.747e+00 gnorm_bridge=2.268e+01 gnorm_router=1.673e-02 peakmem=10960MiB (5220s)
+[step 327] loss_qa=2.9775 loss_kl=n/a loss_addr=1.6556 soft_tokens=4 compress=0.105174 gnorm_comp=2.675e-01 gnorm_bridge=3.228e+00 gnorm_router=2.895e-01 peakmem=10960MiB (5235s)
+[step 328] loss_qa=0.8109 loss_kl=n/a loss_addr=1.1410 soft_tokens=4 compress=0.148936 gnorm_comp=5.637e-01 gnorm_bridge=6.487e+00 gnorm_router=8.589e-03 peakmem=10960MiB (5249s)
+[step 329] loss_qa=1.9060 loss_kl=n/a loss_addr=1.1706 soft_tokens=4 compress=0.131507 gnorm_comp=6.764e-01 gnorm_bridge=7.769e+00 gnorm_router=4.768e-03 peakmem=10960MiB (5265s)
+[step 330] loss_qa=1.3613 loss_kl=n/a loss_addr=1.2413 soft_tokens=4 compress=0.123457 gnorm_comp=4.112e-01 gnorm_bridge=3.724e+00 gnorm_router=3.127e-01 peakmem=10960MiB (5281s)
+[step 331] loss_qa=2.2542 loss_kl=n/a loss_addr=1.4773 soft_tokens=4 compress=0.132812 gnorm_comp=3.023e-01 gnorm_bridge=3.474e+00 gnorm_router=3.833e-01 peakmem=10960MiB (5295s)
+[step 332] loss_qa=1.4041 loss_kl=n/a loss_addr=1.8050 soft_tokens=4 compress=0.128237 gnorm_comp=4.194e-01 gnorm_bridge=5.631e+00 gnorm_router=8.653e-02 peakmem=10960MiB (5309s)
+[step 333] loss_qa=2.9043 loss_kl=n/a loss_addr=1.7301 soft_tokens=4 compress=0.123077 gnorm_comp=6.319e-01 gnorm_bridge=6.364e+00 gnorm_router=2.151e-01 peakmem=10960MiB (5322s)
+[step 334] loss_qa=2.5674 loss_kl=n/a loss_addr=1.1405 soft_tokens=4 compress=0.116343 gnorm_comp=2.379e+00 gnorm_bridge=1.891e+01 gnorm_router=4.054e-02 peakmem=10960MiB (5337s)
+[step 335] loss_qa=2.5801 loss_kl=n/a loss_addr=1.3786 soft_tokens=4 compress=0.11124 gnorm_comp=4.973e-01 gnorm_bridge=4.887e+00 gnorm_router=8.000e-01 peakmem=10960MiB (5351s)
+[step 336] loss_qa=2.6318 loss_kl=n/a loss_addr=1.4167 soft_tokens=4 compress=0.12693 gnorm_comp=1.331e+00 gnorm_bridge=1.370e+01 gnorm_router=9.252e-01 peakmem=10960MiB (5365s)
+[step 337] loss_qa=1.5005 loss_kl=n/a loss_addr=1.6252 soft_tokens=4 compress=0.14629 gnorm_comp=7.749e-01 gnorm_bridge=7.695e+00 gnorm_router=6.381e-01 peakmem=10960MiB (5379s)
+[step 338] loss_qa=2.0908 loss_kl=n/a loss_addr=1.6434 soft_tokens=4 compress=0.145669 gnorm_comp=7.690e-01 gnorm_bridge=8.892e+00 gnorm_router=1.695e-01 peakmem=10960MiB (5393s)
+[step 339] loss_qa=1.6826 loss_kl=n/a loss_addr=1.6823 soft_tokens=4 compress=0.12 gnorm_comp=4.128e-01 gnorm_bridge=4.914e+00 gnorm_router=1.603e-01 peakmem=10960MiB (5408s)
+[step 340] loss_qa=0.5582 loss_kl=n/a loss_addr=1.4176 soft_tokens=4 compress=0.148532 gnorm_comp=3.728e-01 gnorm_bridge=5.451e+00 gnorm_router=7.629e-01 peakmem=10960MiB (5422s)
+[step 341] loss_qa=1.2295 loss_kl=n/a loss_addr=1.5762 soft_tokens=4 compress=0.129524 gnorm_comp=5.057e-01 gnorm_bridge=7.917e+00 gnorm_router=9.768e-01 peakmem=10960MiB (5438s)
+[step 342] loss_qa=2.0335 loss_kl=n/a loss_addr=1.5514 soft_tokens=4 compress=0.133803 gnorm_comp=2.562e-01 gnorm_bridge=2.743e+00 gnorm_router=2.821e-01 peakmem=10960MiB (5456s)
+[step 343] loss_qa=1.4038 loss_kl=n/a loss_addr=1.5699 soft_tokens=4 compress=0.112948 gnorm_comp=3.363e-01 gnorm_bridge=3.832e+00 gnorm_router=4.681e-01 peakmem=10960MiB (5472s)
+[step 344] loss_qa=1.5776 loss_kl=n/a loss_addr=1.5907 soft_tokens=4 compress=0.127753 gnorm_comp=4.354e-01 gnorm_bridge=6.022e+00 gnorm_router=8.639e-01 peakmem=10960MiB (5486s)
+[step 345] loss_qa=1.1006 loss_kl=n/a loss_addr=1.4576 soft_tokens=4 compress=0.11339 gnorm_comp=5.448e-01 gnorm_bridge=5.279e+00 gnorm_router=6.338e-01 peakmem=10960MiB (5503s)
+[step 346] loss_qa=2.4609 loss_kl=n/a loss_addr=1.2478 soft_tokens=4 compress=0.145125 gnorm_comp=5.086e-01 gnorm_bridge=5.739e+00 gnorm_router=3.939e-01 peakmem=10960MiB (5516s)
+[step 347] loss_qa=1.4873 loss_kl=n/a loss_addr=1.3387 soft_tokens=4 compress=0.124118 gnorm_comp=7.589e-01 gnorm_bridge=1.004e+01 gnorm_router=1.850e+00 peakmem=10960MiB (5530s)
+[step 348] loss_qa=3.3555 loss_kl=n/a loss_addr=1.4047 soft_tokens=4 compress=0.128584 gnorm_comp=1.266e+00 gnorm_bridge=1.438e+01 gnorm_router=9.528e-01 peakmem=10960MiB (5545s)
+[step 349] loss_qa=0.7334 loss_kl=n/a loss_addr=1.6551 soft_tokens=4 compress=0.165517 gnorm_comp=7.693e-01 gnorm_bridge=9.506e+00 gnorm_router=5.048e-02 peakmem=10960MiB (5558s)
+[step 350] loss_qa=1.7070 loss_kl=n/a loss_addr=1.7999 soft_tokens=4 compress=0.21097 gnorm_comp=2.768e+00 gnorm_bridge=3.573e+01 gnorm_router=1.532e-02 peakmem=10960MiB (5573s)
+[step 351] loss_qa=1.7637 loss_kl=n/a loss_addr=1.7155 soft_tokens=4 compress=0.128843 gnorm_comp=8.553e-01 gnorm_bridge=5.458e+00 gnorm_router=3.255e+00 peakmem=10960MiB (5587s)
+[step 352] loss_qa=2.1973 loss_kl=n/a loss_addr=1.4766 soft_tokens=4 compress=0.122841 gnorm_comp=9.730e-01 gnorm_bridge=7.775e+00 gnorm_router=8.089e-02 peakmem=10960MiB (5602s)
+[step 353] loss_qa=1.0575 loss_kl=n/a loss_addr=1.5268 soft_tokens=4 compress=0.127186 gnorm_comp=3.148e-01 gnorm_bridge=2.092e+00 gnorm_router=1.563e+00 peakmem=10960MiB (5614s)
+[step 354] loss_qa=3.4199 loss_kl=n/a loss_addr=0.9989 soft_tokens=4 compress=0.136662 gnorm_comp=1.189e+00 gnorm_bridge=1.887e+01 gnorm_router=3.291e-02 peakmem=10960MiB (5627s)
+[step 355] loss_qa=1.2698 loss_kl=n/a loss_addr=1.5396 soft_tokens=4 compress=0.127222 gnorm_comp=2.645e-01 gnorm_bridge=3.010e+00 gnorm_router=2.987e-01 peakmem=10960MiB (5643s)
+[step 356] loss_qa=2.1621 loss_kl=n/a loss_addr=1.3834 soft_tokens=4 compress=0.136869 gnorm_comp=5.432e-01 gnorm_bridge=5.876e+00 gnorm_router=6.222e-01 peakmem=10960MiB (5657s)
+[step 357] loss_qa=0.9325 loss_kl=n/a loss_addr=1.0427 soft_tokens=4 compress=0.130868 gnorm_comp=5.088e-01 gnorm_bridge=6.505e+00 gnorm_router=7.581e-01 peakmem=10960MiB (5672s)
+[step 358] loss_qa=1.5039 loss_kl=n/a loss_addr=1.2131 soft_tokens=4 compress=0.137592 gnorm_comp=7.316e-01 gnorm_bridge=5.265e+00 gnorm_router=2.896e-02 peakmem=10960MiB (5687s)
+[step 359] loss_qa=1.0972 loss_kl=n/a loss_addr=1.1412 soft_tokens=4 compress=0.171364 gnorm_comp=3.945e-01 gnorm_bridge=3.045e+00 gnorm_router=2.734e-02 peakmem=10960MiB (5702s)
+[step 360] loss_qa=2.4756 loss_kl=n/a loss_addr=1.4335 soft_tokens=4 compress=0.12987 gnorm_comp=3.693e-01 gnorm_bridge=2.485e+00 gnorm_router=2.055e-01 peakmem=10960MiB (5714s)
+[step 361] loss_qa=1.8984 loss_kl=n/a loss_addr=1.3653 soft_tokens=4 compress=0.125683 gnorm_comp=1.130e+00 gnorm_bridge=1.050e+01 gnorm_router=3.193e-01 peakmem=10960MiB (5728s)
+[step 362] loss_qa=2.0850 loss_kl=n/a loss_addr=1.5234 soft_tokens=4 compress=0.142857 gnorm_comp=5.944e-01 gnorm_bridge=5.320e+00 gnorm_router=1.500e-01 peakmem=10960MiB (5741s)
+[step 363] loss_qa=1.4767 loss_kl=n/a loss_addr=1.4509 soft_tokens=4 compress=0.121029 gnorm_comp=4.320e-01 gnorm_bridge=5.438e+00 gnorm_router=1.493e-01 peakmem=10960MiB (5751s)
+[step 364] loss_qa=0.4607 loss_kl=n/a loss_addr=1.0398 soft_tokens=4 compress=0.131579 gnorm_comp=2.572e-01 gnorm_bridge=4.171e+00 gnorm_router=8.722e-03 peakmem=10960MiB (5767s)
+[step 365] loss_qa=0.8687 loss_kl=n/a loss_addr=1.5942 soft_tokens=4 compress=0.151383 gnorm_comp=3.497e-01 gnorm_bridge=5.702e+00 gnorm_router=2.714e-02 peakmem=10960MiB (5782s)
+[step 366] loss_qa=3.1533 loss_kl=n/a loss_addr=1.4542 soft_tokens=4 compress=0.144144 gnorm_comp=6.118e-01 gnorm_bridge=6.499e+00 gnorm_router=9.072e-03 peakmem=10960MiB (5794s)
+[step 367] loss_qa=1.6006 loss_kl=n/a loss_addr=1.3795 soft_tokens=4 compress=0.129505 gnorm_comp=2.264e-01 gnorm_bridge=3.020e+00 gnorm_router=8.779e-02 peakmem=11097MiB (5810s)

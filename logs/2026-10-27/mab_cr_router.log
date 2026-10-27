@@ -1,0 +1,337 @@
+[cfg] stage=a m=4 layer=18 inner=512 heads=8 bottleneck=512 max_unit_tokens=64 lr=0.0002 accum=2 kl=0.0 recon=0.3 smoke=False dry_run=False
+[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
+[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）
+/share/exp4group/train_latent_memory.py:892: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:835.)
+  f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
+[router] LatentRouter 启用：d_key=256 τ0=0.0700 addr_weight=1.0
+[params] 可训练 14.375M (compressor=4.994M, bridge=2.630M, router=6.752M)
+[data][warn] 切分不干净：问句完全相同 1 条（如 ['what is the place of death of the performer of the song collection "back to black"?']）
+[data] synth/mab_cr_train.jsonl: train=300 val=60 hops={1: 300} 平均记忆单元=32.0
+[data] 例：units=['United Kingdom is located in the continent of Europe.', 'Crysis 2 was developed by Sony Interactive Entertainment.', 'Ozzy Osbourne is married to Miranda Otto.'] q='From which continent does the sport of Haverfordwest County A.F.C. originally hail?' a='Oceania'
+  [eval@0] ✗ q='What is the language officially spoken in the country where the spouse of the Chief Executive Officer of CBS Corporation holds citizenship?' gold='Walloon' pred='English'
+  [eval@0] ✗ q='What is the location of the head office of the broadcaster that originally aired "Adventures in Paradise"?' gold='Knoxville' pred='New York, NY'
+  [eval@0] ✗ q="Which city is the capital of the country that created the sport associated with Peter Schmeichel's position?" gold='Dublin' pred='London'
+  [eval@0] ✗ q='What is the continent of the country where the director / manager of "Please Please Me" holds citizenship?' gold='Oceania' pred='Europe'
+  [eval@0] ✗ q='What location was the place of death of the author of Carmilla?' gold='New York City' pred='Vienna, Austria'
+  [eval@0] ✗ q='From what country does the music genre of Dave Matthews Band originate?' gold='Spain' pred='United States'
+  [eval@0] ✗ q='Who holds the position of chairperson at the organization where Stephen Greenblatt is employed?' gold='Mike Cheston' pred='Stephen Greenblatt is employed at Harvard University. The ch'
+  [eval@0] ✗ q="What is the capital city of the country which Sumie Sakai's sport founder holds citizenship in?" gold='New Delhi' pred='Tokyo'
+  [eval@0] ✗ q='What is the name of the city which is the capital of the country where the director/manager of "Back in the U.S.S.R." holds citizenship?' gold='Canberra' pred='Moscow'
+  [eval@0] ✗ q='Which language is considered the official language of the religion that Malik Kafur practiced?' gold='Picard' pred='Sanskrit'
+  [eval@0] ✗ q='What city serves as the capital of the country where the sport played by Derek Holland originated?' gold='Ottawa' pred='Derek Holland is a pitcher in Major League Baseball, which o'
+  [eval@0] ✗ q='What is the name of the person who was in charge of the organization that Philip Agee worked for?' gold='Christopher A. Wray' pred='Philip Agee worked for the CIA. The person in charge of the '
+  [eval@0] ✗ q='What country is the nationality of the spouse of the author of "David Copperfield"?' gold='Belgium' pred='England'
+  [eval@0] ✓ q='What continent is the country of citizenship of the manager/director of Taxman located in?' gold='Asia' pred='Asia'
+  [eval@0] ✗ q='In which city was the person who created the centrifugal governor born?' gold='Edinburgh' pred='London'
+  [eval@0] ✗ q='Where is the educational institution located where Tom Selleck was educated and its headquarters also situated?' gold='Vienna' pred='California'
+  [eval@0] ✗ q='Which faith is the partner of Benigno Aquino Jr. affiliated with?' gold='Methodism' pred='Catholic'
+  [eval@0] ✗ q='What is the name of the leader of the government in the country where the sport related to the 1985 NBA Draft originated?' gold='Lili Bosse' pred='The sport related to the 1985 NBA Draft is basketball, which'
+  [eval@0] ✗ q="What is the country of origin of the sport associated with Dave Dombrowski's employer?" gold='Australia' pred='United States'
+  [eval@0] ✗ q='Which country is the birthplace of the sport associated with Steve Sax?' gold='Italy' pred='United States'
+  [eval@0] ✗ q='What is the sport that Blair Walsh plays in which he is known for his position on the team?' gold='rugby' pred='American football'
+  [eval@0] ✗ q='What was the religion of the person with the citizenship of the country to which Edmund Burke belonged?' gold='Zoroastrianism' pred='Christianity'
+  [eval@0] ✗ q='What was the name of the head of state in the country where Andrew Carnegie was a citizen?' gold='Emmerson Mnangagwa' pred='United States'
+  [eval@0] ✗ q='From which country does the sport, with which Carlos Gómez is associated, come from?' gold='Soviet Union' pred='United States'
+  [eval@0] ✗ q="Which city serves as the capital of the country where the sport that Mike D'Antoni specialized in hails from?" gold='London' pred='Paris'
+  [eval@0] ✗ q='What is the capital city of the country from which the sport of Daniele De Rossi originated?' gold='Tokyo' pred='Rome'
+  [eval@0] ✗ q='What country does the genre of music associated with the spouse of Roy Rogers originate from?' gold='Russian Empire' pred='United States'
+  [eval@0] ✗ q='What is the name of the political entity that was established from the successor of the Sasanian Empire?' gold='Charles Frederick, Duke of Holstein-Gottorp' pred='Sassanid Empire'
+  [eval@0] ✗ q='In which city is the capital of the country that FC Irtysh Omsk originates from located?' gold='Duluth' pred='Omsk'
+  [eval@0] ✗ q='What is the place of death of the performer of the song collection "Back to Black"?' gold='Berlin' pred='The performer of the song collection "Back to Black" is Amy '
+  [eval@0] ✗ q='Which city serves as the capital of the country that gave rise to the sport played by Rogério Ceni?' gold='New Delhi' pred='São Paulo'
+  [eval@0] ✗ q='Who serves as the head of government in the location where the AP1000 was made by its manufacturer?' gold='Jonathan Rothschild' pred='The AP1000 is a nuclear reactor design developed by Westingh'
+  [eval@0] ✗ q='In what place did the author of "A Wizard of Earthsea" breathe his last?' gold='Wolverhampton' pred='The author of "A Wizard of Earthsea," Ursula K. Le Gu'
+  [eval@0] ✗ q='Which individual is responsible for founding the organization that has its headquarters in the same location where Bill Frisell received his education?' gold='William Penn' pred='Bill Frisell'
+  [eval@0] ✗ q='Which university was Adam Putnam educated at?' gold='Federal University of Rio de Janeiro' pred='University of Florida'
+  [eval@0] ✓ q='What type of music does Tito Nieves play?' gold='salsa' pred='Salsa'
+  [eval@0] ✗ q='Who was Bart Simpson created by?' gold='Ray Bradbury' pred='Matt Groening'
+  [eval@0] ✗ q='Which religion is Albert of Saxony affiliated with?' gold='The Church of Jesus Christ of Latter-day Saints' pred='Catholicism'
+  [eval@0] ✗ q='What language does Queen Victoria I speak?' gold='Dutch' pred='Queen Victoria I speaks English.'
+  [eval@0] ✗ q='Which sport is Indiana Mr. Basketball associated with?' gold='association football' pred='basketball'
+[eval@0] pair-acc=2/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.05 (n=40)
+[ckpt] step 0 已保存 -> ckpt/mab_cr_router.pt
+  [eval@0] ✗ q='What is the language officially spoken in the country where the spouse of the Chief Executive Officer of CBS Corporation holds citizenship?' gold='Walloon' pred='English'
+  [eval@0] ✗ q='What is the location of the head office of the broadcaster that originally aired "Adventures in Paradise"?' gold='Knoxville' pred='London'
+  [eval@0] ✗ q="Which city is the capital of the country that created the sport associated with Peter Schmeichel's position?" gold='Dublin' pred='Oslo'
+  [eval@0] ✗ q='What is the continent of the country where the director / manager of "Please Please Me" holds citizenship?' gold='Oceania' pred='Europe'
+  [eval@0] ✗ q='What location was the place of death of the author of Carmilla?' gold='New York City' pred='Bucharest'
+  [eval@0] ✗ q='From what country does the music genre of Dave Matthews Band originate?' gold='Spain' pred='United States'
+  [eval@0] ✗ q='Who holds the position of chairperson at the organization where Stephen Greenblatt is employed?' gold='Mike Cheston' pred='Stephen Greenblatt is employed at Harvard University. The ch'
+  [eval@0] ✗ q="What is the capital city of the country which Sumie Sakai's sport founder holds citizenship in?" gold='New Delhi' pred='Tokyo'
+  [eval@0] ✗ q='What is the name of the city which is the capital of the country where the director/manager of "Back in the U.S.S.R." holds citizenship?' gold='Canberra' pred='Moscow'
+  [eval@0] ✗ q='Which language is considered the official language of the religion that Malik Kafur practiced?' gold='Picard' pred='Sanskrit'
+  [eval@0] ✗ q='What city serves as the capital of the country where the sport played by Derek Holland originated?' gold='Ottawa' pred='Derek Holland is a pitcher in Major League Baseball (MLB), w'
+  [eval@0] ✗ q='What is the name of the person who was in charge of the organization that Philip Agee worked for?' gold='Christopher A. Wray' pred='Philip Agee worked for the CIA. The person in charge of the '
+  [eval@0] ✗ q='What country is the nationality of the spouse of the author of "David Copperfield"?' gold='Belgium' pred='England'
+  [eval@0] ✓ q='What continent is the country of citizenship of the manager/director of Taxman located in?' gold='Asia' pred='Asia'
+  [eval@0] ✗ q='In which city was the person who created the centrifugal governor born?' gold='Edinburgh' pred='London'
+  [eval@0] ✗ q='Where is the educational institution located where Tom Selleck was educated and its headquarters also situated?' gold='Vienna' pred='California'
+  [eval@0] ✗ q='Which faith is the partner of Benigno Aquino Jr. affiliated with?' gold='Methodism' pred='Roman Catholic'
+  [eval@0] ✗ q='What is the name of the leader of the government in the country where the sport related to the 1985 NBA Draft originated?' gold='Lili Bosse' pred='1985 NBA Draft originated in the United States. The leader o'
+  [eval@0] ✗ q="What is the country of origin of the sport associated with Dave Dombrowski's employer?" gold='Australia' pred='United States'
+  [eval@0] ✗ q='Which country is the birthplace of the sport associated with Steve Sax?' gold='Italy' pred='United States'
+  [eval@0] ✗ q='What is the sport that Blair Walsh plays in which he is known for his position on the team?' gold='rugby' pred='Football'
+  [eval@0] ✗ q='What was the religion of the person with the citizenship of the country to which Edmund Burke belonged?' gold='Zoroastrianism' pred='Catholic'
+  [eval@0] ✗ q='What was the name of the head of state in the country where Andrew Carnegie was a citizen?' gold='Emmerson Mnangagwa' pred='President'
+  [eval@0] ✗ q='From which country does the sport, with which Carlos Gómez is associated, come from?' gold='Soviet Union' pred='Cuba'
+  [eval@0] ✗ q="Which city serves as the capital of the country where the sport that Mike D'Antoni specialized in hails from?" gold='London' pred='Mexico City'
+  [eval@0] ✗ q='What is the capital city of the country from which the sport of Daniele De Rossi originated?' gold='Tokyo' pred='Rome'
+  [eval@0] ✗ q='What country does the genre of music associated with the spouse of Roy Rogers originate from?' gold='Russian Empire' pred='United States'
+  [eval@0] ✗ q='What is the name of the political entity that was established from the successor of the Sasanian Empire?' gold='Charles Frederick, Duke of Holstein-Gottorp' pred='Sassanid Empire'
+  [eval@0] ✗ q='In which city is the capital of the country that FC Irtysh Omsk originates from located?' gold='Duluth' pred='Omsk'
+  [eval@0] ✗ q='What is the place of death of the performer of the song collection "Back to Black"?' gold='Berlin' pred='England'
+  [eval@0] ✗ q='Which city serves as the capital of the country that gave rise to the sport played by Rogério Ceni?' gold='New Delhi' pred='São Paulo'
+  [eval@0] ✗ q='Who serves as the head of government in the location where the AP1000 was made by its manufacturer?' gold='Jonathan Rothschild' pred='South Korea'
+  [eval@0] ✗ q='In what place did the author of "A Wizard of Earthsea" breathe his last?' gold='Wolverhampton' pred='The author of "A Wizard of Earthsea," Ursula K. Le Gu'
+  [eval@0] ✗ q='Which individual is responsible for founding the organization that has its headquarters in the same location where Bill Frisell received his education?' gold='William Penn' pred='Bill Frisell'
+  [eval@0] ✗ q='Which university was Adam Putnam educated at?' gold='Federal University of Rio de Janeiro' pred='University of Florida'
+  [eval@0] ✓ q='What type of music does Tito Nieves play?' gold='salsa' pred='Salsa'
+  [eval@0] ✗ q='Who was Bart Simpson created by?' gold='Ray Bradbury' pred='Matt Groening'
+  [eval@0] ✗ q='Which religion is Albert of Saxony affiliated with?' gold='The Church of Jesus Christ of Latter-day Saints' pred='Catholicism'
+  [eval@0] ✗ q='What language does Queen Victoria I speak?' gold='Dutch' pred='English'
+  [eval@0] ✗ q='Which sport is Indiana Mr. Basketball associated with?' gold='association football' pred='basketball'
+[eval@0] pair-acc=2/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=0 full-match=0.05 (n=40) gnorm_comp=7.993e+01 gnorm_bridge=2.828e+01 gnorm_router=5.221e+00
+[step 1] loss_qa=3.0820 loss_kl=n/a loss_addr=1.5877 soft_tokens=4 compress=0.410256 gnorm_comp=7.993e+01 gnorm_bridge=2.828e+01 gnorm_router=5.221e+00 peakmem=9186MiB (173s)
+[step 2] loss_qa=13.0938 loss_kl=n/a loss_addr=0.5058 soft_tokens=4 compress=0.361582 gnorm_comp=9.318e+02 gnorm_bridge=3.868e+02 gnorm_router=2.015e+00 peakmem=9186MiB (178s)
+[step 3] loss_qa=9.7812 loss_kl=n/a loss_addr=0.4682 soft_tokens=4 compress=0.391437 gnorm_comp=3.391e+01 gnorm_bridge=1.237e+01 gnorm_router=5.573e+00 peakmem=9186MiB (182s)
+[step 4] loss_qa=7.7656 loss_kl=n/a loss_addr=2.7643 soft_tokens=4 compress=0.360563 gnorm_comp=5.222e+02 gnorm_bridge=1.565e+02 gnorm_router=5.172e+01 peakmem=9186MiB (187s)
+[step 5] loss_qa=7.1875 loss_kl=n/a loss_addr=1.1825 soft_tokens=4 compress=0.379822 gnorm_comp=4.057e+01 gnorm_bridge=1.159e+01 gnorm_router=5.159e+00 peakmem=9186MiB (191s)
+[step 6] loss_qa=8.0469 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.38209 gnorm_comp=6.861e+01 gnorm_bridge=2.332e+01 gnorm_router=0.000e+00 peakmem=9186MiB (196s)
+[step 7] loss_qa=3.7578 loss_kl=n/a loss_addr=0.5659 soft_tokens=4 compress=0.407643 gnorm_comp=1.365e+02 gnorm_bridge=2.746e+01 gnorm_router=4.210e+00 peakmem=9186MiB (200s)
+[step 8] loss_qa=9.2344 loss_kl=n/a loss_addr=0.6632 soft_tokens=4 compress=0.411576 gnorm_comp=6.936e+02 gnorm_bridge=1.147e+02 gnorm_router=6.960e+00 peakmem=9186MiB (205s)
+[step 9] loss_qa=6.7031 loss_kl=n/a loss_addr=1.6559 soft_tokens=4 compress=0.405063 gnorm_comp=5.505e+01 gnorm_bridge=1.850e+01 gnorm_router=2.939e+00 peakmem=9186MiB (209s)
+[step 10] loss_qa=3.3506 loss_kl=n/a loss_addr=1.1578 soft_tokens=4 compress=0.398754 gnorm_comp=1.570e+02 gnorm_bridge=1.081e+02 gnorm_router=1.462e+00 peakmem=9186MiB (214s)
+[step 11] loss_qa=3.6392 loss_kl=n/a loss_addr=1.5629 soft_tokens=4 compress=0.343164 gnorm_comp=9.050e+00 gnorm_bridge=6.426e+00 gnorm_router=6.973e-01 peakmem=9186MiB (218s)
+[step 12] loss_qa=7.7812 loss_kl=n/a loss_addr=0.9646 soft_tokens=4 compress=0.391437 gnorm_comp=1.930e+01 gnorm_bridge=1.160e+01 gnorm_router=1.282e+00 peakmem=9186MiB (223s)
+[step 13] loss_qa=4.9688 loss_kl=n/a loss_addr=1.5685 soft_tokens=4 compress=0.395062 gnorm_comp=1.115e+01 gnorm_bridge=6.209e+00 gnorm_router=4.088e+00 peakmem=9186MiB (228s)
+[step 14] loss_qa=6.0625 loss_kl=n/a loss_addr=0.7315 soft_tokens=4 compress=0.323232 gnorm_comp=5.506e+00 gnorm_bridge=4.402e+00 gnorm_router=1.272e+00 peakmem=9186MiB (232s)
+[step 15] loss_qa=11.4688 loss_kl=n/a loss_addr=1.0570 soft_tokens=4 compress=0.390244 gnorm_comp=1.247e+01 gnorm_bridge=6.068e+00 gnorm_router=1.984e+00 peakmem=9186MiB (237s)
+[step 16] loss_qa=11.1875 loss_kl=n/a loss_addr=3.0662 soft_tokens=4 compress=0.351648 gnorm_comp=5.301e+01 gnorm_bridge=7.725e+00 gnorm_router=1.734e+01 peakmem=9186MiB (241s)
+[step 17] loss_qa=7.5938 loss_kl=n/a loss_addr=0.6231 soft_tokens=4 compress=0.312195 gnorm_comp=1.842e+01 gnorm_bridge=1.050e+01 gnorm_router=4.148e+00 peakmem=9186MiB (246s)
+[step 18] loss_qa=4.4453 loss_kl=n/a loss_addr=0.6175 soft_tokens=4 compress=0.321608 gnorm_comp=1.109e+01 gnorm_bridge=3.096e+00 gnorm_router=3.246e+00 peakmem=9186MiB (251s)
+[step 19] loss_qa=1.7829 loss_kl=n/a loss_addr=0.7893 soft_tokens=4 compress=0.387879 gnorm_comp=7.372e+00 gnorm_bridge=3.128e+00 gnorm_router=1.738e+00 peakmem=9186MiB (255s)
+[step 20] loss_qa=8.9688 loss_kl=n/a loss_addr=0.4233 soft_tokens=4 compress=0.386707 gnorm_comp=1.162e+01 gnorm_bridge=7.793e+00 gnorm_router=1.779e+00 peakmem=9186MiB (260s)
+[step 21] loss_qa=8.2969 loss_kl=n/a loss_addr=1.2326 soft_tokens=4 compress=0.347826 gnorm_comp=2.171e+01 gnorm_bridge=7.702e+00 gnorm_router=6.475e+00 peakmem=9186MiB (265s)
+[step 22] loss_qa=6.8281 loss_kl=n/a loss_addr=0.0124 soft_tokens=4 compress=0.345013 gnorm_comp=6.393e+00 gnorm_bridge=6.531e+00 gnorm_router=4.658e-01 peakmem=9186MiB (269s)
+[step 23] loss_qa=3.6905 loss_kl=n/a loss_addr=1.3954 soft_tokens=4 compress=0.355556 gnorm_comp=1.072e+01 gnorm_bridge=4.282e+00 gnorm_router=1.790e+00 peakmem=9186MiB (274s)
+[step 24] loss_qa=5.2188 loss_kl=n/a loss_addr=1.2506 soft_tokens=4 compress=0.398754 gnorm_comp=2.156e+01 gnorm_bridge=5.318e+00 gnorm_router=5.589e+00 peakmem=9186MiB (279s)
+[step 25] loss_qa=7.5625 loss_kl=n/a loss_addr=0.4806 soft_tokens=4 compress=0.403785 gnorm_comp=1.995e+01 gnorm_bridge=3.744e+00 gnorm_router=7.879e+00 peakmem=9186MiB (283s)
+[step 26] loss_qa=7.4531 loss_kl=n/a loss_addr=0.2859 soft_tokens=4 compress=0.349727 gnorm_comp=1.649e+01 gnorm_bridge=4.958e+00 gnorm_router=4.865e+00 peakmem=9186MiB (288s)
+[step 27] loss_qa=4.5332 loss_kl=n/a loss_addr=0.1450 soft_tokens=4 compress=0.392638 gnorm_comp=1.609e+01 gnorm_bridge=4.112e+00 gnorm_router=3.506e+00 peakmem=9186MiB (292s)
+[step 28] loss_qa=3.8047 loss_kl=n/a loss_addr=3.3963 soft_tokens=4 compress=0.387879 gnorm_comp=5.111e+01 gnorm_bridge=2.949e+00 gnorm_router=2.056e+01 peakmem=9186MiB (297s)
+[step 29] loss_qa=2.8047 loss_kl=n/a loss_addr=0.5022 soft_tokens=4 compress=0.323232 gnorm_comp=2.976e+02 gnorm_bridge=1.591e+01 gnorm_router=1.339e+00 peakmem=9186MiB (301s)
+[step 30] loss_qa=8.8125 loss_kl=n/a loss_addr=0.0018 soft_tokens=4 compress=0.389058 gnorm_comp=4.484e+01 gnorm_bridge=1.018e+01 gnorm_router=5.312e-02 peakmem=9186MiB (306s)
+[step 31] loss_qa=12.9062 loss_kl=n/a loss_addr=0.2022 soft_tokens=4 compress=0.358543 gnorm_comp=1.147e+01 gnorm_bridge=1.116e+01 gnorm_router=2.585e+00 peakmem=9186MiB (310s)
+[step 32] loss_qa=7.5078 loss_kl=n/a loss_addr=1.2679 soft_tokens=4 compress=0.368876 gnorm_comp=1.240e+01 gnorm_bridge=3.529e+00 gnorm_router=3.261e+00 peakmem=9186MiB (315s)
+[step 33] loss_qa=2.3438 loss_kl=n/a loss_addr=1.2601 soft_tokens=4 compress=0.407643 gnorm_comp=5.905e+00 gnorm_bridge=2.666e+00 gnorm_router=2.162e+00 peakmem=9186MiB (320s)
+[step 34] loss_qa=4.0469 loss_kl=n/a loss_addr=0.3748 soft_tokens=4 compress=0.407643 gnorm_comp=1.147e+01 gnorm_bridge=9.141e+00 gnorm_router=2.796e+00 peakmem=9186MiB (324s)
+[step 35] loss_qa=0.8379 loss_kl=n/a loss_addr=0.2662 soft_tokens=4 compress=0.362606 gnorm_comp=1.061e+01 gnorm_bridge=4.991e+00 gnorm_router=3.512e+00 peakmem=9186MiB (329s)
+[step 36] loss_qa=9.3594 loss_kl=n/a loss_addr=0.0162 soft_tokens=4 compress=0.354571 gnorm_comp=4.653e+00 gnorm_bridge=9.116e+00 gnorm_router=5.163e-01 peakmem=9186MiB (333s)
+[step 37] loss_qa=5.9375 loss_kl=n/a loss_addr=0.0001 soft_tokens=4 compress=0.395062 gnorm_comp=2.976e+00 gnorm_bridge=5.106e+00 gnorm_router=6.976e-03 peakmem=9186MiB (338s)
+[step 38] loss_qa=5.2422 loss_kl=n/a loss_addr=0.0761 soft_tokens=4 compress=0.412903 gnorm_comp=5.759e+00 gnorm_bridge=6.347e+00 gnorm_router=1.333e+00 peakmem=9186MiB (342s)
+[step 39] loss_qa=8.3906 loss_kl=n/a loss_addr=1.5526 soft_tokens=4 compress=0.368876 gnorm_comp=1.499e+01 gnorm_bridge=4.186e+00 gnorm_router=5.337e+00 peakmem=9186MiB (347s)
+[step 40] loss_qa=5.9062 loss_kl=n/a loss_addr=0.7724 soft_tokens=4 compress=0.397516 gnorm_comp=1.658e+01 gnorm_bridge=7.405e+00 gnorm_router=2.024e+00 peakmem=9186MiB (351s)
+[step 41] loss_qa=6.1719 loss_kl=n/a loss_addr=0.1122 soft_tokens=4 compress=0.402516 gnorm_comp=9.426e+00 gnorm_bridge=4.105e+00 gnorm_router=2.591e+00 peakmem=9186MiB (356s)
+[step 42] loss_qa=1.5898 loss_kl=n/a loss_addr=0.0001 soft_tokens=4 compress=0.407643 gnorm_comp=6.716e+00 gnorm_bridge=1.220e+01 gnorm_router=5.146e-03 peakmem=9186MiB (360s)
+[step 43] loss_qa=6.8750 loss_kl=n/a loss_addr=0.0001 soft_tokens=4 compress=0.408946 gnorm_comp=2.793e+00 gnorm_bridge=4.025e+00 gnorm_router=3.412e-03 peakmem=9186MiB (365s)
+[step 44] loss_qa=5.3750 loss_kl=n/a loss_addr=14.5711 soft_tokens=4 compress=0.355556 gnorm_comp=2.669e+02 gnorm_bridge=8.300e+00 gnorm_router=6.429e+01 peakmem=9186MiB (369s)
+[step 45] loss_qa=3.5312 loss_kl=n/a loss_addr=4.1114 soft_tokens=4 compress=0.301176 gnorm_comp=6.137e+01 gnorm_bridge=6.613e+00 gnorm_router=2.530e+01 peakmem=9186MiB (374s)
+[step 46] loss_qa=7.0156 loss_kl=n/a loss_addr=1.7004 soft_tokens=4 compress=0.395062 gnorm_comp=2.354e+01 gnorm_bridge=6.424e+00 gnorm_router=7.929e+00 peakmem=9186MiB (379s)
+[step 47] loss_qa=8.5625 loss_kl=n/a loss_addr=1.1550 soft_tokens=4 compress=0.380952 gnorm_comp=1.326e+01 gnorm_bridge=4.966e+00 gnorm_router=1.949e+00 peakmem=9186MiB (384s)
+[step 48] loss_qa=4.9219 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.351648 gnorm_comp=6.787e+00 gnorm_bridge=1.363e+01 gnorm_router=0.000e+00 peakmem=9186MiB (388s)
+[step 49] loss_qa=2.8102 loss_kl=n/a loss_addr=1.9196 soft_tokens=4 compress=0.335958 gnorm_comp=1.630e+01 gnorm_bridge=2.413e+00 gnorm_router=6.878e+00 peakmem=9186MiB (393s)
+[step 50] loss_qa=4.2891 loss_kl=n/a loss_addr=0.1570 soft_tokens=4 compress=0.395062 gnorm_comp=4.677e+00 gnorm_bridge=6.255e+00 gnorm_router=2.123e+00 peakmem=9186MiB (397s)
+[step 51] loss_qa=7.6875 loss_kl=n/a loss_addr=0.5796 soft_tokens=4 compress=0.372093 gnorm_comp=3.299e+00 gnorm_bridge=5.493e+00 gnorm_router=4.963e-01 peakmem=9186MiB (402s)
+[step 52] loss_qa=4.2305 loss_kl=n/a loss_addr=0.5993 soft_tokens=4 compress=0.38209 gnorm_comp=6.243e+00 gnorm_bridge=9.783e+00 gnorm_router=2.612e+00 peakmem=9186MiB (407s)
+[step 53] loss_qa=4.9844 loss_kl=n/a loss_addr=1.0256 soft_tokens=4 compress=0.376471 gnorm_comp=4.579e+00 gnorm_bridge=5.365e+00 gnorm_router=2.268e+00 peakmem=9186MiB (411s)
+[step 54] loss_qa=4.8242 loss_kl=n/a loss_addr=0.8445 soft_tokens=4 compress=0.408946 gnorm_comp=1.256e+01 gnorm_bridge=2.486e+01 gnorm_router=2.677e+00 peakmem=9186MiB (416s)
+[step 55] loss_qa=3.9609 loss_kl=n/a loss_addr=1.0710 soft_tokens=4 compress=0.390244 gnorm_comp=5.641e+00 gnorm_bridge=7.688e+00 gnorm_router=2.518e+00 peakmem=9186MiB (420s)
+[step 56] loss_qa=5.6484 loss_kl=n/a loss_addr=0.8182 soft_tokens=4 compress=0.389058 gnorm_comp=7.888e+00 gnorm_bridge=1.433e+01 gnorm_router=8.653e-01 peakmem=9186MiB (425s)
+[step 57] loss_qa=3.4766 loss_kl=n/a loss_addr=1.2376 soft_tokens=4 compress=0.343164 gnorm_comp=5.225e+00 gnorm_bridge=7.991e+00 gnorm_router=1.567e+00 peakmem=9186MiB (429s)
+[step 58] loss_qa=3.5938 loss_kl=n/a loss_addr=1.0679 soft_tokens=4 compress=0.396285 gnorm_comp=7.727e+00 gnorm_bridge=8.035e+00 gnorm_router=2.395e+00 peakmem=9186MiB (434s)
+[step 59] loss_qa=0.9199 loss_kl=n/a loss_addr=0.1072 soft_tokens=4 compress=0.361582 gnorm_comp=5.451e+00 gnorm_bridge=1.062e+01 gnorm_router=8.062e-01 peakmem=9186MiB (438s)
+[step 60] loss_qa=6.0000 loss_kl=n/a loss_addr=0.5626 soft_tokens=4 compress=0.378698 gnorm_comp=2.254e+01 gnorm_bridge=3.621e+01 gnorm_router=1.797e+00 peakmem=9186MiB (443s)
+[step 61] loss_qa=5.5703 loss_kl=n/a loss_addr=0.5231 soft_tokens=4 compress=0.384384 gnorm_comp=9.356e+00 gnorm_bridge=1.519e+01 gnorm_router=1.145e+00 peakmem=9186MiB (447s)
+[step 62] loss_qa=6.3125 loss_kl=n/a loss_addr=0.2275 soft_tokens=4 compress=0.373178 gnorm_comp=1.202e+01 gnorm_bridge=2.049e+01 gnorm_router=1.741e+00 peakmem=9186MiB (451s)
+[step 63] loss_qa=7.6875 loss_kl=n/a loss_addr=0.0001 soft_tokens=4 compress=0.414239 gnorm_comp=9.083e+00 gnorm_bridge=1.163e+01 gnorm_router=6.003e-03 peakmem=9186MiB (456s)
+[step 64] loss_qa=6.2500 loss_kl=n/a loss_addr=5.9764 soft_tokens=4 compress=0.386707 gnorm_comp=1.108e+02 gnorm_bridge=1.120e+01 gnorm_router=2.165e+01 peakmem=9186MiB (461s)
+[step 65] loss_qa=2.7695 loss_kl=n/a loss_addr=0.3580 soft_tokens=4 compress=0.349727 gnorm_comp=7.404e+00 gnorm_bridge=1.207e+01 gnorm_router=4.815e-01 peakmem=9186MiB (466s)
+[step 66] loss_qa=3.1719 loss_kl=n/a loss_addr=0.0893 soft_tokens=4 compress=0.391437 gnorm_comp=1.004e+01 gnorm_bridge=8.902e+00 gnorm_router=1.602e+00 peakmem=9186MiB (470s)
+[step 67] loss_qa=5.3438 loss_kl=n/a loss_addr=0.0171 soft_tokens=4 compress=0.30622 gnorm_comp=4.908e+00 gnorm_bridge=9.566e+00 gnorm_router=3.647e-01 peakmem=9186MiB (475s)
+[step 68] loss_qa=6.7656 loss_kl=n/a loss_addr=0.0350 soft_tokens=4 compress=0.343164 gnorm_comp=6.890e+00 gnorm_bridge=1.007e+01 gnorm_router=7.505e-01 peakmem=9186MiB (479s)
+[step 69] loss_qa=4.5469 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.385542 gnorm_comp=5.894e+00 gnorm_bridge=1.278e+01 gnorm_router=5.566e-05 peakmem=9186MiB (484s)
+[step 70] loss_qa=7.0156 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.324051 gnorm_comp=8.969e+00 gnorm_bridge=1.817e+01 gnorm_router=3.637e-04 peakmem=9186MiB (488s)
+[step 71] loss_qa=7.3438 loss_kl=n/a loss_addr=10.2425 soft_tokens=4 compress=0.336842 gnorm_comp=1.806e+02 gnorm_bridge=1.987e+01 gnorm_router=3.978e+01 peakmem=9186MiB (493s)
+[step 72] loss_qa=4.0156 loss_kl=n/a loss_addr=0.0234 soft_tokens=4 compress=0.398754 gnorm_comp=2.164e+01 gnorm_bridge=2.577e+01 gnorm_router=7.630e-01 peakmem=9186MiB (497s)
+[step 73] loss_qa=6.4531 loss_kl=n/a loss_addr=1.6746 soft_tokens=4 compress=0.299065 gnorm_comp=3.175e+01 gnorm_bridge=2.625e+01 gnorm_router=7.166e+00 peakmem=9186MiB (502s)
+[step 74] loss_qa=6.8594 loss_kl=n/a loss_addr=0.0644 soft_tokens=4 compress=0.368876 gnorm_comp=9.541e+00 gnorm_bridge=1.671e+01 gnorm_router=1.428e+00 peakmem=9186MiB (507s)
+[step 75] loss_qa=5.7031 loss_kl=n/a loss_addr=0.6092 soft_tokens=4 compress=0.329049 gnorm_comp=2.347e+01 gnorm_bridge=2.561e+01 gnorm_router=1.350e+00 peakmem=9186MiB (511s)
+[step 76] loss_qa=2.1914 loss_kl=n/a loss_addr=0.4580 soft_tokens=4 compress=0.401254 gnorm_comp=1.163e+01 gnorm_bridge=1.198e+01 gnorm_router=1.763e+00 peakmem=9186MiB (516s)
+[step 77] loss_qa=3.5312 loss_kl=n/a loss_addr=0.0007 soft_tokens=4 compress=0.387879 gnorm_comp=5.476e+01 gnorm_bridge=1.135e+01 gnorm_router=1.793e-02 peakmem=9186MiB (520s)
+[step 78] loss_qa=3.6289 loss_kl=n/a loss_addr=0.5799 soft_tokens=4 compress=0.345946 gnorm_comp=1.316e+02 gnorm_bridge=1.376e+01 gnorm_router=7.788e-01 peakmem=9186MiB (525s)
+[step 79] loss_qa=5.2578 loss_kl=n/a loss_addr=0.5981 soft_tokens=4 compress=0.341333 gnorm_comp=2.523e+01 gnorm_bridge=1.155e+01 gnorm_router=1.956e+00 peakmem=9186MiB (530s)
+[step 80] loss_qa=3.2876 loss_kl=n/a loss_addr=0.0217 soft_tokens=4 compress=0.349727 gnorm_comp=5.341e+01 gnorm_bridge=3.077e+01 gnorm_router=5.008e-01 peakmem=9186MiB (534s)
+[step 81] loss_qa=6.1094 loss_kl=n/a loss_addr=2.3039 soft_tokens=4 compress=0.300469 gnorm_comp=4.071e+01 gnorm_bridge=1.579e+01 gnorm_router=8.221e+00 peakmem=9186MiB (539s)
+[step 82] loss_qa=5.6719 loss_kl=n/a loss_addr=0.3866 soft_tokens=4 compress=0.395062 gnorm_comp=8.206e+01 gnorm_bridge=3.126e+01 gnorm_router=2.129e+00 peakmem=9186MiB (543s)
+[step 83] loss_qa=3.7734 loss_kl=n/a loss_addr=1.2219 soft_tokens=4 compress=0.353591 gnorm_comp=2.110e+02 gnorm_bridge=4.202e+01 gnorm_router=3.993e+00 peakmem=9186MiB (548s)
+[step 84] loss_qa=3.7502 loss_kl=n/a loss_addr=0.3319 soft_tokens=4 compress=0.392638 gnorm_comp=1.523e+02 gnorm_bridge=3.027e+01 gnorm_router=9.776e-02 peakmem=9186MiB (552s)
+[step 85] loss_qa=5.5000 loss_kl=n/a loss_addr=0.5604 soft_tokens=4 compress=0.374269 gnorm_comp=2.274e+01 gnorm_bridge=1.768e+01 gnorm_router=2.790e+00 peakmem=9186MiB (557s)
+[step 86] loss_qa=2.1925 loss_kl=n/a loss_addr=1.3939 soft_tokens=4 compress=0.397516 gnorm_comp=3.549e+01 gnorm_bridge=1.891e+01 gnorm_router=2.257e+00 peakmem=9186MiB (561s)
+[step 87] loss_qa=4.6484 loss_kl=n/a loss_addr=0.6150 soft_tokens=4 compress=0.383234 gnorm_comp=3.154e+01 gnorm_bridge=2.113e+01 gnorm_router=1.706e+00 peakmem=9186MiB (566s)
+[step 88] loss_qa=5.8594 loss_kl=n/a loss_addr=0.2550 soft_tokens=4 compress=0.361582 gnorm_comp=1.497e+01 gnorm_bridge=1.710e+01 gnorm_router=1.076e+00 peakmem=9186MiB (571s)
+[step 89] loss_qa=1.0762 loss_kl=n/a loss_addr=0.4286 soft_tokens=4 compress=0.339523 gnorm_comp=1.728e+01 gnorm_bridge=2.244e+01 gnorm_router=1.711e+00 peakmem=9186MiB (576s)
+[step 90] loss_qa=4.7422 loss_kl=n/a loss_addr=0.1769 soft_tokens=4 compress=0.359551 gnorm_comp=2.033e+01 gnorm_bridge=1.758e+01 gnorm_router=2.219e+00 peakmem=9186MiB (580s)
+[step 91] loss_qa=8.7344 loss_kl=n/a loss_addr=0.2356 soft_tokens=4 compress=0.405063 gnorm_comp=2.863e+01 gnorm_bridge=2.955e+01 gnorm_router=1.734e+00 peakmem=9186MiB (585s)
+[step 92] loss_qa=3.3906 loss_kl=n/a loss_addr=0.2345 soft_tokens=4 compress=0.408946 gnorm_comp=7.182e+00 gnorm_bridge=1.247e+01 gnorm_router=2.768e+00 peakmem=9186MiB (589s)
+[step 93] loss_qa=5.1406 loss_kl=n/a loss_addr=0.6887 soft_tokens=4 compress=0.355556 gnorm_comp=2.644e+01 gnorm_bridge=2.395e+01 gnorm_router=6.901e-01 peakmem=9186MiB (594s)
+[step 94] loss_qa=3.8906 loss_kl=n/a loss_addr=1.6104 soft_tokens=4 compress=0.393846 gnorm_comp=4.616e+01 gnorm_bridge=5.082e+01 gnorm_router=4.432e+00 peakmem=9186MiB (598s)
+[step 95] loss_qa=0.8027 loss_kl=n/a loss_addr=0.2962 soft_tokens=4 compress=0.390244 gnorm_comp=1.794e+01 gnorm_bridge=2.103e+01 gnorm_router=2.669e+00 peakmem=9186MiB (603s)
+[step 96] loss_qa=8.1875 loss_kl=n/a loss_addr=0.1597 soft_tokens=4 compress=0.378698 gnorm_comp=4.390e+01 gnorm_bridge=5.853e+01 gnorm_router=1.401e+00 peakmem=9186MiB (607s)
+[step 97] loss_qa=2.9414 loss_kl=n/a loss_addr=0.0003 soft_tokens=4 compress=0.396285 gnorm_comp=2.452e+01 gnorm_bridge=2.831e+01 gnorm_router=9.151e-03 peakmem=9186MiB (612s)
+[step 98] loss_qa=4.0000 loss_kl=n/a loss_addr=2.2593 soft_tokens=4 compress=0.355556 gnorm_comp=5.769e+01 gnorm_bridge=3.960e+01 gnorm_router=1.147e+01 peakmem=9186MiB (616s)
+[step 99] loss_qa=6.3906 loss_kl=n/a loss_addr=0.0381 soft_tokens=4 compress=0.385542 gnorm_comp=1.114e+01 gnorm_bridge=2.541e+01 gnorm_router=6.787e-01 peakmem=9186MiB (621s)
+[step 100] loss_qa=4.9375 loss_kl=n/a loss_addr=0.9866 soft_tokens=4 compress=0.358543 gnorm_comp=2.778e+01 gnorm_bridge=4.753e+01 gnorm_router=2.278e+00 peakmem=9186MiB (625s)
+  [eval@100] ✗ q='What is the language officially spoken in the country where the spouse of the Chief Executive Officer of CBS Corporation holds citizenship?' gold='Walloon' pred='English'
+  [eval@100] ✗ q='What is the location of the head office of the broadcaster that originally aired "Adventures in Paradise"?' gold='Knoxville' pred='London'
+  [eval@100] ✗ q="Which city is the capital of the country that created the sport associated with Peter Schmeichel's position?" gold='Dublin' pred='London'
+  [eval@100] ✗ q='What is the continent of the country where the director / manager of "Please Please Me" holds citizenship?' gold='Oceania' pred='Africa'
+  [eval@100] ✗ q='What location was the place of death of the author of Carmilla?' gold='New York City' pred='Bucharest'
+  [eval@100] ✗ q='From what country does the music genre of Dave Matthews Band originate?' gold='Spain' pred='United States'
+  [eval@100] ✗ q='Who holds the position of chairperson at the organization where Stephen Greenblatt is employed?' gold='Mike Cheston' pred='Stephen Greenblatt is employed at Harvard University. The ch'
+  [eval@100] ✗ q="What is the capital city of the country which Sumie Sakai's sport founder holds citizenship in?" gold='New Delhi' pred='Bermuda'
+  [eval@100] ✗ q='What is the name of the city which is the capital of the country where the director/manager of "Back in the U.S.S.R." holds citizenship?' gold='Canberra' pred='Bucharest'
+  [eval@100] ✗ q='Which language is considered the official language of the religion that Malik Kafur practiced?' gold='Picard' pred='Bengali'
+  [eval@100] ✗ q='What city serves as the capital of the country where the sport played by Derek Holland originated?' gold='Ottawa' pred='Bermuda'
+  [eval@100] ✗ q='What is the name of the person who was in charge of the organization that Philip Agee worked for?' gold='Christopher A. Wray' pred='Bertie Ahern'
+  [eval@100] ✗ q='What country is the nationality of the spouse of the author of "David Copperfield"?' gold='Belgium' pred='David Copperfield is a novel by Charles Dickens. The author,'
+  [eval@100] ✗ q='What continent is the country of citizenship of the manager/director of Taxman located in?' gold='Asia' pred='Africa'
+  [eval@100] ✗ q='In which city was the person who created the centrifugal governor born?' gold='Edinburgh' pred='Belfast'
+  [eval@100] ✗ q='Where is the educational institution located where Tom Selleck was educated and its headquarters also situated?' gold='Vienna' pred='Buckley, Colorado'
+  [eval@100] ✗ q='Which faith is the partner of Benigno Aquino Jr. affiliated with?' gold='Methodism' pred='Benedict XVI'
+  [eval@100] ✗ q='What is the name of the leader of the government in the country where the sport related to the 1985 NBA Draft originated?' gold='Lili Bosse' pred='Birchard'
+  [eval@100] ✗ q="What is the country of origin of the sport associated with Dave Dombrowski's employer?" gold='Australia' pred='United States'
+  [eval@100] ✗ q='Which country is the birthplace of the sport associated with Steve Sax?' gold='Italy' pred='Bermuda'
+  [eval@100] ✗ q='What is the sport that Blair Walsh plays in which he is known for his position on the team?' gold='rugby' pred='Blair Walsh is known for playing as a placekicker in America'
+  [eval@100] ✗ q='What was the religion of the person with the citizenship of the country to which Edmund Burke belonged?' gold='Zoroastrianism' pred='Buddhism'
+  [eval@100] ✗ q='What was the name of the head of state in the country where Andrew Carnegie was a citizen?' gold='Emmerson Mnangagwa' pred='Austria-Hungary'
+  [eval@100] ✗ q='From which country does the sport, with which Carlos Gómez is associated, come from?' gold='Soviet Union' pred='United States'
+  [eval@100] ✗ q="Which city serves as the capital of the country where the sport that Mike D'Antoni specialized in hails from?" gold='London' pred='Budapest'
+  [eval@100] ✗ q='What is the capital city of the country from which the sport of Daniele De Rossi originated?' gold='Tokyo' pred='Daniele De Rossi is from Italy. The capital city of Italy is'
+  [eval@100] ✗ q='What country does the genre of music associated with the spouse of Roy Rogers originate from?' gold='Russian Empire' pred='Bulgaria'
+  [eval@100] ✗ q='What is the name of the political entity that was established from the successor of the Sasanian Empire?' gold='Charles Frederick, Duke of Holstein-Gottorp' pred='Babylonian Empire'
+  [eval@100] ✗ q='In which city is the capital of the country that FC Irtysh Omsk originates from located?' gold='Duluth' pred='Omsk'
+  [eval@100] ✗ q='What is the place of death of the performer of the song collection "Back to Black"?' gold='Berlin' pred='Bermuda'
+  [eval@100] ✗ q='Which city serves as the capital of the country that gave rise to the sport played by Rogério Ceni?' gold='New Delhi' pred='Buenos Aires'
+  [eval@100] ✗ q='Who serves as the head of government in the location where the AP1000 was made by its manufacturer?' gold='Jonathan Rothschild' pred='Bhutan'
+  [eval@100] ✗ q='In what place did the author of "A Wizard of Earthsea" breathe his last?' gold='Wolverhampton' pred='Bermuda'
+  [eval@100] ✗ q='Which individual is responsible for founding the organization that has its headquarters in the same location where Bill Frisell received his education?' gold='William Penn' pred='Buckminster Fuller'
+  [eval@100] ✗ q='Which university was Adam Putnam educated at?' gold='Federal University of Rio de Janeiro' pred='Adam Putnam was educated at the University of Florida.'
+  [eval@100] ✗ q='What type of music does Tito Nieves play?' gold='salsa' pred='Tito Nieves plays salsa music.'
+  [eval@100] ✗ q='Who was Bart Simpson created by?' gold='Ray Bradbury' pred='Bart Simpson was created by Matt Groening.'
+  [eval@100] ✗ q='Which religion is Albert of Saxony affiliated with?' gold='The Church of Jesus Christ of Latter-day Saints' pred='None'
+  [eval@100] ✗ q='What language does Queen Victoria I speak?' gold='Dutch' pred='Queen Victoria I does not speak any language. She was a Brit'
+  [eval@100] ✗ q='Which sport is Indiana Mr. Basketball associated with?' gold='association football' pred='basketball'
+[eval@100] pair-acc=0/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] step=100 full-match=0.0 (n=40) gnorm_comp=2.369e+01 gnorm_bridge=2.982e+01 gnorm_router=4.609e-01
+[step 101] loss_qa=5.7344 loss_kl=n/a loss_addr=0.2982 soft_tokens=4 compress=0.377581 gnorm_comp=2.369e+01 gnorm_bridge=2.982e+01 gnorm_router=4.609e-01 peakmem=9186MiB (715s)
+[step 102] loss_qa=5.6250 loss_kl=n/a loss_addr=0.8210 soft_tokens=4 compress=0.383234 gnorm_comp=1.349e+01 gnorm_bridge=2.094e+01 gnorm_router=1.100e+00 peakmem=9186MiB (720s)
+[step 103] loss_qa=2.2773 loss_kl=n/a loss_addr=0.0909 soft_tokens=4 compress=0.387879 gnorm_comp=9.697e+00 gnorm_bridge=1.461e+01 gnorm_router=1.683e+00 peakmem=9186MiB (724s)
+[step 104] loss_qa=2.3398 loss_kl=n/a loss_addr=1.7209 soft_tokens=4 compress=0.406349 gnorm_comp=2.642e+01 gnorm_bridge=1.132e+01 gnorm_router=7.000e+00 peakmem=9186MiB (729s)
+[step 105] loss_qa=4.8125 loss_kl=n/a loss_addr=0.6605 soft_tokens=4 compress=0.362606 gnorm_comp=1.446e+01 gnorm_bridge=1.885e+01 gnorm_router=3.698e+00 peakmem=9186MiB (733s)
+[step 106] loss_qa=3.4062 loss_kl=n/a loss_addr=0.5439 soft_tokens=4 compress=0.368876 gnorm_comp=3.946e+01 gnorm_bridge=5.623e+01 gnorm_router=7.152e+00 peakmem=9186MiB (738s)
+[step 107] loss_qa=4.5078 loss_kl=n/a loss_addr=1.1941 soft_tokens=4 compress=0.329897 gnorm_comp=1.152e+01 gnorm_bridge=1.822e+01 gnorm_router=1.048e+00 peakmem=9186MiB (742s)
+[step 108] loss_qa=2.6191 loss_kl=n/a loss_addr=0.4512 soft_tokens=4 compress=0.386707 gnorm_comp=1.829e+01 gnorm_bridge=2.273e+01 gnorm_router=6.659e+00 peakmem=9186MiB (747s)
+[step 109] loss_qa=5.2969 loss_kl=n/a loss_addr=0.8064 soft_tokens=4 compress=0.393846 gnorm_comp=1.467e+01 gnorm_bridge=2.111e+01 gnorm_router=2.034e+00 peakmem=9186MiB (752s)
+[step 110] loss_qa=3.8578 loss_kl=n/a loss_addr=0.1306 soft_tokens=4 compress=0.391437 gnorm_comp=7.869e+00 gnorm_bridge=1.090e+01 gnorm_router=1.622e+00 peakmem=9186MiB (757s)
+[step 111] loss_qa=1.2582 loss_kl=n/a loss_addr=0.0303 soft_tokens=4 compress=0.411576 gnorm_comp=5.253e+00 gnorm_bridge=9.334e+00 gnorm_router=6.976e-01 peakmem=9186MiB (761s)
+[step 112] loss_qa=2.9453 loss_kl=n/a loss_addr=0.0017 soft_tokens=4 compress=0.396285 gnorm_comp=1.027e+01 gnorm_bridge=1.701e+01 gnorm_router=4.560e-02 peakmem=9186MiB (766s)
+[step 113] loss_qa=2.1211 loss_kl=n/a loss_addr=1.9929 soft_tokens=4 compress=0.297674 gnorm_comp=9.320e+00 gnorm_bridge=9.229e+00 gnorm_router=2.911e+00 peakmem=9186MiB (770s)
+[step 114] loss_qa=4.9062 loss_kl=n/a loss_addr=0.0296 soft_tokens=4 compress=0.306954 gnorm_comp=1.369e+01 gnorm_bridge=2.346e+01 gnorm_router=4.756e-01 peakmem=9186MiB (775s)
+[step 115] loss_qa=5.6094 loss_kl=n/a loss_addr=0.5987 soft_tokens=4 compress=0.392638 gnorm_comp=7.408e+01 gnorm_bridge=9.795e+01 gnorm_router=1.951e+00 peakmem=9186MiB (779s)
+[step 116] loss_qa=5.5156 loss_kl=n/a loss_addr=0.6631 soft_tokens=4 compress=0.377581 gnorm_comp=1.580e+01 gnorm_bridge=2.386e+01 gnorm_router=3.335e-01 peakmem=9186MiB (784s)
+[step 117] loss_qa=2.0469 loss_kl=n/a loss_addr=1.3567 soft_tokens=4 compress=0.389058 gnorm_comp=1.597e+01 gnorm_bridge=2.697e+01 gnorm_router=3.847e+00 peakmem=9186MiB (789s)
+[step 118] loss_qa=2.2246 loss_kl=n/a loss_addr=0.0132 soft_tokens=4 compress=0.377581 gnorm_comp=5.530e+00 gnorm_bridge=1.105e+01 gnorm_router=1.746e-01 peakmem=9186MiB (793s)
+[step 119] loss_qa=5.7812 loss_kl=n/a loss_addr=1.0562 soft_tokens=4 compress=0.410256 gnorm_comp=2.867e+01 gnorm_bridge=5.281e+01 gnorm_router=3.691e-01 peakmem=9186MiB (797s)
+[step 120] loss_qa=5.5312 loss_kl=n/a loss_addr=0.1776 soft_tokens=4 compress=0.411576 gnorm_comp=8.771e+00 gnorm_bridge=2.446e+01 gnorm_router=1.127e+00 peakmem=9186MiB (802s)
+[step 121] loss_qa=2.8047 loss_kl=n/a loss_addr=0.8243 soft_tokens=4 compress=0.350685 gnorm_comp=1.082e+01 gnorm_bridge=3.069e+01 gnorm_router=1.183e+00 peakmem=9186MiB (807s)
+[step 122] loss_qa=5.0859 loss_kl=n/a loss_addr=0.0196 soft_tokens=4 compress=0.408946 gnorm_comp=8.530e+00 gnorm_bridge=1.922e+01 gnorm_router=2.468e-01 peakmem=9186MiB (811s)
+[step 123] loss_qa=3.7031 loss_kl=n/a loss_addr=1.0578 soft_tokens=4 compress=0.349727 gnorm_comp=8.649e+00 gnorm_bridge=2.343e+01 gnorm_router=6.944e-01 peakmem=9186MiB (816s)
+[step 124] loss_qa=3.4785 loss_kl=n/a loss_addr=1.1229 soft_tokens=4 compress=0.363636 gnorm_comp=8.201e+00 gnorm_bridge=2.105e+01 gnorm_router=1.189e+00 peakmem=9186MiB (820s)
+[step 125] loss_qa=3.0703 loss_kl=n/a loss_addr=1.1280 soft_tokens=4 compress=0.354571 gnorm_comp=7.827e+00 gnorm_bridge=1.389e+01 gnorm_router=1.641e+00 peakmem=9186MiB (825s)
+[step 126] loss_qa=2.3984 loss_kl=n/a loss_addr=0.3841 soft_tokens=4 compress=0.335958 gnorm_comp=1.266e+01 gnorm_bridge=2.660e+01 gnorm_router=1.661e+00 peakmem=9186MiB (829s)
+[step 127] loss_qa=4.8125 loss_kl=n/a loss_addr=0.3445 soft_tokens=4 compress=0.366762 gnorm_comp=5.608e+00 gnorm_bridge=1.182e+01 gnorm_router=8.796e-01 peakmem=9186MiB (834s)
+[step 128] loss_qa=3.1055 loss_kl=n/a loss_addr=0.2240 soft_tokens=4 compress=0.371014 gnorm_comp=8.943e+00 gnorm_bridge=2.353e+01 gnorm_router=1.300e+00 peakmem=9186MiB (838s)
+[step 129] loss_qa=2.2070 loss_kl=n/a loss_addr=3.5721 soft_tokens=4 compress=0.300469 gnorm_comp=2.430e+01 gnorm_bridge=8.394e+00 gnorm_router=1.126e+01 peakmem=9186MiB (843s)
+[step 130] loss_qa=5.5586 loss_kl=n/a loss_addr=0.4739 soft_tokens=4 compress=0.308434 gnorm_comp=3.772e+01 gnorm_bridge=4.172e+01 gnorm_router=9.034e-01 peakmem=9186MiB (848s)
+[step 131] loss_qa=3.3750 loss_kl=n/a loss_addr=0.5666 soft_tokens=4 compress=0.38209 gnorm_comp=7.212e+00 gnorm_bridge=1.361e+01 gnorm_router=1.575e+00 peakmem=9186MiB (852s)
+[step 132] loss_qa=6.5625 loss_kl=n/a loss_addr=0.2307 soft_tokens=4 compress=0.363636 gnorm_comp=4.971e+00 gnorm_bridge=1.444e+01 gnorm_router=8.600e-01 peakmem=9186MiB (857s)
+[step 133] loss_qa=4.2812 loss_kl=n/a loss_addr=0.0135 soft_tokens=4 compress=0.389058 gnorm_comp=3.020e+00 gnorm_bridge=8.595e+00 gnorm_router=1.328e-01 peakmem=9186MiB (861s)
+[step 134] loss_qa=2.3281 loss_kl=n/a loss_addr=1.7186 soft_tokens=4 compress=0.284444 gnorm_comp=6.579e+00 gnorm_bridge=1.330e+01 gnorm_router=1.174e+00 peakmem=9186MiB (866s)
+[step 135] loss_qa=3.5234 loss_kl=n/a loss_addr=0.8042 soft_tokens=4 compress=0.379822 gnorm_comp=7.271e+00 gnorm_bridge=1.447e+01 gnorm_router=2.284e+00 peakmem=9186MiB (871s)
+[step 136] loss_qa=2.6514 loss_kl=n/a loss_addr=1.5880 soft_tokens=4 compress=0.326531 gnorm_comp=3.041e+00 gnorm_bridge=8.887e+00 gnorm_router=1.995e-01 peakmem=9186MiB (876s)
+[step 137] loss_qa=1.2863 loss_kl=n/a loss_addr=0.3622 soft_tokens=4 compress=0.361582 gnorm_comp=5.023e+00 gnorm_bridge=9.899e+00 gnorm_router=1.667e+00 peakmem=9186MiB (880s)
+[step 138] loss_qa=5.5625 loss_kl=n/a loss_addr=3.3725 soft_tokens=4 compress=0.306954 gnorm_comp=1.493e+01 gnorm_bridge=1.169e+01 gnorm_router=7.353e+00 peakmem=9186MiB (885s)
+[step 139] loss_qa=5.0000 loss_kl=n/a loss_addr=0.2373 soft_tokens=4 compress=0.372093 gnorm_comp=2.468e+01 gnorm_bridge=5.689e+01 gnorm_router=1.260e+00 peakmem=9186MiB (889s)
+[step 140] loss_qa=2.5312 loss_kl=n/a loss_addr=0.1198 soft_tokens=4 compress=0.364672 gnorm_comp=4.741e+00 gnorm_bridge=1.097e+01 gnorm_router=9.877e-01 peakmem=9186MiB (894s)
+[step 141] loss_qa=3.1875 loss_kl=n/a loss_addr=0.3240 soft_tokens=4 compress=0.390244 gnorm_comp=2.895e+00 gnorm_bridge=5.877e+00 gnorm_router=1.200e+00 peakmem=9186MiB (898s)
+[step 142] loss_qa=3.4219 loss_kl=n/a loss_addr=0.3002 soft_tokens=4 compress=0.348774 gnorm_comp=6.531e+00 gnorm_bridge=1.749e+01 gnorm_router=4.239e-01 peakmem=9186MiB (902s)
+[step 143] loss_qa=3.2891 loss_kl=n/a loss_addr=0.3139 soft_tokens=4 compress=0.386707 gnorm_comp=6.449e+00 gnorm_bridge=1.696e+01 gnorm_router=1.118e+00 peakmem=9186MiB (907s)
+[step 144] loss_qa=2.5658 loss_kl=n/a loss_addr=0.7936 soft_tokens=4 compress=0.396285 gnorm_comp=4.894e+00 gnorm_bridge=8.403e+00 gnorm_router=1.834e+00 peakmem=9186MiB (911s)
+[step 145] loss_qa=2.6641 loss_kl=n/a loss_addr=0.7253 soft_tokens=4 compress=0.385542 gnorm_comp=6.944e+00 gnorm_bridge=1.965e+01 gnorm_router=4.865e-01 peakmem=9186MiB (916s)
+[step 146] loss_qa=4.6797 loss_kl=n/a loss_addr=1.5205 soft_tokens=4 compress=0.403785 gnorm_comp=8.016e+00 gnorm_bridge=1.140e+01 gnorm_router=3.455e+00 peakmem=9186MiB (920s)
+[step 147] loss_qa=4.6484 loss_kl=n/a loss_addr=3.5351 soft_tokens=4 compress=0.314496 gnorm_comp=2.332e+01 gnorm_bridge=2.361e+01 gnorm_router=1.149e+01 peakmem=9186MiB (925s)
+[step 148] loss_qa=2.6562 loss_kl=n/a loss_addr=0.4757 soft_tokens=4 compress=0.324873 gnorm_comp=6.085e+00 gnorm_bridge=1.263e+01 gnorm_router=4.346e-01 peakmem=9186MiB (929s)
+[step 149] loss_qa=1.9219 loss_kl=n/a loss_addr=0.7607 soft_tokens=4 compress=0.299766 gnorm_comp=4.589e+00 gnorm_bridge=8.273e+00 gnorm_router=1.986e+00 peakmem=9186MiB (934s)
+[step 150] loss_qa=1.2115 loss_kl=n/a loss_addr=0.0000 soft_tokens=4 compress=0.27234 gnorm_comp=4.088e+00 gnorm_bridge=1.607e+01 gnorm_router=0.000e+00 peakmem=9186MiB (939s)
+[grad-check] {"model_has_no_grad": true, "compressor_queries": true, "compressor_input_proj": true, "bridge_last_linear": true}
+  [eval-final] ✗ q='What is the language officially spoken in the country where the spouse of the Chief Executive Officer of CBS Corporation holds citizenship?' gold='Walloon' pred='Mandarin'
+  [eval-final] ✗ q='What is the location of the head office of the broadcaster that originally aired "Adventures in Paradise"?' gold='Knoxville' pred='New York'
+  [eval-final] ✗ q="Which city is the capital of the country that created the sport associated with Peter Schmeichel's position?" gold='Dublin' pred='Buenos Aires'
+  [eval-final] ✗ q='What is the continent of the country where the director / manager of "Please Please Me" holds citizenship?' gold='Oceania' pred='Africa'
+  [eval-final] ✗ q='What location was the place of death of the author of Carmilla?' gold='New York City' pred='Bucharest'
+  [eval-final] ✗ q='From what country does the music genre of Dave Matthews Band originate?' gold='Spain' pred='United States'
+  [eval-final] ✗ q='Who holds the position of chairperson at the organization where Stephen Greenblatt is employed?' gold='Mike Cheston' pred='Stephen Greenblatt is employed at Harvard University. The ch'
+  [eval-final] ✗ q="What is the capital city of the country which Sumie Sakai's sport founder holds citizenship in?" gold='New Delhi' pred='Buenos Aires'
+  [eval-final] ✗ q='What is the name of the city which is the capital of the country where the director/manager of "Back in the U.S.S.R." holds citizenship?' gold='Canberra' pred='Bucharest'
+  [eval-final] ✗ q='Which language is considered the official language of the religion that Malik Kafur practiced?' gold='Picard' pred='A language is not a religion.'
+  [eval-final] ✗ q='What city serves as the capital of the country where the sport played by Derek Holland originated?' gold='Ottawa' pred='Derek Holland is a professional baseball player from the Uni'
+  [eval-final] ✗ q='What is the name of the person who was in charge of the organization that Philip Agee worked for?' gold='Christopher A. Wray' pred='the name of the person who was in charge of the organization'
+  [eval-final] ✗ q='What country is the nationality of the spouse of the author of "David Copperfield"?' gold='Belgium' pred='David Copperfield'
+  [eval-final] ✗ q='What continent is the country of citizenship of the manager/director of Taxman located in?' gold='Asia' pred='Africa'
+  [eval-final] ✗ q='In which city was the person who created the centrifugal governor born?' gold='Edinburgh' pred='1800'
+  [eval-final] ✗ q='Where is the educational institution located where Tom Selleck was educated and its headquarters also situated?' gold='Vienna' pred='Baton Rouge, Louisiana'
+  [eval-final] ✗ q='Which faith is the partner of Benigno Aquino Jr. affiliated with?' gold='Methodism' pred='African American'
+  [eval-final] ✗ q='What is the name of the leader of the government in the country where the sport related to the 1985 NBA Draft originated?' gold='Lili Bosse' pred='the leader of the government in the country where the sport '
+  [eval-final] ✗ q="What is the country of origin of the sport associated with Dave Dombrowski's employer?" gold='Australia' pred='United States'
+  [eval-final] ✗ q='Which country is the birthplace of the sport associated with Steve Sax?' gold='Italy' pred='United States'
+  [eval-final] ✗ q='What is the sport that Blair Walsh plays in which he is known for his position on the team?' gold='rugby' pred='football'
+  [eval-final] ✗ q='What was the religion of the person with the citizenship of the country to which Edmund Burke belonged?' gold='Zoroastrianism' pred='Buddhism'
+  [eval-final] ✗ q='What was the name of the head of state in the country where Andrew Carnegie was a citizen?' gold='Emmerson Mnangagwa' pred='John A. Logan'
+  [eval-final] ✗ q='From which country does the sport, with which Carlos Gómez is associated, come from?' gold='Soviet Union' pred='Argentina'
+  [eval-final] ✗ q="Which city serves as the capital of the country where the sport that Mike D'Antoni specialized in hails from?" gold='London' pred='Buenos Aires'
+  [eval-final] ✗ q='What is the capital city of the country from which the sport of Daniele De Rossi originated?' gold='Tokyo' pred='Daniele De Rossi is from Italy. The capital city of Italy is'
+  [eval-final] ✗ q='What country does the genre of music associated with the spouse of Roy Rogers originate from?' gold='Russian Empire' pred='the United States'
+  [eval-final] ✗ q='What is the name of the political entity that was established from the successor of the Sasanian Empire?' gold='Charles Frederick, Duke of Holstein-Gottorp' pred='the Sasanian Empire did not have a successor state that esta'
+  [eval-final] ✗ q='In which city is the capital of the country that FC Irtysh Omsk originates from located?' gold='Duluth' pred='Omsk'
+  [eval-final] ✗ q='What is the place of death of the performer of the song collection "Back to Black"?' gold='Berlin' pred='Birmingham'
+  [eval-final] ✗ q='Which city serves as the capital of the country that gave rise to the sport played by Rogério Ceni?' gold='New Delhi' pred='Buenos Aires'
+  [eval-final] ✗ q='Who serves as the head of government in the location where the AP1000 was made by its manufacturer?' gold='Jonathan Rothschild' pred='Bong Joon-soo'
+  [eval-final] ✗ q='In what place did the author of "A Wizard of Earthsea" breathe his last?' gold='Wolverhampton' pred='1996'
+  [eval-final] ✗ q='Which individual is responsible for founding the organization that has its headquarters in the same location where Bill Frisell received his education?' gold='William Penn' pred='Buckley'
+  [eval-final] ✗ q='Which university was Adam Putnam educated at?' gold='Federal University of Rio de Janeiro' pred='University of Florida'
+  [eval-final] ✓ q='What type of music does Tito Nieves play?' gold='salsa' pred='salsa'
+  [eval-final] ✗ q='Who was Bart Simpson created by?' gold='Ray Bradbury' pred='Bart Simpson was created by Matt Groening.'
+  [eval-final] ✗ q='Which religion is Albert of Saxony affiliated with?' gold='The Church of Jesus Christ of Latter-day Saints' pred='The provided text does not contain information about Albert '
+  [eval-final] ✗ q='What language does Queen Victoria I speak?' gold='Dutch' pred='no'
+  [eval-final] ✗ q='Which sport is Indiana Mr. Basketball associated with?' gold='association football' pred='basketball'
+[eval-final] pair-acc=1/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval] val full-match=0.025 (n=40) —— 规范化完整答案匹配（不再是子串匹配）
+[eval-reload] pair-acc=1/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval-reload] full-match=0.025 (n=40) —— 存盘重载后的对照值
+[eval-after-reset] pair-acc=1/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
+[eval-after-reset] full-match=0.025 (n=40) —— 清空 delta 状态后的对照值
+[eval] recon token-acc=0.581（n_tok=5650）—— z 里还留了多少原文符号信息
+[save] ckpt/mab_cr_router.pt config={"schema": 1, "n_slots": 4, "layer": 18, "inner_dim": 512, "num_heads": 8, "bottleneck": 512, "max_unit_tokens": 64, "target_norm": 1.087283, "read_budget": 32, "dtype": "bf16", "stage": "a", "kl_weight": 0.0, "kl_tau": 1.0, "recon_weight": 0.3, "lr": 0.0002, "steps": 150, "epochs": 1, "seed": 0, "smoke_model": false, "router": true, "d_key": 256, "addr_weight": 1.0}
