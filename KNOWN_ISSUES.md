@@ -1,6 +1,6 @@
 # KNOWN_ISSUES.md — 已知问题登记
 
-**最后更新**：2026-10-27（FST-Mem 阶段 B 轮）
+**最后更新**：2026-10-27（真实数据接入轮）
 
 只登记**确实存在、已确认、但尚未修复**的问题。每条都写明「怎么发现的 / 影响什么 / 怎么修」。
 已修的问题记在 [`CHANGELOG.md`](CHANGELOG.md) 对应版本里。
@@ -9,7 +9,14 @@
 
 ## P0 — 会影响实验结论的正确性
 
-### 1. `delta_write_disabled` 会永久关闭 Delta 写入
+### 0. 已修（v9.7）：`delta_write_disabled` 永久关闭写入 + KL 覆盖寻址损失
+
+这两条已修复并进 CHANGELOG v9.7；保留说明在此是因为**它们解释了此前所有"训练好、重载崩"类现象**：
+`delta_write_disabled` 退出时恒 `fn(model, False)`，第一次调用后进程内写入永久关闭；
+`loss = loss_qa + kl_weight * loss_kl` 在 KL 分支重新赋值，把 `addr_weight * loss_addr` 整条覆盖。
+回归测试：`tests/test_train_objectives.py`（Q1–Q6 / P1–P8）。
+
+### 1. `delta_write_disabled` 会永久关闭 Delta 写入（已修，见上）
 
 **位置**：`latent_memory.py`，`delta_write_disabled` contextmanager
 
@@ -207,3 +214,40 @@ PYTHONPATH=/share/exp4group/shim19:/share/exp4group:/share/delta-Mem \
 2. **说清影响**（哪些实验/结论会被它污染）
 3. **给出修法**（哪怕只是方向）
 4. **标注优先级**：`P0` 影响结论正确性 / `P1` 让某路径静默失效 / `P2` 环境与流程
+
+---
+
+## P1 — 接入真实数据后新出现、需在结果表里显式说明的
+
+### 4. HotpotQA 的答案几乎总在上下文里（数据集性质，不是缺陷）
+
+含黄金段落时 95.0%、加 8 段干扰后 96.3% 的样本答案能在上下文某句里找到。
+后果：单看 exact-match 会把"字符串检索能力"当成"潜层记忆读出能力"。
+处理：结果表必须同时给 `none`（不给记忆，纯参数知识）这一行 —— 实测 **12.0%**（100 题），
+所以"有记忆的准确率"要与 12% 比，而不是与 0 比。同时给"读对槽位率"这一列。
+
+### 5. `--recon-weight>0` 用整段记忆会在长记忆上 OOM（已修）
+
+整段 recon 对一条 35 句记忆做带梯度的 LM 前向+反传：峰值 21.8GB → 逐步涨到 30GB，第 3 步 OOM。
+已改为 `--recon-units`（默认 2）：峰值钉回 9.19GB，6 步稳定。
+
+### 6. 槽位记忆的容量与 benchmark 规模不匹配（设计级限制，必须写进论文）
+
+一条事实一个槽、每槽一次编码前向（V100 上约 0.1~0.15s）：
+- HotpotQA（~35 句/题）→ 每题 4~5s，可接受；
+- MAB-CR 6k context（数百事实）→ 每题几十秒，**只能按 `--cap`（默认 32 条）评测**；
+- LongMemEval-S（~115k token，40 会话）→ 即使按会话切槽也要读 2% 的内容，**当前设计不适用**。
+
+这不掩饰：MAB-CR 报 `cap`，LME 要么改成"会话级 + 分块"两级读出，要么明确写成局限。
+
+### 7. 服务器没有 huggingface.co / github.com 网络
+
+`hf-mirror.com` 与 `pypi.org` 可达。下载必须显式
+`HF_ENDPOINT=https://hf-mirror.com HF_HUB_OFFLINE=0`，否则静默走离线路径报"数据集不存在"。
+
+### 8. GPU 是共享的，作业会被别人挤掉
+
+10 张 V100-32GB 上长期有其他用户 8~30GB 的进程；同一张卡 30 秒内可用显存能变化 20GB。
+症状是 `OutOfMemoryError` 里写着"Process XXX has N GiB in use"（不是自己的进程号）。
+处理：启动前用 `nvidia-smi` 排序取当前最空的卡；每步日志打印 `peakmem` 以便区分
+"自己涨"还是"别人挤"。

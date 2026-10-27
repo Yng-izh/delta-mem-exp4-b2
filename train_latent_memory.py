@@ -194,10 +194,18 @@ def load_synth_jsonl(path, limit=0, seed=0):
             if not line or line.startswith("#"):
                 continue
             rec = json.loads(line)
-            mem = rec.get("memory") or rec.get("evidence") or []
-            if isinstance(mem, str):
-                mem = [mem]
-            mem = [str(m).strip() for m in mem if str(m).strip()]
+            # `units` 为**显式槽位列表**时以它为准：真实数据（HotpotQA / LME）一条样本有
+            # 几十句，`memory` 往往已经是拼好的整串；若还按"memory 是一条事实"去切槽，
+            # 整段会被压成 1 个槽位 —— 训练里"从 40 个槽里选 1 个"当场退化成"压缩整段"，
+            # 而这正是真实数据要练的能力。合成数据的 memory 本来就是事实列表，未受影响。
+            units = rec.get("units")
+            if isinstance(units, list) and units:
+                mem = [str(u).strip() for u in units if str(u).strip()]
+            else:
+                mem = rec.get("memory") or rec.get("evidence") or []
+                if isinstance(mem, str):
+                    mem = [mem]
+                mem = [str(m).strip() for m in mem if str(m).strip()]
             if not mem or rec.get("question") in (None, "") or rec.get("answer") in (None, ""):
                 continue
             meta = rec.get("meta") or {}
@@ -519,6 +527,35 @@ class StubTok:
 # =====================================================================
 # 4) 训练
 # =====================================================================
+def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
+                  recon_weight, recon_stage=False):
+    """把四项损失组合起来（**纯函数**，可直接单测）。
+
+    唯一允许的行为：寻址/KL/重建都**累加**到 QA 损失上。
+    唯一的例外是 `recon_stage`（两阶段训练的前 N 步）：那时切换到"纯重建 + 寻址"，
+    故意丢掉 QA —— 因为两个目标在同一组软 token 上争预算。
+
+    这里曾有一个静默 bug：KL 用 `loss = loss_qa + kl_weight*loss_kl` 直接赋值，
+    把已经加进去的 `addr_weight*loss_addr` **整条覆盖掉**，于是"开了 KL 之后寻址
+    再没被监督过"；而日志里 loss_addr 照常打印，看起来一切正常。
+    """
+    loss = loss_qa
+    if loss_addr is not None:
+        loss = loss + addr_weight * loss_addr
+    if loss_kl is not None:
+        loss = loss + kl_weight * loss_kl
+    if recon_stage:
+        if loss_r is None:
+            raise ValueError("recon_stage=True 但 loss_r is None")
+        # 纯重建阶段：只保留重建 + 寻址
+        loss = loss_r
+        if loss_addr is not None:
+            loss = loss + addr_weight * loss_addr
+    elif loss_r is not None:
+        loss = loss + recon_weight * loss_r
+    return loss
+
+
 def qa_loss(logits, labels):
     """标准 Causal LM 交叉熵，只对答案 token（labels != -100）计算。"""
     shift_logits = logits[:, :-1].reshape(-1, logits.shape[-1])
@@ -635,6 +672,7 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
     n = 0
     groups = {}                     # 规范化问题 -> [该组各条是否全对]
     for item in data[:limit]:
+        reset_delta_state(model)     # 样本间隔离：上一题的在线状态不许泄进下一题
         if bridge_only:
             z, _info = encode_item_raw_embed(model, tokenizer, item)
         else:
@@ -737,6 +775,36 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=16,
         hit += int((pred == gold).sum().item())
         tot += int(n_ans)
     return (hit / tot if tot else None), tot
+
+
+def _peak_mb():
+    """本进程 CUDA 峰值显存（MiB）。打在每步日志里，任何"显存慢慢涨"都能一眼看出。"""
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.max_memory_allocated() / 2 ** 20
+
+
+def reset_delta_state(model):
+    """清空 Delta-Mem 在线状态（**每条样本前必须调用**）。
+
+    为什么必须显式清：在线状态是挂在模块上的、跨 forward 累积的量。训练里我们
+    关了写入（`delta_write_disabled`），但状态里仍是**上一条样本**留下的内容；
+    只要有一条路径漏关写入，状态就会越积越大，最终不是报错而是
+    "显存慢慢涨到 OOM"或"后面的样本莫名受前面影响"，两者都很难定位。
+
+    这也是评估纪律的一部分：同一 context 内必须前后一致，不同 context 之间必须隔离。
+    """
+    if model is None:
+        return False
+    try:
+        from deltamem.core.delta import reset_delta_mem_states as _r
+    except Exception:
+        return False
+    try:
+        _r(model)
+        return True
+    except Exception:
+        return False
 
 
 def _load_backbone(args, dev=None):
@@ -882,6 +950,7 @@ def train(args):
     system_prompt = args.system_prompt
     reader_like = (comp, bridge) if router is None else (comp, bridge, router)
     rng_slots = random.Random(args.seed + 777)      # 变槽数采样的独立随机流
+    rng_recon = random.Random(args.seed + 31337)    # recon 取单元用的独立随机流
     max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
     if args.freeze_compressor:
         comp.eval()          # 冻结主干：训练循环里的 comp.train() 会覆盖，这里兜住
@@ -930,6 +999,9 @@ def train(args):
         random.Random(args.seed + 100 + epoch).shuffle(order)
         for i in order:
             item = train_data[i]
+            # 每条样本前清 Delta 在线状态：状态是跨 forward 累积的模块属性，
+            # 不清就会"显存慢慢涨"/"后面的样本受前面影响"（都不报错）。
+            reset_delta_state(model)
             # ① 压缩（grad=True：保留到压缩器输出的梯度路径）
             #    一条样本有几条事实就编几个槽位（与推理期 bank 布局一致）
             #    --bridge-only：跳过压缩器，原文 token embedding 直接进 bridge（消融用）
@@ -973,14 +1045,12 @@ def train(args):
                                                            dtype=torch.long, device=dev),
                                  use_cache=False).logits
             loss_qa = qa_loss(s_logits, labels)
-            loss = loss_qa
             loss_addr = None
             if r_logits is not None:
                 # 显式寻址监督：让"选哪个槽"有直接梯度。只靠 QA 隐式回传时，
                 # 4 槽里 3 个干扰槽会把信号摊薄到学不出来（实测 target_only 直接 0%）。
                 tgt_t = torch.tensor([int(tgt_slot)], device=r_logits.device)
                 loss_addr = F.cross_entropy(r_logits, tgt_t)
-                loss = loss + args.addr_weight * loss_addr
             loss_kl = None
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
@@ -993,32 +1063,35 @@ def train(args):
                                                                dtype=torch.long, device=dev),
                                      use_cache=False).logits
                 loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)], tau=args.kl_tau)
-                if loss_kl is not None:
-                    loss = loss_qa + args.kl_weight * loss_kl
             recon_stage = args.recon_only_steps > 0 and step < args.recon_only_steps
             if args.recon_weight > 0 or recon_stage:
                 # ⑤ 事实重建辅助任务：只给 soft tokens，重建原事实（检查符号保真）
                 #    memory 字段是列表，必须先 join 成句 —— str(list) 会得到
                 #    "['Taron works at Velcor.']" 这种 Python repr（实测踩过：
                 #    recon token-acc 被这个 bug 压低了 ~39%）。
+                # recon 只重建**少量**随机单元：整段记忆（HotpotQA 一条 ~35 句、
+                # 上千 token）做一次带梯度的 LM 前向+反传要 ~11GB，v100-32GB 上跑到
+                # 第 3 步就 OOM（实测 21.8GB→30GB）。取固定条数既把显存钉死，
+                # 又保持"检查压缩器符号保真"这个用途不变。
+                _ru = list(item_units(item))
+                if args.recon_units > 0 and len(_ru) > args.recon_units:
+                    _ru = [x[1] for x in
+                           sorted((rng_recon.random(), u) for u in _ru)[:args.recon_units]]
                 r_embeds, r_labels, _ = build_student_inputs(
                     model, tokenizer, soft, system_prompt,
-                    "Repeat the memory verbatim.", " ".join(item_units(item)))
+                    "Repeat the memory verbatim.", " ".join(_ru))
                 with LM.delta_write_disabled(model):
                     r_logits = model(inputs_embeds=r_embeds,
                                      attention_mask=torch.ones(r_embeds.shape[:2],
                                                                dtype=torch.long, device=dev),
                                      use_cache=False).logits
                 loss_r = qa_loss(r_logits, r_labels)
-                # 两阶段（--recon-only-steps N）：前 N 步只训重建 —— 先逼压缩器把内容
-                # 保住，再引入 QA 学读出。两个目标在同一组软 token 上会争预算，同时开
-                # 会震荡（实测 200/400/600 步准确率 0.0625->0.125->0.0625 非单调）。
-                if recon_stage:
-                    loss = loss_r
-                    if loss_addr is not None:
-                        loss = loss + args.addr_weight * loss_addr
-                else:
-                    loss = loss + args.recon_weight * loss_r
+            # 四项损失的组合规则集中在 assemble_loss（旧代码在 KL 分支里重新赋值，
+            # 把寻址项整条覆盖掉了；两阶段的重建切换规则也一并挪进来便于单测）。
+            loss = assemble_loss(loss_qa, loss_addr, loss_kl,
+                                 None if not (args.recon_weight > 0 or recon_stage) else loss_r,
+                                 addr_weight=args.addr_weight, kl_weight=args.kl_weight,
+                                 recon_weight=args.recon_weight, recon_stage=recon_stage)
             (loss / args.accum).backward()
             acc_items.append((float(loss_qa.detach()),
                                None if loss_kl is None else float(loss_kl.detach()),
@@ -1088,6 +1161,7 @@ def train(args):
                       f"compress={enc_info['compression_ratio']} "
                       f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
                       f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
+                      f"peakmem={_peak_mb():.0f}MiB "
                       f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
                 if args.max_steps > 0 and step >= max_steps:
@@ -1447,6 +1521,7 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
     order_same = order_n = 0
     fails = []
     for item in fst_eval_subset(data, limit):
+        reset_delta_state(model)
         try:
             fi = build_fst_bank(encoder, item, hist_max, tag="val", grad=False,
                                 shuffle_order=shuffle_order, rng=rng)
@@ -1608,6 +1683,7 @@ def train_fst(args):
         random.Random(args.seed + 100 + epoch).shuffle(order)
         for i in order:
             item = train_data[i]
+            reset_delta_state(model)
             fi = build_fst_bank(encoder, item, args.hist_max, tag="fact",
                                 grad=not args.freeze_compressor)
             if fi["evicted"]:
@@ -1848,6 +1924,8 @@ def parse_args(argv=None):
     ap.add_argument("--kl-weight", type=float, default=0.0)
     ap.add_argument("--kl-tau", type=float, default=1.0)
     ap.add_argument("--recon-weight", type=float, default=0.0)
+    ap.add_argument("--recon-units", type=int, default=2,
+                    help="recon 每次只重建这么多条记忆单元（0=整段；整段在长记忆上会 OOM）")
     ap.add_argument("--counterfactual", action="store_true",
                     help="训练集加入『同主语同属性冲突，只记新值』样本")
     ap.add_argument("--data", default="",

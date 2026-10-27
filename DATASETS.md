@@ -1,8 +1,43 @@
 # DATASETS.md — 实验数据盘点
 
-**最后更新**：2026-10-27（FST-Mem 阶段 B 轮）
+**最后更新**：2026-10-27（真实数据接入轮）
 
-**一句话**：潜层读出实验实际只用了 **3 套自造玩具数据（共 280 条）**；服务器上另有 **5 套更大的数据从未进过潜层实验**（含 2998 条多跳）；外部 benchmark **一套都没有**。
+**一句话**：玩具数据退居 smoke 测试；**正式训练与评测改用公开数据**——HotpotQA（训练 + 读出评测）、
+MemoryAgentBench Conflict Resolution（冲突覆盖）、LongMemEval cleaned（知识更新/时间推理/多会话）。
+
+---
+
+## 0. 公开数据（v9.7 起，正式实验只用这些）
+
+| 数据 | 服务器位置 | 规模 | 用途 | 转换器 |
+|---|---|---|---|---|
+| HotpotQA distractor `train` | `/share/exp4group/data/hotpot/distractor/train-0000{0,1}-of-00002.parquet` | 90447 | **训练** Compressor+Router（真实文本/问题/答案/支持事实，2 跳） | `tools/prep_hotpotqa.py` |
+| HotpotQA distractor `validation` | 同目录 `validation-00000-of-00001.parquet` | 7405 | **评测**（严格与训练隔离） | 同上 |
+| MAB Conflict Resolution | `/share/latent/MemoryAgentBench/data/Conflict_Resolution-00000-of-00001.parquet` | 8 context × 100 问 | **评测**：事实冲突覆盖（"更新到最新值"） | `tools/prep_mab.py` |
+| MAB Accurate Retrieval | 同目录 `Accurate_Retrieval-*.parquet` | 22 context → 2000 问 | 基础检索对照（选择性使用） | 待接 |
+| LongMemEval cleaned | `/share/latent2/vcrm/data/longmemeval_s_cleaned.json`（264MB, 500 问） | multi-session 133 / temporal 133 / knowledge-update 78 / single-session 156 | **评测**：更新与时间推理 | 待接 |
+
+获取方式：服务器**没有** huggingface.co 网络，但 **`hf-mirror.com` 可达**（`pypi.org` 也可达，
+`github.com` 不可达）。下载命令：
+`HF_ENDPOINT=https://hf-mirror.com HF_HUB_OFFLINE=0 python -c "from huggingface_hub import hf_hub_download; ..."`
+
+### 0.1 HotpotQA 转换后的三条硬事实（必须带进论文）
+
+1. **答案在上下文里是常态**：含黄金段落时 95.0% 的样本答案能在同段其它句子找到；
+   加入干扰段落（8 段）后 96.3%。这就是数据集性质，**统计并报告**（`meta.leak` 只统计干扰段落），
+   不许当成缺陷去"修"。正因如此，结果表必须同时给 `none`（不给记忆）这一行。
+2. **0.017% 的 `supporting_facts` 越界/标题缺失**（实测 1/6000）：转换器**跳过并计数**，
+   不 clamp（clamp 会把 evidence 指到别的句子，寻址标签直接错）；比例 >1% 直接拒绝产出。
+3. **96% 是 2 跳（bridge/comparison 全为 multi-hop）**：`hops=2` 的链式选槽必须开，
+   否则两跳题永远不可能对。
+
+### 0.2 MAB-CR 的容量限制（写进报告，不许隐瞒）
+
+CR 的一条 6k context 有几百条事实，而槽位记忆**一条事实一个槽、每槽一次编码前向**
+→ 每问几十秒。因此按 `--cap` 限定每问可见事实数（默认 32），选法是
+"金标 + **同键全部冲突版本** + BM25 相关事实"。同键版本必须整组进入，否则
+"用最新值覆盖旧值"这条被测能力会被选择策略本身消掉。`meta.cap` / `meta.n_facts_total`
+会写进每条样本。
 
 ---
 

@@ -16,7 +16,7 @@
 > `results/latent_router_2026-10-27/`、`DATASETS.md`、`KNOWN_ISSUES.md`。
 >
 > 2026-10-27 追加（FST-Mem，阶段 B）：在 `LatentRouter` 之上再加**事实键级寻址 +
-> 状态/轨迹解耦 + 时序两级读出**（§6.5）。代码与机制单测齐备（`tests/test_fst_mem.py` 88 项，并用 `tools/audit_mutations.py` 变异验证断言有约束力），
+> 状态/轨迹解耦 + 时序两级读出**（§6.5）。代码与机制单测齐备（`tests/test_fst_mem.py` 88 项、`tests/test_train_objectives.py` 14 项覆盖损失装配与 Delta 写入状态恢复、`tests/test_prep_hotpotqa.py` 14 项 + `tests/test_prep_mab.py` 22 项覆盖公开数据转换，并用 `tools/audit_mutations.py` 变异验证断言有约束力），
 > 训练入口 `--fst` 在 CPU 极小模型上跑通全链路（训练→评估→存盘→重载→评估）。
 > **同样一步真实训练都没跑**，没有任何效果数字；`LatentRouter` 的定位从"候选方法"
 > 下调为"静态多事实内容寻址基线"。详见 `results/fst_mem_2026-10-27/`。

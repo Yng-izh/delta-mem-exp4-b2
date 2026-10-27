@@ -1,5 +1,65 @@
 # CHANGELOG
 
+## [v9.7-real-data] — 2026-10-27 — 真实数据接入：HotpotQA / MAB-CR 转换器、统一评测入口、两处污染性 bug
+
+**一句话**：按"实验主线收束为三个问题 + 只留两个主基准 + 训练换真实数据 + 方法对比压缩到四组"
+的要求落地第一步：接入公开数据、打通真实训练与评测通路，并修掉两个**会让结果整体作废**
+的实现问题（Delta 写入状态不恢复、KL 项覆盖寻址损失）。
+
+### 一、两处污染性 bug（已修，均有回归测试）
+
+| # | Bug | 后果 | 修法 / 证据 |
+|---|---|---|---|
+| 1 | `delta_write_disabled` 在 `finally` 里恒 `fn(model, False)` | 第一次调用之后**进程内永久关闭 Delta 写入**：后续所有 forward 都在"没有写入"的模型上跑，多轮实验口径不一致 | 改为**逐模块快照/恢复**各自原本的 `write_enabled`（不碰 `read_context_mask` / `write_message_ids`）；`tests/test_train_objectives.py` Q1–Q6（含"每个模块各自的值"、嵌套、异常路径） |
+| 2 | KL 分支 `loss = loss_qa + kl_weight * loss_kl` 直接**覆盖**了前面累加好的 `addr_weight * loss_addr` | 一旦启用 KL，寻址监督静默消失，Router 退化成无监督 | 抽出纯函数 `assemble_loss(...)` 统一累加；P3 是这条的定点回归（KL 打开后 addr 项必须仍在） |
+
+同时新增 `reset_delta_state(model)`：**每条样本前清空 Delta 在线状态**。在线状态是挂在模块上的
+跨 forward 累积量，不清会表现为"显存缓慢上涨到最后 OOM"或"后面的样本受前面影响"，两者都不报错。
+
+### 二、真实数据接入（正式基准与训练数据严格隔离）
+
+| 数据 | 位置（服务器） | 用途 | 转换器 |
+|---|---|---|---|
+| HotpotQA distractor（train 90447 / validation 7405） | `/share/exp4group/data/hotpot/distractor/`（经 `hf-mirror.com` 下载） | **训练**：真实文本+问题+答案+支持事实；**评测**：dev 7405 | `tools/prep_hotpotqa.py` |
+| MemoryAgentBench Conflict Resolution（8 context × 100 问） | `/share/latent/MemoryAgentBench/data/Conflict_Resolution-*.parquet` | 评测：事实冲突覆盖（主线问题 2、3） | `tools/prep_mab.py` |
+| LongMemEval cleaned（500 问，6 类） | `/share/latent2/vcrm/data/longmemeval_s_cleaned.json` | 评测：knowledge-update / temporal / multi-session | 待接入（容量见下） |
+
+转换器的关键约束（**写错不会报错，只会让实验失去意义**）：
+- `units` 必须逐条保留：一条事实一个槽位。`load_synth_jsonl` 原先只认 `memory` 列表，
+  真实数据的 `memory` 往往是拼好的整串，会被压成 1 个槽位 —— 已改为**优先用显式 `units`**。
+- `evidence` 必须是支持事实**原文**：丢了就只能靠答案串定位槽位，而 HotpotQA 的答案
+  经常出现在干扰段落里，寻址标签会被标错。
+- HotpotQA 的"答案出现在上下文里"是数据集性质（含黄金段落时 95%、纯干扰段落时 96.3%），
+  **必须统计并报告**（`meta.leak` 只统计干扰段落），不能当成数据缺陷去"修"。
+- MAB-CR 没有金标事实编号、没有时间戳：`derive_gold` 用"含答案值且编号最大"机械推导，
+  同一事实键的**所有版本必须一起进上下文**（`select_facts` 强制，违反即报错），否则
+  "最新值覆盖旧值"这条被测能力会被选择策略本身消掉；可见事实数按 `--cap` 限定并写入 meta。
+
+### 三、统一评测入口 `eval_latent_table.py`（结果表的一行）
+
+四组方法 + 两个参照，**同一冻结主模型、同一 prompt 模板、同一 generate 调用**，差别只是
+"记忆以什么形式进入"：
+
+| method | 记忆怎么进 | 注入 token |
+|---|---|---|
+| `none` | 不给记忆（纯参数知识下界） | 0 |
+| `text` | system 段写明文事实（BM25 top-k） | 明文 token |
+| `oracle` | 只给支持事实原文（上界） | 明文 token |
+| `bridge` | 全部槽位载荷过 Bridge | K × m |
+| `router` | Router 选 1 槽 → Bridge | m |
+| `fst` | 两级寻址选 (事实, 版本) → Bridge | m |
+
+指标只保留五项：答案准确率、**读对槽位率**（text 用检索命中、router 用选中槽、fst 用组命中，
+可直接横向比较）、更新准确率、历史访问准确率、注入 token 数、查询耗时。
+`none` 这一行是**必须**的：HotpotQA 答案大量存在于 Qwen 参数知识里，没有它就无法判断记忆是否真被读到。
+
+### 四、连通性修复：整段 recon 在长记忆上 OOM
+
+`--recon-weight>0` 时用**整段记忆**（HotpotQA 一条 ~35 句、上千 token）做一次带梯度的 LM
+前向+反传，实测峰值 21.8GB 并逐步涨到 30GB，第 3 步 OOM。改为 `--recon-units N`（默认 2）
+只重建少量随机单元：峰值从 21.8GB 钉回 9.19GB 且 6 步稳定，recon 的用途（检查压缩器符号保真）不变。
+
+
 ## [v9.6.1-fst-audit] — 2026-10-27 — 核查轮：6 个静默 bug + 3 条恒真断言 + 3 个数据缺陷
 
 **一句话**：用户要求"核查代码"，三路并行审查 FST 代码后逐条在源码里复核，

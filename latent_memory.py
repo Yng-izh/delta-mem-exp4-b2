@@ -157,27 +157,35 @@ def _model_hidden_size(model: Any) -> int:
 
 @contextmanager
 def delta_write_disabled(model: Any):
-    """编码期禁止 Delta 写入：记忆编码不得改动在线状态（否则同一 context 内前后不一致）。"""
-    fn = None
-    try:
-        from deltamem.core.delta import set_delta_mem_write_enabled as fn  # noqa: F811
-    except Exception:
-        fn = None
-    if fn is None or model is None:
+    """编码期禁止 Delta 写入：记忆编码不得改动在线状态（否则同一 context 内前后不一致）。
+
+    **必须恢复调用前的状态**，不能"用完置 False 就完事"（旧实现在 finally 里
+    `fn(model, False)`，于是第一次进这个上下文之后写入被**永久关闭**：后续 chunk
+    一个字节都写不进在线状态，跑分照样出数、只是全错，日志里毫无痕迹）。
+
+    这里直接改模块属性 `write_enabled` 而不调 `set_write_enabled()`：后者在
+    `enabled=True` 时会顺手清掉 `read_context_mask`、在 `False` 时会清掉
+    `write_message_ids/write_sentence_ids` —— 恢复快照时把这些旁路状态一起清掉，
+    同样是静默错误。
+    """
+    mods = []
+    if model is not None:
+        try:
+            from deltamem.core.delta import iter_delta_mem_modules as _iter
+            mods = [m for _, m in _iter(model)]
+        except Exception:
+            mods = []
+    if not mods:
         yield False
         return
+    prev = [(m, bool(getattr(m, "write_enabled", True))) for m in mods]
     try:
-        fn(model, False)
-    except Exception:
-        yield False
-        return
-    try:
+        for m, _p in prev:
+            m.write_enabled = False
         yield True
     finally:
-        try:
-            fn(model, False)
-        except Exception:
-            pass
+        for m, p in prev:
+            m.write_enabled = p
 
 
 def _safe_torch_load(path: str) -> Any:

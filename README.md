@@ -9,7 +9,55 @@
 > 上一轮 Router 根因诊断见 [results/latent_router_2026-10-27/](results/latent_router_2026-10-27/README.md)。
 > 本文按时间倒序记录版本进展与实测数字。
 
-## 最新进展（v9.6.1-fst-audit 核查轮，2026-10-27）——核查并修掉 6 个静默 bug + 3 条恒真断言 + 3 个数据缺陷
+## 最新进展（v9.7-real-data 轮，2026-10-27）——玩具数据退场：接入 HotpotQA / MAB-CR，修掉两处会让结果作废的 bug
+
+**一句话**：问题不再是"缺新探针"，而是"缺能支撑论文核心结论的实验"。本轮把实验主线收束成三个问题
+（真实潜层读出 / 多事实抗干扰 / 动态更新与历史访问），正式数据只留 **HotpotQA（训练+读出）** 与
+**MemoryAgentBench-CR / LongMemEval（冲突覆盖、知识更新）**，方法对比压缩成四组
+（Text-RAG+StatePool / Compressor+Bridge / Compressor+Router+Bridge / FST-Mem）。
+
+### 1. 两处污染性 bug（已修，有定点回归测试）
+
+- `delta_write_disabled` 退出时恒 `fn(model, False)` → **进程内永久关闭 Delta 写入**；
+  改为逐模块快照/恢复各自原本的 `write_enabled`。
+- KL 分支 `loss = loss_qa + kl_weight * loss_kl` **覆盖**了 `addr_weight * loss_addr`
+  → 一开 KL，寻址监督静默消失；抽出纯函数 `assemble_loss` 统一累加。
+- 新增 `reset_delta_state(model)`：每条样本前清 Delta 在线状态（不清 = 显存慢涨 / 样本互相污染，都不报错）。
+
+回归测试：`tests/test_train_objectives.py`（14 项，含"KL 打开后 addr 项仍在"和"逐模块各自恢复"）。
+
+### 2. 公开数据接入
+
+| 数据 | 规模 | 用途 | 转换器 |
+|---|---|---|---|
+| HotpotQA distractor（镜像下载到 `/share/exp4group/data/hotpot/`） | train 90447 / val 7405 | 训练 + 评测 | `tools/prep_hotpotqa.py` |
+| MAB Conflict Resolution | 8 context × 100 问 | 冲突覆盖 | `tools/prep_mab.py` |
+| LongMemEval cleaned（264MB / 500 问） | 6 类问题 | 更新与时间推理 | 待接入（容量限制见 KNOWN_ISSUES §6） |
+
+转换器里三条"写错不报错、只是让实验失去意义"的坑已固定并有单测：
+`units` 必须逐条保留（一条事实一个槽）、`evidence` 必须是支持事实原文、同键冲突版本必须整组进上下文。
+
+### 3. 统一评测入口 `eval_latent_table.py` 与第一个真实数字
+
+四组方法 + 两个参照走**同一条 generate 路径**，差别只是"记忆以什么形式进入"；
+指标 = 答案准确率 / 读对槽位率 / 更新准确率 / 历史访问准确率 / 注入 token 数 / 查询耗时。
+
+HotpotQA dev（dis4，100 题）首个基线：
+
+| 方法 | n | acc% | 读对槽位% | 注入记忆 token |
+|---|---|---|---|---|
+| **none（不给记忆，纯参数知识）** | 100 | **12.0** | n/a | 0 |
+
+这 12% 是**所有方法必须超过的地板**——HotpotQA 的答案大量存在于模型参数知识里，
+不报这一行就无法判断"记忆是否真被读到"。
+
+### 4. 连通性修复
+
+`--recon-weight>0` 用整段记忆做带梯度的 LM 前向+反传，实测峰值 21.8GB→30GB，第 3 步 OOM；
+改为 `--recon-units`（默认 2）后峰值钉回 9.19GB / 6 步稳定。每步日志新增 `peakmem=`，
+用于区分"自己涨"和"被同卡其他用户的进程挤掉"。
+
+## v9.6.1-fst-audit 核查轮（2026-10-27）——核查并修掉 6 个静默 bug + 3 条恒真断言 + 3 个数据缺陷
 
 **结论先行**：用户要求"核查代码"。三路并行审查 + 逐条源码复核，确认 **6 个不会报错、只会让指标悄悄失效的 bug**（训练/读出键特征不同源、STE 未 detach 载荷、版本命中不绑组别、配对恒真、淘汰/缺标签混淆、并列时间戳监督取最旧）、**3 条恒真断言**、**3 个数据缺陷**（21.9% 训练行的答案字符串出现在干扰事实里）。全部已修，并新增 `tools/audit_mutations.py` 变异审计：**6/6 变异被单测抓住**。仍未训练，仍无任何效果数字。详见 [CHANGELOG v9.6.1](CHANGELOG.md) 与 [本轮记录](results/fst_mem_2026-10-27/README.md)。
 
