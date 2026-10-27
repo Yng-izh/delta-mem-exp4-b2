@@ -201,11 +201,18 @@ def load_synth_jsonl(path, limit=0, seed=0):
             if not mem or rec.get("question") in (None, "") or rec.get("answer") in (None, ""):
                 continue
             meta = rec.get("meta") or {}
+            ev = rec.get("evidence") or []
+            if isinstance(ev, str):
+                ev = [ev]
             items.append({
                 "memory": " ".join(mem),
                 "units": mem,
                 "question": str(rec["question"]).strip(),
                 "answer": str(rec["answer"]).strip(),
+                # evidence = 目标事实（唯一能唯一定位"哪个槽该被选中"的字段）。
+                # 丢掉它就只能靠答案串匹配，而 22.5% 的样本里答案值在干扰事实里
+                # 也出现过，实测会把 13.5% 的寻址标签标错 —— router 直接被教歪。
+                "evidence": [str(e).strip() for e in ev if str(e).strip()],
                 "cf": bool(rec.get("cf", False)),
                 "hops": int(rec.get("hops") or 1),
                 "cluster": meta.get("cluster", (meta.get("clusters") or [None])[0]),
@@ -513,14 +520,26 @@ def _norm_ans(t: str) -> str:
     return " ".join(t.split())
 
 
-def target_slot_index(units, answer, fallback=0):
-    """目标槽位下标：用答案字符串在事实里的出现位置判定，不依赖数据集的摆放约定。
+def target_slot_index(units, answer, fallback=0, evidence=None):
+    """目标槽位下标：优先按 evidence（目标事实原文）精确匹配，退化才用答案串。
 
-    为什么不用"第 0 条就是目标"：那样一旦数据生成顺序变了，寻址监督会训练模型
-    去选错槽位，而且错得很隐蔽（QA 损失照样下降，因为软门控聚合仍然看得到目标）。
+    为什么不能只用答案串：干扰事实常常**恰好包含同一个值**。实测
+    latent_exp2_train 里 45/200（22.5%）的样本答案值在 >1 条事实中出现，
+    只用答案串匹配会把 27/200（13.5%）的寻址标签标到错误的槽位上 ——
+    loss_addr 于是把 router 往错的方向训，且训练损失照样下降，看不出来。
+
+    为什么也不用"第 0 条就是目标"：数据生成会 shuffle，位置本身是随机的。
     """
     if isinstance(answer, (list, tuple)):
         answer = " ".join(str(x) for x in answer)
+    ev = evidence or []
+    if isinstance(ev, str):
+        ev = [ev]
+    ev_n = {_norm_ans(e) for e in ev if str(e).strip()}
+    if ev_n:
+        for i, u in enumerate(units):
+            if _norm_ans(u) in ev_n:
+                return i
     a = _norm_ans(answer)
     if a:
         for i, u in enumerate(units):
@@ -889,7 +908,8 @@ def train(args):
             tgt_slot = 0
             if router is not None and payloads is not None:
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
-                tgt_slot = target_slot_index(item_units(item), item["answer"])
+                tgt_slot = target_slot_index(item_units(item), item["answer"],
+                                             evidence=item.get("evidence"))
                 slot_z, tgt_slot, _keep = sample_slot_subset(
                     payloads, tgt_slot, rng_slots, args.max_slots or None,
                     keep_all=(int(item.get("hops", 1) or 1) > 1))
