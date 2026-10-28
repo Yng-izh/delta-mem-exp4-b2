@@ -490,27 +490,91 @@ class LatentRouter(nn.Module):
         if hard or not self.training:
             return z_hard, logits, k_in, k_out
         w = torch.softmax(logits, dim=-1)                             # [B,K]
-        z_soft = torch.einsum("bk,bkmd->bmd", w, z)
+        # 载荷必须 detach：软期望的唯一用途是把**路由分数**的梯度送回去。
+        # 不 detach 时梯度会经由软期望那一路回传到**全部候选槽位**的载荷上，
+        # 未被选中事实的压缩器表示也被当前答案的梯度拖走（FST 侧早已这么修，
+        # Router 侧漏了 —— 同一个病，只是从数值挪到了梯度）。
+        z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach())
         # 前向取 z_hard，梯度走 z_soft（STE）
         z_read = z_hard + (z_soft - z_soft.detach())
         return z_read, logits, k_in, k_out
 
+    def forward_hops(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
+                     n_hops: int = 2, hard: bool = False) -> Dict[str, Any]:
+        """多跳前向：第 1 跳选槽 -> q' = norm(q + k_out[选中槽]) -> 第 2 跳再选槽。
+
+        修的是一个**架构级缺陷**，不是调参问题：
+            旧训练路径只调 `router(q_feat, slot_z)`，拿回的 `k_out` 直接被丢掉，
+            只有第 1 跳的 `loss_addr` 进图；推理侧 `chain()` 却用
+            `q' = norm(q + k_out[idx])` 接力找下一跳 —— 于是 `k_out_net`
+            在正常训练里**没有任何梯度**，第二跳实际由一个随机投影在寻址。
+            HotpotQA 的现象正对得上：第一跳寻址在涨（read_acc 35%→50%）、
+            答案准确率不动。单跳监督永远学不会"第二跳该读哪条事实"。
+
+        返回每一跳的 logits（训练侧逐跳算 CE）与载荷（推理侧用同一套拼接）。
+        """
+        q_vec = self.encode_query(q_feat)
+        k_in, k_out = self.encode_keys(slot_z)
+        z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
+        z = z.to(device=q_vec.device, dtype=q_vec.dtype)
+        n = max(1, min(int(n_hops), int(z.shape[1])))
+        used = torch.zeros(int(z.shape[1]), dtype=torch.bool, device=z.device)
+        z_list: List[torch.Tensor] = []
+        logits_list: List[torch.Tensor] = []
+        picks: List[int] = []
+        for _ in range(n):
+            logits = self.scores(q_vec, k_in)                          # [1,K]
+            logits = logits.masked_fill(used.unsqueeze(0), float("-inf"))
+            idx = logits.argmax(dim=-1)                                # [1]
+            used[int(idx[0].item())] = True
+            z_hard = z[0, idx]                                         # [1,m,d]
+            if not (hard or not self.training):
+                w = torch.softmax(logits, dim=-1)
+                z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach()).unsqueeze(0)
+                z_hard = z_hard + (z_soft - z_soft.detach())
+            z_list.append(z_hard)
+            logits_list.append(logits)
+            picks.append(int(idx[0].item()))
+            # 查询更新**留在计算图里**：这是 k_out_net 唯一能拿到梯度的通路
+            q_vec = torch.nn.functional.normalize(
+                q_vec + k_out[:, int(idx[0].item())], dim=-1)
+        return {"z_list": z_list, "logits_list": logits_list, "picks": picks,
+                "k_in": k_in, "k_out": k_out}
+
     @torch.no_grad()
     def chain(self, q_feat: torch.Tensor, slot_z: torch.Tensor, hops: int = 2
               ) -> List[int]:
-        """多跳：第 1 跳按问题选，之后用 k_out 更新查询接力选下一跳。返回槽位下标序列。"""
-        hops = max(1, int(hops))
-        q_vec = self.encode_query(q_feat)
-        k_in, k_out = self.encode_keys(slot_z)
-        picked: List[int] = []
-        for _ in range(min(hops, int(k_in.shape[1]))):
-            s = self.scores(q_vec, k_in)[0]
-            if picked:
-                s[torch.tensor(picked, device=s.device)] = float("-inf")
-            idx = int(s.argmax().item())
-            picked.append(idx)
-            q_vec = torch.nn.functional.normalize(q_vec + k_out[:, idx], dim=-1)
-        return picked
+        """多跳推理：直接复用训练用的 forward_hops（同一套打分与查询更新规则）。
+
+        旧实现自己维护了一份循环，与训练侧根本不是同一条路径 ——
+        推理用 k_out、训练不监督 k_out，两份代码让这个错误一直看不出来。
+        """
+        return self.forward_hops(q_feat, slot_z, n_hops=hops, hard=True)["picks"]
+
+
+def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
+                        z_list: Sequence[torch.Tensor],
+                        dev: Any = None) -> torch.Tensor:
+    """若干槽位载荷 -> 一段 soft 序列（每槽过一次 bridge，槽间插原生 "\\n"）。
+
+    **训练与推理必须调同一个函数**：旧实现里训练是 `bridge(z_read)` 一段、
+    推理是 `bridge(z1) + "\\n" + bridge(z2)`，两跳样本的 train/infer 输入分布不同，
+    而且训练侧第 2 跳的载荷根本没进图。
+    """
+    if not z_list:
+        raise ValueError("compose_routed_soft 收到空载荷列表")
+    dev = _model_device(model) if dev is None else dev
+    emb = model.get_input_embeddings()
+    nl = emb(_tokenize_no_special(tokenizer, "\n", dev))
+    pieces = []
+    for j, zj in enumerate(z_list):
+        if j:
+            pieces.append(nl)
+        s = bridge(zj)
+        if s.dim() == 2:
+            s = s.unsqueeze(0)
+        pieces.append(s.reshape(1, -1, s.shape[-1]))
+    return torch.cat(pieces, dim=1)
 
 
 def extract_query_feature(model: Any, tokenizer: Any, question: str,
@@ -824,12 +888,53 @@ class FstRouter(nn.Module):
         self.state = TemporalStateSelector(self.d_model, self.n_slots,
                                            self.d_key, init_temp)
 
+    def pick_version(self, g: int, lg_ver_all: torch.Tensor, ver_mask: Any = None,
+                     ver_policy: str = "learned", ver_times: Any = None,
+                     query_time: Any = None) -> int:
+        """组内版本读出：**显式时间规则优先**，learned 只作消融对照。
+
+        为什么不再默认交给分类器：状态库已经把"当前版本"这件事结构性地写清楚了
+        （`list_versions` 最后一个就是当前状态），CR 的判定又是"最新值算对"。
+        旧实现把这个已知事实重新交给一个 softmax 重新学，实测 ver 0.525 反而输给
+        "恒取最新"的 0.885 —— 那不是训练不足，是把结构信息丢了。
+        只有问题里带明确时间条件、且该条件能与某个版本时间对上时，才需要按时间选。
+        """
+        row = lg_ver_all[int(g)]
+        ok = None
+        if ver_mask is not None:
+            ok = torch.as_tensor(ver_mask).to(row.device)[int(g)].bool()
+        policy = str(ver_policy or "current")
+        if policy == "learned":
+            r = row if ok is None else row.masked_fill(~ok, float("-inf"))
+            return int(r.argmax().item())
+        avail = ([i for i, b in enumerate(ok.tolist()) if b] if ok is not None
+                 else list(range(int(row.numel()))))
+        if not avail:
+            return 0
+        q = _norm_time(query_time)
+        if policy == "time" and q and ver_times is not None:
+            ts = list(ver_times[int(g)])
+            best, best_sc = None, 0
+            for i in avail:                       # 旧 -> 新，同分时更新的胜出
+                if i >= len(ts):
+                    continue
+                sc = _time_match_score(q, ts[i])
+                if sc >= best_sc and sc > 0:
+                    best, best_sc = i, sc
+            if best is not None:
+                return int(best)
+        # 没有时间条件 / 时间对不上 -> 当前状态（组内最后写入且仍在库里的版本）
+        return int(avail[-1])
+
     def forward(self, q_feat: torch.Tensor, e_feat: torch.Tensor, r_feat: torch.Tensor,
                 ver_z: torch.Tensor, ver_t_feat: torch.Tensor,
                 tq_feat: Optional[torch.Tensor] = None,
-                ver_mask: Optional[torch.Tensor] = None, hard: bool = False
+                ver_mask: Optional[torch.Tensor] = None, hard: bool = False,
+                k_groups: int = 1, ver_policy: str = "learned",
+                ver_times: Any = None, query_time: Any = None
                 ) -> Dict[str, Any]:
-        """返回 dict：z_read [1,m,d]、logits_group [1,G]、logits_ver [1,V]、picks。
+        """返回 dict：z_read [1,m,d]、z_reads List[[1,m,d]]、logits_group [1,G]、
+        logits_ver [1,V]、groups / versions（本次读出选了哪些键与版本）。
 
         ver_z 是一次性传入的 [G,V,m,d]（G 个事实组、每组最多 V 个版本），
         logits_ver     : **被选中那一组**内部的版本打分（跨组版本不互相竞争）。
@@ -839,11 +944,21 @@ class FstRouter(nn.Module):
         只拿 logits_ver（被选中组）去算 CE，一旦路由初期选错组，监督就会
         指向另一组的版本布局（甚至指向被掩码的填充位），loss 直接爆到 1e4 量级 ——
         实测踩过：loss_ver 从 0 跳到 9990。这不是数值问题，是监督对象错了。
+
+        k_groups>1：一次读出多个键（多跳/多事实题必须能同时取多条证据）。
+        旧接口硬编码"只送 1 个版本的 m 个软 token"，即使键选对了，证据也不足以
+        回答两跳题 —— 这不是训练问题，是读出带宽不够。
         """
         q_vec = self.key.encode_query(q_feat)
         k_grp = self.key.encode_keys(e_feat, r_feat)                # [G,dk]
         lg_grp = self.key.scores(q_vec, k_grp)                      # [1,G]
-        g = int(lg_grp[0].argmax().item())
+        n_g = max(1, min(int(k_groups), int(lg_grp.shape[-1])))
+        groups: List[int] = []
+        lg_tmp = lg_grp.clone()
+        for _ in range(n_g):                       # 贪心取互不重复的键
+            g = int(lg_tmp[0].argmax().item())
+            groups.append(g)
+            lg_tmp[0, g] = float("-inf")
 
         k_ver = self.state.encode_versions(ver_z, ver_t_feat)       # [G,V,dk]
         qt_vec = self.state.encode_query(q_feat, tq_feat)           # [1,dk]
@@ -855,35 +970,43 @@ class FstRouter(nn.Module):
             if mask.dim() != 2 or int(mask.shape[0]) != int(ver_z.shape[0]):
                 raise ValueError(f"ver_mask 必须是 [G,V]，得到 {tuple(mask.shape)}")
             lg_ver_all = lg_ver_all.masked_fill(~mask, -1e4)
+        versions = [self.pick_version(g, lg_ver_all, ver_mask, ver_policy,
+                                      ver_times, query_time) for g in groups]
         # 读出用**被选中组**的版本打分；监督用 tgt_group 那一行（见 logits_ver_all）
-        lg_all = lg_ver_all[g:g + 1]                                # [1,V]
-        v = int(lg_all[0].argmax().item())
+        g0 = int(groups[0])
+        lg_all = lg_ver_all[g0:g0 + 1]                              # [1,V]
 
         z_all = torch.as_tensor(ver_z)
-        z_hard = _payload_md(z_all[g, v])                           # [m,d]
-        z_hard = z_hard.unsqueeze(0)                                # [1,m,d]
-        out = {"z_read": z_hard, "logits_group": lg_grp, "logits_ver": lg_all,
+        z_reads = [_payload_md(z_all[g, v]).unsqueeze(0) for g, v in zip(groups, versions)]
+        out = {"z_read": z_reads[0], "z_reads": z_reads,
+               "logits_group": lg_grp, "logits_ver": lg_all,
                "logits_ver_all": lg_ver_all,
-               "group": g, "version": v, "hard": True}
+               "group": g0, "version": int(versions[0]),
+               "groups": groups, "versions": [int(x) for x in versions],
+               "ver_policy": str(ver_policy or "current"), "hard": True}
         if hard or not self.training:
             return out
-        # STE：前向 z_hard，梯度走"两级软加权"的期望向量。
+        # STE：前向 z_hard，梯度走版本级的软加权期望。
         # 两个容易写错、且**不会报错只会悄悄更差**的点：
         #  a) 载荷必须 detach：否则梯度会同时从 z_hard（one-hot 那一路）和软期望那一路
         #     回传到全部 G×V 条载荷上，压缩器被迫同时满足所有事实——与 2.5 节实测过的
         #     "软加权前向"同一个病，只是从数值挪到了梯度。载荷只经由 z_hard 拿梯度。
         #  b) 版本分布必须**按组各算一次**：把选中组的 wv 套到所有组上，等于假设
         #     "别的组里第 v 个版本也重要"，向量本身就不再是任何一致的期望量。
-        wg = torch.softmax(lg_grp, dim=-1)[0]                       # [G]
+        # 组级不再做软期望：组的选择本来就有 lg_grp 上的显式 CE 监督，
+        # 多取一组时再摊一次全局软期望只会让两组的梯度互相污染。
         wv_all = torch.softmax(lg_ver_all, dim=-1)                  # [G,V]
-        z = z_all.to(device=wg.device, dtype=wg.dtype).flatten(-2)   # [G,V,m*d]
-        z = z.detach()
-        z_soft = torch.einsum("g,gv,gvd->d", wg, wv_all, z).reshape(
-            1, self.n_slots, self.d_model)
-        # STE 要求前向数值与推理逐位一致：把软期望转回载荷精度/设备再做"梯度直通"，
-        # 否则 z_hard(bf16) + Δ(float32) 会被提升成 float32，bridge 的 bf16 权重直接报错。
-        z_soft = z_soft.to(device=z_hard.device, dtype=z_hard.dtype)
-        out["z_read"] = z_hard + (z_soft - z_soft.detach())
+        zf = z_all.flatten(-2).detach()                             # [G,V,m*d]
+        for j, g in enumerate(groups):
+            z_soft = torch.einsum("v,gvd->d", wv_all[g],
+                                  zf[g].to(device=wv_all.device, dtype=wv_all.dtype)
+                                  ).reshape(1, self.n_slots, self.d_model)
+            # STE 要求前向数值与推理逐位一致：转回载荷精度/设备再做"梯度直通"，
+            # 否则 z_hard(bf16) + Δ(float32) 会被提升成 float32，bridge 的 bf16 权重报错。
+            z_soft = z_soft.to(device=z_reads[j].device, dtype=z_reads[j].dtype)
+            z_reads[j] = z_reads[j] + (z_soft - z_soft.detach())
+        out["z_read"] = z_reads[0]
+        out["z_reads"] = z_reads
         out["hard"] = False
         return out
 
@@ -1141,6 +1264,8 @@ class LatentStateTrajectoryBank(LatentSlotBank):
         # key -> {"cur": slot_id, "cur_time": str, "hist": [(slot_id, time), ...], "n_write": int}
         self.groups: Dict[str, Dict[str, Any]] = {}
         self.n_evicted = 0
+        # slot_id -> 该版本的**客体值原文**（多跳接力用：上一跳选中的值 -> 下一跳的实体）
+        self.slot_values: Dict[str, str] = {}
 
     # ---- 键 ----
     def group_keys(self) -> List[str]:
@@ -1171,22 +1296,29 @@ class LatentStateTrajectoryBank(LatentSlotBank):
 
     # ---- 写入（状态转移） ----
     def write(self, key: Any, z: torch.Tensor, time: Any = None,
-              detach: bool = True, entity: Any = None, relation: Any = None) -> str:
+              detach: bool = True, entity: Any = None, relation: Any = None,
+              value: Any = None) -> str:
         """写一个新版本：旧当前值下沉进历史，新值成为当前值。返回新槽位 ID。
 
         entity/relation 是**原始文本**（保留大小写）。它必须存在这里而不是由
         `split_fact_key(key)` 反推：键是规范化（小写、去标点）过的，反推出来的文本
         与训练时喂进编码器的文本不同，同一实体在训练/读出两条路上会得到不同的
         键特征 —— 不报错、指标看不出，只是"评估时路由器面对没见过的输入"。
+
+        value 是该版本的**客体值原文**。库里只有"键 + 时间 + 载荷"时，多跳的第二跳
+        无从下手（键是静态身份键，没有"客体值"这一路）；把值随版本一起存下来，
+        第二跳就能用"上一跳的值 = 下一跳的实体"做确定性接力。
         """
         key = str(key)
         split_fact_key(key)                    # 格式校验：别把整句事实当键写进来
         z = self._normalize(z)
         t = _norm_time(time)
+        v = "" if value is None else str(value)
         g = self.groups.get(key)
         if g is None:
             sid = self._slot_id(key, 0)
             self.append(sid, z, detach=detach)
+            self.slot_values[sid] = v
             self.groups[key] = {"cur": sid, "cur_time": t, "hist": [],
                                 "n_write": 1,
                                 "ent": (None if entity is None else str(entity)),
@@ -1195,12 +1327,21 @@ class LatentStateTrajectoryBank(LatentSlotBank):
         sid = self._slot_id(key, int(g["n_write"]))
         old = g["cur"]
         self.append(sid, z, detach=detach)     # 先 append 再改指针：append 抛错则状态不变
+        self.slot_values[sid] = v
         g["hist"].append((old, g["cur_time"]))
         g["cur"] = sid
         g["cur_time"] = t
         g["n_write"] = int(g["n_write"]) + 1
         self._evict_history(key)
         return sid
+
+    def value_at(self, key: Any, index: int) -> str:
+        """该键第 index 个版本（旧 -> 新，最后一个 = 当前）的客体值原文。"""
+        vers = self.list_versions(key)
+        i = int(index)
+        if not (0 <= i < len(vers)):
+            raise IndexError(f"版本下标越界：{i}/{len(vers)}（key={key!r}）")
+        return str(self.slot_values.get(vers[i]["slot_id"], ""))
 
     def _evict_history(self, key: str) -> int:
         """历史超过 hist_max 时淘汰最旧的，并真正释放其槽位。返回淘汰条数。"""
@@ -1212,6 +1353,7 @@ class LatentStateTrajectoryBank(LatentSlotBank):
             sid, _t = g["hist"].pop(0)
             if sid in self.payloads:
                 self.drop(sid)
+            self.slot_values.pop(sid, None)     # 淘汰即真释放：值文本也不许留着
             n += 1
         self.n_evicted += n
         return n
@@ -1810,20 +1952,14 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
             qf = extract_query_feature(model, tokenizer, question, system_prompt,
                                        layer=layer, device=dev)
         if int(hops) > 1:
-            routed = router.chain(qf, slot_z, hops=hops)
+            # 多跳走 forward_hops：与训练侧**同一个函数**，保证 k_out 的用法一致
+            out = router.forward_hops(qf, slot_z, n_hops=int(hops), hard=True)
         else:
             _z, logits, _ki, _ko = router(qf, slot_z, hard=True)
-            routed = [int(logits[0].argmax().item())]
-        # 统一走 _tokenize_no_special：它同时兼容真 tokenizer（BatchEncoding）
-        # 和测试桩（返回 dict），直接取 .input_ids 会在桩上 AttributeError。
-        nl_emb = emb_layer(_tokenize_no_special(tokenizer, "\n", dev))
-        pieces = []
-        for j, idx in enumerate(routed):
-            if j:
-                pieces.append(nl_emb)
-            sel = bridge(slot_z[:, idx])             # [1, m, d]
-            pieces.append(sel.reshape(1, -1, sel.shape[-1]))
-        soft = torch.cat(pieces, dim=1)
+            out = {"picks": [int(logits[0].argmax().item())],
+                   "z_list": [slot_z[:, int(logits[0].argmax().item())]]}
+        routed = list(out["picks"])
+        soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev)
     elif has_payload:
         soft = bridge(payloads.to(dev))              # [K, m, d] -> [K*m, d]
         if soft.dim() == 3:
@@ -1847,6 +1983,7 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
                                query_time: Any = None,
                                device: Any = None,
                                hops: int = 1,
+                               ver_policy: str = "learned",
                                feat_cache: Optional[Dict[Any, torch.Tensor]] = None
                                ) -> Tuple[str, Dict[str, Any]]:
     """FST-Mem 的两级寻址读出：**先选 (实体,属性)，再按时间条件选版本**。
@@ -1864,10 +2001,8 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
         raise ValueError("generate_latent_answer_fst 需要 model 与 tokenizer")
     if not isinstance(bank, LatentStateTrajectoryBank):
         raise TypeError("generate_latent_answer_fst 需要 LatentStateTrajectoryBank")
-    if int(hops) > 1:
-        # 多跳（阶段 C）需要在选中一个版本后再用 k_out 接力，而 FST 的键是静态身份键，
-        # 没有"客体值"这一路。**显式报错**：静默按单跳跑会得到看起来正常的错误答案。
-        raise ValueError("FST 读出目前只实现 hops=1（多跳属阶段 C，未实现）")
+    if int(hops) < 1:
+        raise ValueError(f"hops 必须 >= 1，得到 {hops}")
     dev = torch.device(device) if device is not None else _model_device(model)
     keys = bank.group_keys()
     if not keys:
@@ -1908,23 +2043,50 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
     # 查询时间条件也用**规范化后**的文本取特征：训练侧先 _norm_time 再取特征，
     # 这里若把原串（'2021,' / ' May 2021'）直接送进去，两侧时间向量就不是同一分布。
     tq_feat = _tf(_norm_time(query_time)) if _norm_time(query_time) else None
+    n_read = max(1, min(int(hops), len(keys)))
     out = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq_feat,
-                     ver_mask=ver_mask, hard=True)
-    z_read = out["z_read"]                                            # [1,m,d]
-    soft = bridge(z_read)
-    soft = soft.reshape(1, -1, soft.shape[-1])
-    g, v = int(out["group"]), int(out["version"])
+                     ver_mask=ver_mask, hard=True, k_groups=n_read,
+                     ver_policy=ver_policy, ver_times=times, query_time=query_time)
+    picked: List[Tuple[int, int]] = list(zip(out["groups"], out["versions"]))
+    # 第 2..n 跳：用上一跳选中版本的**客体值**去找"以它为实体"的事实键。
+    # 这里刻意**不用**可学习的 k_out —— FST 的键是静态身份键，没有"客体值"这一路，
+    # 硬塞一个 chain 网络就回到"推理用未训练网络"的老问题上（Router 侧的旧 bug）。
+    # 值 -> 实体是数据里就有的确定性链接，不该交给学习器重新猜。
+    while len(picked) < n_read:
+        last_v = _norm_key_part(bank.value_at(keys[picked[-1][0]], picked[-1][1]))
+        if not last_v:
+            break
+        taken = {g for g, _v in picked}
+        cands = [i for i, k in enumerate(keys)
+                 if i not in taken and _norm_key_part(bank.group_text(k)[0])
+                 and _norm_key_part(bank.group_text(k)[0]) in last_v]
+        if not cands:
+            break
+        sub = out["logits_group"][0][cands]
+        g2 = int(cands[int(sub.argmax().item())])
+        v2 = int(fst_router.pick_version(g2, out["logits_ver_all"], ver_mask,
+                                         ver_policy, times, query_time))
+        picked.append((g2, v2))
+    z_list = [_payload_md(ver_z[g, v]).unsqueeze(0) for g, v in picked]
+    soft = compose_routed_soft(model, tokenizer, bridge, z_list, dev=dev)
+    g, v = picked[0]
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,
                               max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
                               extra_meta={
-                                  "has_payload": True, "routed": [g], "hops": 1,
+                                  "has_payload": True, "routed": [int(x[0]) for x in picked],
+                                  "hops": len(picked),
                                   "n_slots_in": len(keys),
-                                  "group_keys": keys, "group_picked": g,
+                                  "group_keys": keys, "group_picked": int(g),
+                                  "groups_picked": [int(x[0]) for x in picked],
+                                  "versions_picked": [int(x[1]) for x in picked],
+                                  "chain_values": [bank.value_at(keys[x[0]], x[1])
+                                                   for x in picked],
                                   "n_groups": len(keys),
-                                  "ver_times": times[g], "ver_picked": v,
+                                  "ver_times": times[g], "ver_picked": int(v),
                                   "ver_time": times[g][v],
                                   "ver_is_current": bool(v == len(times[g]) - 1),
                                   "query_time": _norm_time(query_time),
+                                  "ver_policy": str(ver_policy),
                                   "n_versions": len(times[g])})
     return pred, meta
 

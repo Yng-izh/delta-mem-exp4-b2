@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 架构修正轮（2026-10-28）——按代码评审修掉 9 处"不报错但让结论作废"的实现缺陷
+
+**一句话**：2026-10-27 的四方法结果表（HotpotQA dis4 100q：none 12.0 / text-top4 36.0 /
+oracle 58.0 / bridge 17.5 / router 17.5；MAB-CR cap32：none 4.0 / text-top4 17.0 /
+oracle 32.0 / router 2.5 / fst 2.5）**在实现层面站不住**：潜层两法都低于文本 RAG，
+根因不是"潜层表征不够强"，而是训练/推理两条路各自缺半边。本轮只修实现、**未重跑**，
+因此上面那些数字仍是旧口径，需在下一轮重训后整体替换。
+
+| # | 缺陷（旧实现） | 为什么会让结论作废 | 修法 |
+|---|---|---|---|
+| 1 | 多跳**第二跳无监督**：训练只用第 1 跳的 CE，`k_out` 直接被丢掉；推理却用 `k_out` 接力 | 推理走一条训练里从没被监督过的网络 —— 两跳题注定接近随机，而指标只表现为"acc 低"，看不出根因 | `LatentRouter.forward_hops` 逐跳返回 logits，训练按 `evidence` 顺序**逐跳 CE**；训练与推理共用 `compose_routed_soft`（槽间 `"\n"`，与推理逐位一致） |
+| 2 | 重建辅助任务**目标错位**：随机抽单元当重建目标，输入却只有"路由选中那一个槽"的 soft | 上下文 A/B/C、路由选 A 时，任务是"据 A 恢复 B 和 C"，信息上不可能完成；实测 recon token-acc 22.8% vs 平凡基线 19.8% | 新增 `recon_loss_units`：每个被抽中单元**用自己的载荷重建自己的原文**，输入与目标严格同位 |
+| 3 | `prep_mab.select_facts` 的 BM25 **升序**（漏 `reverse=True`） | 按 cap 截断时优先塞入**最不相关**的事实，等于把选法用意做反；MAB 的"抗干扰"难度被人为放大 | 改降序；并新增 `chain_indices`（值→实体图上的 2 跳确定性扩张）+ 问题实体锚定，优先级：金标与同键版本 > 锚点 > 推理链 > BM25 |
+| 4 | FST 读出**硬编码单槽**（`hops>1` 直接抛错） | 与 Router 的 multi-hop 比较不是同一件事，"FST 更差"有一部分只是"只读一条" | `FstRouter.forward(k_groups=)` 贪心取 k 个不同事实键；`generate_latent_answer_fst` 用 `bank.value_at()` 做**确定性**值→实体接力（不引入未训练网络），多读槽位经 `compose_routed_soft` 拼接 |
+| 5 | `LatentRouter` 的 STE 软期望**未 detach** 载荷 | 梯度顺着"软期望"回流到载荷本身，等于让压缩器去迎合路由器当前的混合权重（耦合，不是监督） | `z_soft = einsum(w, z.detach())` |
+| 6 | HotpotQA 单元**没有实体锚点**（纯句子） | "He was married to Peggy Seeger." 这类句子没有实体绑定，第二跳即使读对也无法使用 | `prep_hotpotqa` 产出 `unit_meta`（`anchor`=段落标题）；编码时以 `[Title] sentence` 进编码器（`unit_encode_text`），**不改** `units`/`evidence`，字符串匹配口径不变 |
+| 7 | 版本级**重新学"取最新"**（`TemporalStateSelector` 去拟合归一化里已给定的规则） | 把结构规则交给分类器：多一个可错点、多一份容量、还要给它造 CE 监督 | 新增 `--ver-policy current|time|learned`：默认 `current`（取当前版本，结构规则）/`time`（按查询时间最近匹配）；只有 `learned` 才算并监督版本 CE（消融） |
+| 8 | `build_fst_bank` / 编码路径**每题重复编码**整段上下文 | MAB-CR 上 FST 每题 11.0s vs text-top4 1.46s，主要成本是重复前向，而非方法本身 | `encode_item_slots(cache=)` / `build_fst_bank(cache=)` 文本级载荷复用；`eval_latent_table` 每进程一个 `unit_cache`，训练/评估的写入路径不变 |
+| 9 | 评测侧两处口径错：`--method bridge` 会把 ckpt 里的 router 塞进 ctx（实跑成"有路由的单槽读出"）；多跳 `read_acc` 用"选中任意一条黄金事实"判定 | 前者让 bridge 与 router 两行**同源**，"Bridge vs Router"这一列不成立；后者把"只读了半条链"算成功，read_acc 虚高、与 acc 的落差被误读 | `use_router` 只给 `--method router`；多跳 `read_ok` 要求 `gold ⊆ picked`（**整条链**），text/oracle 列同口径 |
+
+**接口变化（向后兼容）**
+
+- 新增：`LatentRouter.forward_hops`、模块级 `compose_routed_soft`、
+  `LatentStateTrajectoryBank.value_at/slot_values`、`FstRouter.pick_version`、
+  `FstRouter.forward(k_groups=, ver_policy=, ver_times=, query_time=)`（返回 `z_reads/groups/versions`，
+  `z_read` 仍是第一个槽）、`train_latent_memory.unit_encode_text / evidence_chain_indices /
+  recon_loss_units`、`encode_item_slots(cache=)`、`build_fst_bank(value=/cache=)`、
+  `prep_mab.chain_indices`、`prep_hotpotqa` 的 `unit_meta`、`--ver-policy` / `--read-groups`
+  （训练与评测两侧同名同义）。
+- 模块级默认 `ver_policy="learned"`（保持旧调用行为，便于单测与历史配置复现）；
+  **CLI 默认 `current`**：方法默认已改回显式结构规则。
+
+**未做（刻意）**
+
+- 未运行任何训练/评测/测试（本轮只改代码并上传）。`tests/test_fst_mem.py::J8` 的旧断言
+  （"多跳未实现时显式报错"）已按新行为改写；其余测试是否仍全绿**未经执行验证**，
+  下次开工第一件事就是跑一遍。
+- 未改历史结果表：旧数字原样保留，仅在本条与下次结果表里标注"旧口径、待重跑"。
+
 ## 仓库清理（2026-10-27 下午）——废除方案代码移除，文档对齐当前主线
 
 - **删除**（历史见 git log ≤ e290382）：`v6/v7/v8/v9_slotpool`、`v9_cr`、

@@ -271,6 +271,24 @@ def item_units(item):
     return [str(item.get("memory") or "")]
 
 
+def unit_encode_text(item, i):
+    """编码器看到的文本 = [锚点] + 单元原文。
+
+    锚点（HotpotQA 的段落标题 / MAB 的事实主体）**只进编码器输入**，不进 `units`：
+    这样 evidence、答案、gold_slots 的字符串匹配口径完全不变，而压缩器能看到
+    "这句话说的是谁"。纯句子级编码时 "He was married to Peggy Seeger." 这条对
+    第二跳没有可用的实体绑定 —— 即使 Router 选对了槽，模型也没法接着推理。
+    """
+    units = item_units(item)
+    u = str(units[int(i)])
+    ums = item.get("unit_meta") or []
+    if int(i) < len(ums) and isinstance(ums[int(i)], dict):
+        a = str(ums[int(i)].get("anchor") or "").strip()
+        if a and not u.startswith("["):
+            return f"[{a}] {u}"
+    return u
+
+
 def encode_item(encoder, item, tag="fact", grad=False):
     """编码一条样本的全部记忆单元，拼成一段 soft token 序列。
 
@@ -278,7 +296,9 @@ def encode_item(encoder, item, tag="fact", grad=False):
     正好等价于"把多条事实的软 token 接在同一个位置上"。
     """
     units = item_units(item)
-    payloads, info = encoder.encode(units, parent_ids=[f"{tag}:{k}" for k in range(len(units))],
+    texts = [unit_encode_text(item, i) for i in range(len(units))]
+    payloads, info = encoder.encode(texts,
+                                    parent_ids=[f"{tag}:{k}" for k in range(len(texts))],
                                     grad=grad)
     if not payloads:
         raise RuntimeError("encode 未返回任何 payload")
@@ -289,16 +309,36 @@ def encode_item(encoder, item, tag="fact", grad=False):
 # =====================================================================
 # 2) 序列构造：soft tokens + 答案 token 的标签
 # =====================================================================
-def encode_item_slots(encoder, item, tag="fact", grad=False):
+def encode_item_slots(encoder, item, tag="fact", grad=False, cache=None):
     """编码一条样本，返回 (per-slot payload 列表, 拼接后的 z, info)。
 
     为什么要 per-slot：LatentRouter 要在**槽位集合**上打分，需要每个槽独立成形
     [m, d]；encode_item 只给拼好的 [Σk, m, d]，把槽边界丢了，无法路由。
+
+    cache（只对 grad=False 生效）：文本 -> payload 的**跨查询复用**缓存。
+    旧实现每问都把整段上下文的每条事实重新编码一遍，同一段上下文被 100 个问题
+    共享时要付 100 次编码前向 —— 这就是 MAB-CR 上 FST 每题 11s、text-top4 只要
+    1.46s 的主要来源。缓存键是编码器输入文本本身，因此与"事实是否变化"一致：
+    变了才重算，没变就直接复用。
     """
     units = item_units(item)
-    payloads, info = encoder.encode(units,
-                                    parent_ids=[f"{tag}:{k}" for k in range(len(units))],
-                                    grad=grad)
+    texts = [unit_encode_text(item, i) for i in range(len(units))]
+    if cache is None or grad:
+        payloads, info = encoder.encode(
+            texts, parent_ids=[f"{tag}:{k}" for k in range(len(texts))], grad=grad)
+    else:
+        payloads, hits = [], 0
+        for k, t in enumerate(texts):
+            key = (str(t), int(getattr(encoder, "layer", -1)), str(tag))
+            hit = cache.get(key)
+            if hit is None:
+                p, _i = encoder.encode([t], parent_ids=[f"{tag}:{k}"], grad=False)
+                hit = p[0].detach()
+                cache[key] = hit
+            else:
+                hits += 1
+            payloads.append(hit)
+        info = {"cache_hits": hits, "cache_n": len(texts)}
     if not payloads:
         raise RuntimeError("encode 未返回任何 payload")
     z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
@@ -658,6 +698,69 @@ def evidence_slot_indices(units, evidence):
     if not ev:
         return []
     return [i for i, u in enumerate(units) if _norm_ans(u) in ev]
+
+
+def evidence_chain_indices(units, evidence):
+    """按 evidence 的**给定顺序**返回每一跳的槽位下标（多跳监督的跳序以此为准）。
+
+    与 evidence_slot_indices 的分工：
+        那个按 units 顺序返回，用于"把整条证据链都留在候选里"；
+        这个按 evidence 顺序返回，用于"第 1 跳监督谁、第 2 跳监督谁"。
+    HotpotQA 的 supporting_facts 就是按跳序给的，顺序信息必须用上 ——
+    旧训练只监督第 1 跳（甚至只监督"含答案那一条"），第二跳没有任何监督，
+    推理却要求选出两条事实，这是两跳题的硬缺口。
+    """
+    u_norm = [_norm_ans(u) for u in units]
+    out = []
+    for e in (evidence or []):
+        e_n = _norm_ans(e)
+        if not e_n:
+            continue
+        for i, x in enumerate(u_norm):
+            if x == e_n:
+                if i not in out:
+                    out.append(i)
+                break
+    return out
+
+
+def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
+                     system_prompt, dev):
+    """逐单元重建：**用某个单元自己的载荷**去重建**它自己的原文**。
+
+    旧实现（必须记住这个错误，它不会报错、只会让指标停在噪声水平）：
+        recon 从整段记忆里随机抽若干单元当**重建目标**，输入却只用"路由选中的
+        那一个槽"过 bridge 得到的 soft。上下文有 A/B/C 三条事实、路由选了 A 时，
+        模型收到的任务是"根据 A 的潜向量恢复 B 和 C 的原文" —— 信息上不可能完成，
+        压缩器拿到的是自相矛盾的梯度。实测症状：recon token-acc 22.8%，
+        与平凡基线 19.8% 只差 3 个点，加宽 m 也毫无改善。
+
+    现在每个被抽中的单元走一次自己的 forward（n_units 默认 2，显存恒定），
+    输入与目标严格同位 —— 这才是"检查压缩器符号保真"的有效监督。
+    """
+    n = max(1, int(n_units))
+    idxs = list(range(len(units)))
+    if n < len(idxs):
+        idxs = sorted(i for _r, i in sorted((rng.random(), i) for i in idxs)[:n])
+    losses = []
+    for i in idxs:
+        p = payloads[i]
+        if p.dim() == 2:
+            p = p.unsqueeze(0)
+        soft_u = bridge(p)
+        if soft_u.dim() == 2:
+            soft_u = soft_u.unsqueeze(0)
+        soft_u = soft_u.reshape(1, -1, soft_u.shape[-1])
+        r_embeds, r_labels, _n = build_student_inputs(
+            model, tokenizer, soft_u, system_prompt,
+            "Repeat the memory verbatim.", str(units[i]))
+        with LM.delta_write_disabled(model):
+            r_logits = model(inputs_embeds=r_embeds,
+                             attention_mask=torch.ones(r_embeds.shape[:2],
+                                                       dtype=torch.long, device=dev),
+                             use_cache=False).logits
+        losses.append(qa_loss(r_logits, r_labels))
+    return torch.stack(losses).mean()
 
 
 def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
@@ -1035,22 +1138,40 @@ def train(args):
             #    梯度检查会报 bridge_last_linear=false，且推理期用的是随机投影。
             r_logits = None
             tgt_slot = 0
+            addr_logits = None
+            addr_targets: list = []
             if router is not None and payloads is not None:
+                units_now = item_units(item)
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
-                tgt_slot = target_slot_index(item_units(item), item["answer"],
+                tgt_slot = target_slot_index(units_now, item["answer"],
                                              evidence=item.get("evidence"))
                 # 多跳：证据链每一跳都必须留在候选里（否则链被剪断），
                 # 其余槽位按课程随机丢 —— 这一步是"变槽数"能真正生效的关键。
+                chain_orig = evidence_chain_indices(units_now, item.get("evidence"))
                 slot_z, tgt_slot, _keep = sample_slot_subset(
-                    payloads, tgt_slot, rng_slots, args.max_slots or None,
-                    must_keep=evidence_slot_indices(item_units(item),
-                                                    item.get("evidence")))
+                    payloads, (chain_orig[0] if chain_orig else tgt_slot), rng_slots,
+                    args.max_slots or None,
+                    must_keep=evidence_slot_indices(units_now, item.get("evidence")))
                 if args.freeze_compressor:
                     slot_z = slot_z.detach()
                 q_feat = query_feature_cached(model, tokenizer, item["question"],
                                               system_prompt, args.layer, dev)
-                z_read, r_logits, _ki, _ko = router(q_feat, slot_z, hard=False)
-                soft = bridge(z_read)
+                # --- 多跳必须**两跳都有监督** ---
+                # 旧代码只算第 1 跳的 CE、把 k_out 丢掉，推理侧却用 k_out 接力。
+                # 现在：hops>1 且证据链够长时按 evidence 顺序逐跳监督，
+                # 训练与推理共用 LM.compose_routed_soft（槽间插 "\n"，与推理逐位一致）。
+                n_hops = 2 if int(item.get("hops", 1) or 1) > 1 else 1
+                keep_pos = {int(o): j for j, o in enumerate(_keep)}
+                chain_new = [keep_pos[i] for i in chain_orig if i in keep_pos]
+                if n_hops > 1 and len(chain_new) < 2:
+                    # 证据链不足 2 跳时**不假装多跳**：退回单跳（并在日志里看得出）
+                    n_hops = 1
+                router_out = router.forward_hops(q_feat, slot_z, n_hops=n_hops, hard=False)
+                soft = LM.compose_routed_soft(model, tokenizer, bridge,
+                                              router_out["z_list"], dev=dev)
+                addr_logits = router_out["logits_list"]
+                addr_targets = (chain_new[:n_hops] if len(chain_new) >= n_hops
+                                else [int(tgt_slot)])
             else:
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
@@ -1063,11 +1184,16 @@ def train(args):
                                  use_cache=False).logits
             loss_qa = qa_loss(s_logits, labels)
             loss_addr = None
-            if r_logits is not None:
+            if addr_logits is not None:
                 # 显式寻址监督：让"选哪个槽"有直接梯度。只靠 QA 隐式回传时，
                 # 4 槽里 3 个干扰槽会把信号摊薄到学不出来（实测 target_only 直接 0%）。
-                tgt_t = torch.tensor([int(tgt_slot)], device=r_logits.device)
-                loss_addr = F.cross_entropy(r_logits, tgt_t)
+                # 多跳时**逐跳**各算一个 CE 再平均：第 2 跳的监督是 k_out_net
+                # 唯一能学到东西的地方（第 1 跳的 CE 只经过 k_in）。
+                terms = []
+                for lg, gi in zip(addr_logits, addr_targets):
+                    terms.append(F.cross_entropy(
+                        lg, torch.tensor([int(gi)], device=lg.device)))
+                loss_addr = torch.stack(terms).mean()
             loss_kl = None
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
@@ -1082,27 +1208,29 @@ def train(args):
                 loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)], tau=args.kl_tau)
             recon_stage = args.recon_only_steps > 0 and step < args.recon_only_steps
             if args.recon_weight > 0 or recon_stage:
-                # ⑤ 事实重建辅助任务：只给 soft tokens，重建原事实（检查符号保真）
-                #    memory 字段是列表，必须先 join 成句 —— str(list) 会得到
-                #    "['Taron works at Velcor.']" 这种 Python repr（实测踩过：
-                #    recon token-acc 被这个 bug 压低了 ~39%）。
-                # recon 只重建**少量**随机单元：整段记忆（HotpotQA 一条 ~35 句、
-                # 上千 token）做一次带梯度的 LM 前向+反传要 ~11GB，v100-32GB 上跑到
-                # 第 3 步就 OOM（实测 21.8GB→30GB）。取固定条数既把显存钉死，
-                # 又保持"检查压缩器符号保真"这个用途不变。
-                _ru = list(item_units(item))
-                if args.recon_units > 0 and len(_ru) > args.recon_units:
-                    _ru = [x[1] for x in
-                           sorted((rng_recon.random(), u) for u in _ru)[:args.recon_units]]
-                r_embeds, r_labels, _ = build_student_inputs(
-                    model, tokenizer, soft, system_prompt,
-                    "Repeat the memory verbatim.", " ".join(_ru))
-                with LM.delta_write_disabled(model):
-                    r_logits = model(inputs_embeds=r_embeds,
-                                     attention_mask=torch.ones(r_embeds.shape[:2],
-                                                               dtype=torch.long, device=dev),
-                                     use_cache=False).logits
-                loss_r = qa_loss(r_logits, r_labels)
+                # ⑤ 事实重建辅助任务：**输入与目标必须同位**（见 recon_loss_units）。
+                #    旧写法随机抽目标单元、却只把"路由选中那一个槽"的 soft 当输入，
+                #    等于要求"根据 A 的潜向量恢复 B/C 的原文"，梯度自相矛盾。
+                #    现在每个被抽中的单元用自己的载荷重建自己的原文；
+                #    --recon-units 控制条数（显存恒定，OOM 修复保持有效）。
+                if payloads is not None:
+                    loss_r = recon_loss_units(
+                        model, tokenizer, bridge, payloads, item_units(item),
+                        rng_recon, args.recon_units, system_prompt, dev)
+                else:
+                    # --bridge-only / 无 router：z 本身就是整段记忆，目标 = 整段原文，
+                    # 输入与目标仍是同一条记忆，不存在"用 A 重建 B"的问题。
+                    r_embeds, r_labels, _rn = build_student_inputs(
+                        model, tokenizer, soft, system_prompt,
+                        "Repeat the memory verbatim.",
+                        " ".join(item_units(item)[:max(1, args.recon_units)]))
+                    with LM.delta_write_disabled(model):
+                        r_logits = model(inputs_embeds=r_embeds,
+                                         attention_mask=torch.ones(r_embeds.shape[:2],
+                                                                   dtype=torch.long,
+                                                                   device=dev),
+                                         use_cache=False).logits
+                    loss_r = qa_loss(r_logits, r_labels)
             # 四项损失的组合规则集中在 assemble_loss（旧代码在 KL 分支里重新赋值，
             # 把寻址项整条覆盖掉了；两阶段的重建切换规则也一并挪进来便于单测）。
             loss = assemble_loss(loss_qa, loss_addr, loss_kl,
@@ -1323,7 +1451,7 @@ def fst_units_and_meta(item):
 
 
 def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
-                   shuffle_order=False, rng=None):
+                   shuffle_order=False, rng=None, cache=None):
     """把一条样本的时间线按要求顺序写进 LatentStateTrajectoryBank，并定位监督目标。
 
     顺序（order）在这里是**显式可选**的：默认按数据的写入顺序（= 真实的时间线），
@@ -1333,9 +1461,14 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
     返回 dict，其中 tgt_group/tgt_ver 是被监督的"正确事实键 + 正确版本"。
     viable=False 表示目标版本已被容量淘汰（hist_max 太小），此时该样本**没法学**，
     训练要跳过、评估要算错（这正是"硬覆写"基线该拿 0 分的原因）。
+
+    cache（grad=False 时生效）：文本 -> 载荷缓存。同一段上下文被 100 个问题共享时，
+    旧实现把每条事实重编码 100 次（MAB-CR 上 FST 每题 11s vs text-top4 1.46s 的
+    主要来源）。写入顺序、状态转移、版本淘汰全部保持原样，只是**没变的载荷不再重算**。
     """
     units, ums = fst_units_and_meta(item)
-    payloads, _z, info = encode_item_slots(encoder, item, tag=tag, grad=grad)
+    payloads, _z, info = encode_item_slots(encoder, item, tag=tag, grad=grad,
+                                           cache=cache)
     if len(payloads) != len(units):
         raise RuntimeError(f"编码返回 {len(payloads)} 个槽位，但样本有 {len(units)} 条记忆")
     order = list(range(len(units)))
@@ -1349,8 +1482,10 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
         k = LM.fact_key(um["entity"], um["relation"])
         # entity/relation 的**原始文本**随键一起存进库：读出侧从这里取，
         # 不能让它自己从（规范化过的）键反推，否则训练/读出两条路的键特征不同源。
+        # value 一起存：多跳第二跳要靠"上一跳的值 = 下一跳的实体"做确定性接力。
         bank.write(k, payloads[i], time=um.get("time", ""), detach=not grad,
-                   entity=um["entity"], relation=um["relation"])
+                   entity=um["entity"], relation=um["relation"],
+                   value=um.get("value"))
     keys = bank.group_keys()
     ent = {k: bank.group_text(k)[0] for k in keys}
     rel = {k: bank.group_text(k)[1] for k in keys}
@@ -1520,7 +1655,7 @@ def fst_scores(recs):
 def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
                  system_prompt, layer, hist_max, limit=32, cache=None,
                  verbose=False, label="fst-eval", shuffle_order=False, seed=0,
-                 ignore_query_time=False):
+                 ignore_query_time=False, ver_policy="current", read_groups=1):
     """FST 的评估：严格答案匹配 + **两级寻址准确率** + 探针分解 + 反事实配对 + 顺序稳定性。
 
     只报答案准确率是不够的：答案对了可能是"没选对版本但那条刚好也能答对"
@@ -1551,7 +1686,8 @@ def evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, data,
             question=item["question"], system_prompt=system_prompt,
             fst_router=fst_router, max_new_tokens=16, layer=layer,
             query_time=(None if ignore_query_time else item.get("as_of")),
-            device=dev, feat_cache=cache)
+            device=dev, feat_cache=cache, hops=int(read_groups),
+            ver_policy=str(ver_policy))
         gold = item["answer"]
         if isinstance(gold, (list, tuple)):
             gold = " ".join(str(g) for g in gold)
@@ -1687,7 +1823,9 @@ def train_fst(args):
                 "addr_weight": float(args.addr_weight), "ver_weight": float(args.ver_weight),
                 "lr": args.lr, "steps": steps_done, "epochs": args.epochs,
                 "seed": args.seed, "smoke_model": bool(args.smoke_model),
-                "router": False, "fst": True, "d_key": int(args.d_key)}
+                "router": False, "fst": True, "d_key": int(args.d_key),
+                "ver_policy": str(args.ver_policy),
+                "read_groups": int(args.read_groups)}
 
     step = micro = 0
     acc = []
@@ -1723,8 +1861,12 @@ def train_fst(args):
             q_feat = query_feature_cached(model, tokenizer, item["question"],
                                           system_prompt, args.layer, dev)
             out = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq,
-                             ver_mask=ver_mask, hard=False)
-            soft = bridge(out["z_read"])
+                             ver_mask=ver_mask, hard=False,
+                             k_groups=int(args.read_groups),
+                             ver_policy=str(args.ver_policy),
+                             ver_times=fi["times"], query_time=item.get("as_of"))
+            soft = LM.compose_routed_soft(model, tokenizer, bridge,
+                                          out["z_reads"], dev=dev)
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt, item["question"], item["answer"])
             with LM.delta_write_disabled(model):
@@ -1737,14 +1879,17 @@ def train_fst(args):
             # 版本监督打在**目标组**那一行：用 logits_ver（被选中组）会在选错组时
             # 监督到另一组的版本布局（甚至填充位），loss 瞬间到 1e4 量级。
             loss_grp = F.cross_entropy(out["logits_group"], t_g)
-            if fi["viable"]:
+            if fi["viable"] and str(args.ver_policy) == "learned":
                 t_v = torch.tensor([int(fi["tgt_ver"])],
                                    device=out["logits_ver"].device)
                 loss_ver = F.cross_entropy(
                     out["logits_ver_all"][int(fi["tgt_group"]):int(fi["tgt_group"]) + 1],
                     t_v)
             else:
-                # 没有可定位的目标版本：不能凭空造监督，也不能因此丢掉整条样本
+                # 两种"不该造监督"的情形：
+                #   没有可定位的目标版本（数据洞）/ 版本读出已交给显式时间规则
+                # （`--ver-policy current|time`）。后者再算版本 CE 等于让分类器去
+                # 拟合一条已经被结构规则定死的选择，白占容量还会互相拉扯。
                 loss_ver = out["logits_ver_all"].sum() * 0.0
             loss = loss_qa + args.addr_weight * loss_grp + args.ver_weight * loss_ver
             (loss / args.accum).backward()
@@ -1790,7 +1935,9 @@ def train_fst(args):
                                       args.hist_max, limit=args.eval_limit,
                                       cache=cache, verbose=False,
                                       label=f"fst@{step}",
-                                      ignore_query_time=args.ignore_query_time)
+                                      ignore_query_time=args.ignore_query_time,
+                                      ver_policy=args.ver_policy,
+                                      read_groups=args.read_groups)
                 print(f"[eval] step={step} {_fmt_fst(res_ev)}", flush=True)
                 if not args.freeze_compressor:
                     comp.train()
@@ -1822,20 +1969,23 @@ def train_fst(args):
     res_val = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, val_data,
                            system_prompt, args.layer, args.hist_max,
                            limit=args.eval_limit, cache=cache, verbose=True,
-                           label="fst-final", ignore_query_time=args.ignore_query_time)
+                           label="fst-final", ignore_query_time=args.ignore_query_time,
+                           ver_policy=args.ver_policy, read_groups=args.read_groups)
     print(f"[eval] val {_fmt_fst(res_val)}", flush=True)
     res_train = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer,
                              train_data, system_prompt, args.layer, args.hist_max,
                              limit=min(args.eval_limit, len(train_data)), cache=cache,
                              verbose=False, label="fst-train",
-                             ignore_query_time=args.ignore_query_time)
+                             ignore_query_time=args.ignore_query_time,
+                             ver_policy=args.ver_policy, read_groups=args.read_groups)
     print(f"[eval] train {_fmt_fst(res_train)}", flush=True)
     # 顺序稳定性：换一个写入顺序，答案必须一样（组合稳定性的直接检验）
     res_ord = evaluate_fst(fst_router, comp, bridge, encoder, model, tokenizer, val_data,
                            system_prompt, args.layer, args.hist_max,
                            limit=args.eval_limit, cache=cache, verbose=False,
                            label="fst-order", shuffle_order=True, seed=args.seed,
-                           ignore_query_time=args.ignore_query_time)
+                           ignore_query_time=args.ignore_query_time,
+                           ver_policy=args.ver_policy, read_groups=args.read_groups)
     print(f"[eval] val(写入顺序打乱) {_fmt_fst(res_ord)}", flush=True)
 
     if args.dry_run:
@@ -1860,7 +2010,8 @@ def train_fst(args):
     res_rl = evaluate_fst(rd.fst_router, rd.compressor, rd.bridge, rd.encoder, model,
                           tokenizer, val_data, system_prompt, args.layer, args.hist_max,
                           limit=args.eval_limit, cache=cache, verbose=False,
-                          label="fst-reload", ignore_query_time=args.ignore_query_time)
+                          label="fst-reload", ignore_query_time=args.ignore_query_time,
+                          ver_policy=args.ver_policy, read_groups=args.read_groups)
     print(f"[eval-reload] {_fmt_fst(res_rl)}", flush=True)
     if res_val["acc"] is not None and res_rl["acc"] is not None \
             and abs(res_val["acc"] - res_rl["acc"]) > 0.2:
@@ -1972,7 +2123,13 @@ def parse_args(argv=None):
     ap.add_argument("--ignore-query-time", action="store_true",
                     help="消融：丢掉查询里的时间条件（版本级只看问题+载荷，不看年份）")
     ap.add_argument("--ver-weight", type=float, default=1.0,
-                    help="版本级（时间）寻址的交叉熵权重")
+                    help="版本级（时间）寻址的交叉熵权重（仅 --ver-policy learned 生效）")
+    ap.add_argument("--ver-policy", default="current",
+                    choices=("current", "time", "learned"),
+                    help="版本级读出规则：current=取当前版本（默认，结构规则）/"
+                         "time=有查询时间时按时间匹配，否则当前/learned=交给分类器（消融）")
+    ap.add_argument("--read-groups", type=int, default=1,
+                    help="一次读出几个事实键（多跳/多事实题 >1；旧接口硬编码 1）")
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     return ap.parse_args(argv)

@@ -164,11 +164,51 @@ def bm25_scores(facts, question):
     return out
 
 
+def chain_indices(facts, seeds, max_hops=2):
+    """事实图上的 k 跳扩张：某条事实的**客体值**提到的实体 -> 以它为实体的事实。
+
+    MAB-CR 的题多为两跳（问题实体 -> 中间实体 -> 最终属性值）。旧实现只保证
+    "答案值所在的事实 + 同键版本"进上下文，中间事实靠 BM25 撞运气；即使潜层
+    读对了金标槽，模型手里也没有中间证据可用 —— 这一列只能按"不对等比较"解释。
+    这里用数据里现成的 (entity, relation, value) 三元组建链，属于确定性扩张，
+    不依赖任何模型打分。
+    """
+    by_ent = {}
+    for f in facts:
+        by_ent.setdefault(_norm(f["entity"]), []).append(f)
+    frontier = {int(i) for i in seeds}
+    seen = set(frontier)
+    for _ in range(max(1, int(max_hops))):
+        nxt = set()
+        for i in frontier:
+            f = next((g for g in facts if g["idx"] == i), None)
+            if f is None:
+                continue
+            v = _norm(f["value"])
+            if not v:
+                continue
+            for e_n, gs in by_ent.items():
+                if not e_n or e_n == _norm(f["entity"]):
+                    continue
+                if e_n in v:                 # 值里出现了某个实体 -> 它可以接下去
+                    nxt |= {g["idx"] for g in gs}
+        nxt -= seen
+        seen |= nxt
+        frontier = nxt
+        if not frontier:
+            break
+    return sorted(seen)
+
+
 def select_facts(facts, question, gold_idx, cap):
-    """金标 + 同键全部版本 + BM25 相关事实，凑到 cap 条（保持原始编号顺序）。
+    """金标 + 同键全部版本 + 推理链 + 问题锚定的第一跳 + BM25 相关事实，凑到 cap 条。
 
     同键版本必须整组进入：只留最新那条，"抗干扰/覆盖旧值"就没有被考到；
     只留旧的那条则样本无解。两种都会被这里挡住。
+
+    优先级（高 -> 低）：金标与同键版本 > 问题锚定的第一跳事实 > 金标的推理链中间事实
+    > BM25 高相关事实。**BM25 必须降序** —— 旧代码 `sorted(...)` 没写 reverse，
+    等于优先把"最不相关"的事实塞进 cap，把整个选法的用意做反了。
     """
     by_idx = {f["idx"]: f for f in facts}
     keep = set()
@@ -182,8 +222,19 @@ def select_facts(facts, question, gold_idx, cap):
                 keep.add(f["idx"])
     if len(keep) > cap:
         raise ValueError(f"金标+同键版本已 {len(keep)} 条 > cap={cap}，请调大 cap")
+    # 推理链 + 问题锚定（都是确定性规则，不占 BM25 名额的顺序）
+    q_toks = set(_toks(question))
+    anchor = {f["idx"] for f in facts
+              if _norm(f["entity"]) and set(_toks(f["entity"])) <= q_toks} if q_toks else set()
+    chain = set(chain_indices(facts, gold_idx, max_hops=2))
+    for extra in (sorted(anchor), sorted(chain - anchor)):
+        for i in extra:
+            if len(keep) >= cap:
+                break
+            keep.add(i)
     scores = bm25_scores(facts, question)
-    rest = sorted((scores[i], -by_idx[i]["idx"]) for i in by_idx if i not in keep)
+    rest = sorted(((scores[i], -by_idx[i]["idx"]) for i in by_idx if i not in keep),
+                  reverse=True)
     for _s, negi in rest:
         if len(keep) >= cap:
             break
@@ -208,7 +259,8 @@ def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
         # unit_meta 必须与 units 逐条对齐，且 `fact` 字段要**逐字**等于对应 unit：
         # build_fst_bank 用它校验对齐，缺字段会在训练第一步直接报错（比静默错键好）。
         "unit_meta": [{"fact": f["text"], "entity": f["entity"], "relation": f["relation"],
-                       "time": f["idx"], "distractor": f["idx"] not in gold_idx}
+                       "time": f["idx"], "value": f["value"], "fact_idx": f["idx"],
+                       "distractor": f["idx"] not in gold_idx}
                       for f in sel],
         "question": question,
         "answer": gold_val,
@@ -227,6 +279,10 @@ def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
         "as_of": max(keep),
         "meta": dict(meta, qid=qid, n_units=len(units), n_kept=len(keep),
                      n_gold=len(ev), max_versions=n_conflict,
+                     # 上表必须能看出"上下文里有没有中间事实"：没有它，
+                     # 两跳题答错到底是"没读到"还是"没有可读的中间证据"分不开。
+                     n_chain=sum(1 for i in keep
+                                 if i in set(chain_indices(facts, gold_idx, 2))),
                      gold_idx=gold_idx),
     }
 

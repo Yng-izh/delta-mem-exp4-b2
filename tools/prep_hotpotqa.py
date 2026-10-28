@@ -123,20 +123,37 @@ def build_item(rec, n_distractors=8, order="natural", rng=None, qid=None):
         raise ValueError("没有可用的支持事实句子")
 
     # 槽位：黄金段落全部句子 + N 个干扰段落全部句子
-    units = []
+    # meta 与 units 必须逐条对齐（sample_slot_subset / 顺序打乱都会带着 meta 一起动）：
+    # anchor = 该句所属**段落标题**，编码时以 "[Title] sentence" 的形式进编码器。
+    # 纯句子级编码时 "He was married to Peggy Seeger." 这类句子没有实体绑定，
+    # 第二跳即使读到了也没法用；标题是数据里现成的实体锚点，不该丢。
+    units, umeta = [], []
+
+    def _push(title, sent, is_gold):
+        s = str(sent).strip()
+        if not s:
+            return
+        units.append(s)
+        umeta.append({"anchor": str(title), "title": str(title),
+                      "is_gold": bool(is_gold), "fact": s})
+
     for i, p in enumerate(paras):
         if i in gold_idx:
-            units.extend(str(s).strip() for s in p["sentences"] if str(s).strip())
+            for s in p["sentences"]:
+                _push(p["title"], s, True)
     dis_titles = [p["title"] for i, p in enumerate(paras) if i not in gold_idx]
     n_dis = min(int(n_distractors), len(dis_titles))
     for t in dis_titles[:n_dis]:
-        units.extend(str(s).strip() for s in paras[title_to_i[t]]["sentences"]
-                     if str(s).strip())
+        for s in paras[title_to_i[t]]["sentences"]:
+            _push(t, s, False)
 
     if order == "shuffled":
         if rng is None:
             raise ValueError("order=shuffled 时必须传 rng（要可复现）")
-        rng.shuffle(units)
+        idx = list(range(len(units)))
+        rng.shuffle(idx)
+        units = [units[i] for i in idx]
+        umeta = [umeta[i] for i in idx]
 
     # 槽位定位自检：evidence 必须能在 units 里逐条找到原文，否则 loss_addr 会标错槽
     u_norm = {_norm(u) for u in units}
@@ -160,6 +177,7 @@ def build_item(rec, n_distractors=8, order="natural", rng=None, qid=None):
     return {
         "kind": "hotpot", "hops": 2 if qtype in ("bridge", "comparison") else 1,
         "memory": " ".join(units), "units": list(units),
+        "unit_meta": umeta,
         "question": str(rec["question"]).strip(), "answer": str(ans).strip(),
         "evidence": ev_sents,
         "meta": {"qid": qid if qid is not None else rec.get("id", ""),

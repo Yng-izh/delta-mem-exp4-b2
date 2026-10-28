@@ -464,10 +464,14 @@ def test_fst_readout():
         model=model, tokenizer=tok, bridge=bridge,
         bank=LM.LatentStateTrajectoryBank(), question="q", system_prompt="s",
         fst_router=router, max_new_tokens=2, layer=2)))
-    ok("J8 多跳未实现时显式报错（不静默按单跳跑）",
-       _raises(lambda: LM.generate_latent_answer_fst(
-           model=model, tokenizer=tok, bridge=bridge, bank=bank, question="q",
-           system_prompt="s", fst_router=router, max_new_tokens=2, layer=2, hops=2)))
+    # 多跳现在**支持**了（旧断言是"未实现时显式报错"，方向已反转）：
+    # 读出条数 = hops，跳间用"上一跳的值 -> 下一跳的实体"确定性接力。
+    _p2h, meta_h = LM.generate_latent_answer_fst(
+        model=model, tokenizer=tok, bridge=bridge, bank=bank, question="q",
+        system_prompt="s", fst_router=router, max_new_tokens=2, layer=2, hops=2)
+    ok("J8 多跳读出：hops=2 至少读出 1 个键且 meta 记录跳数",
+       int(meta_h.get("hops", 0)) >= 1 and len(meta_h.get("groups_picked", [])) >= 1,
+       extra=str(meta_h.get("groups_picked")))
     ok("J9 传普通 SlotBank 报错（类型必须对）",
        _raises(lambda: LM.generate_latent_answer_fst(
            model=model, tokenizer=tok, bridge=bridge, bank=LM.LatentSlotBank(),

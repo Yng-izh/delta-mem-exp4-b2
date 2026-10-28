@@ -147,6 +147,7 @@ def read_one(method, item, ctx):
                                      max_new_tokens=ctx["max_new_tokens"],
                                      pad_token_id=ctx["pad_token_id"])
         t_gen = time.time()
+        _gs2 = gold_slots(item, units)
         info = {"mem_tokens": n_tokens_of(tok, memory_block(units, idx), dev),
                 "prompt_tokens": n_tokens_of(tok, sys_full, dev)
                 + n_tokens_of(tok, question, dev),
@@ -155,13 +156,15 @@ def read_one(method, item, ctx):
                 # 与潜层方法的"读对槽位"可直接比较的可部署指标：取回的 top-k 里
                 # 有没有黄金事实。不设这一列的话，"文本 RAG 掉点"到底是因为
                 # **没检索到**还是**读到了但答错**无法区分。
-                "read_ok": bool(set(idx) & gold_slots(item, units))}
+                # 多跳口径统一：整条证据链都被取回才算读对（与潜层列同一条规则）。
+                "read_ok": ((bool(_gs2 <= set(idx)) if len(_gs2) > 1
+                             else bool(set(idx) & _gs2)) if _gs2 else None)}
         return pred, info
 
     # ---- 潜层：先编码（所有潜层方法都要付这笔前向） ----
     if method == "fst":
         fi = T.build_fst_bank(ctx["encoder"], item, ctx["hist_max"], tag="eval",
-                              grad=False)
+                              grad=False, cache=ctx.get("unit_cache"))
         bank = fi["bank"]
         t_enc = time.time()
         pred, meta = LM.generate_latent_answer_fst(
@@ -169,20 +172,25 @@ def read_one(method, item, ctx):
             question=question, system_prompt=sysp,
             fst_router=ctx["fst_router"], max_new_tokens=ctx["max_new_tokens"],
             pad_token_id=ctx["pad_token_id"], layer=ctx["layer"], device=dev,
-            query_time=item.get("as_of"), feat_cache=ctx["cache"])
+            query_time=item.get("as_of"), feat_cache=ctx["cache"],
+            hops=max(1, int(ctx.get("read_groups") or 1)),
+            ver_policy=str(ctx.get("ver_policy") or "current"))
         t_gen = time.time()
+        _groups = [int(x) for x in (meta.get("groups_picked") or [meta["group_picked"]])]
+        _g_ok = bool(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"])
         info = {"mem_tokens": int(meta["n_soft"]), "prompt_tokens": int(meta["n_soft"]),
                 "pre_ms": (t_enc - t0) * 1e3, "total_ms": (time.time() - t0) * 1e3,
-                "n_read_units": 1,
+                "n_read_units": len(_groups),
                 # 更新/历史口径的判定用得到（答案对 + 读对版本才算"更新准确率"）
-                "group_ok": bool(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"]),
+                "group_ok": _g_ok,
                 "ver_ok": bool(int(meta["ver_picked"]) == int(fi["tgt_ver"]) and fi["viable"]),
                 "probe": item.get("probe") or "",
                 "decode_mode": meta.get("decode_mode"),
-                "read_ok": bool(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"])}
+                "read_ok": _g_ok}
         return pred, info
 
-    slot_z, _cat, _ei = T.encode_item_slots(ctx["encoder"], item, tag="eval")
+    slot_z, _cat, _ei = T.encode_item_slots(ctx["encoder"], item, tag="eval",
+                                            cache=ctx.get("unit_cache"))
     slot_z = LM.stack_payloads(list(slot_z)).unsqueeze(0)     # [1,K,m,d]
     t_enc = time.time()
     router = ctx["router"]
@@ -194,11 +202,17 @@ def read_one(method, item, ctx):
     t_gen = time.time()
     _gs = gold_slots(item, units)
     _picked = [int(x) for x in (meta.get("routed") or [])]
+    needs_full = len(_gs) > 1          # 多跳：证据链是**一组**槽位，不是随便一条
     info = {"mem_tokens": int(meta.get("n_soft", 0)), "prompt_tokens": int(meta.get("n_soft", 0)),
             "pre_ms": (t_enc - t0) * 1e3, "total_ms": (time.time() - t0) * 1e3,
             "n_read_units": max(1, len(_picked)),
             "decode_mode": meta.get("decode_mode"),
-            "read_ok": bool(set(_picked) & _gs) if _gs else None,
+            # 多跳样本：只有**整条证据链**都被读到才算"读对"。
+            # 旧口径"选中任意一条黄金事实就算对"会把"读了半条链"算成成功，
+            # 于是 read_acc 虚高、与 acc 的落差被误读成"读出端有问题"。
+            "read_ok": (bool(_gs <= set(_picked)) if needs_full
+                        else (bool(set(_picked) & _gs) if _gs else None)),
+            "read_all": bool(_gs <= set(_picked)) if _gs else None,
             "picked": _picked, "gold": sorted(_gs)}
     return pred, info
 
@@ -270,6 +284,11 @@ def main(argv=None):
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--text-topk", type=int, default=5, help="text 方法的检索条数（0=全给）")
     ap.add_argument("--hist-max", type=int, default=LM.LATENT_HIST_MAX)
+    ap.add_argument("--ver-policy", default="current",
+                    choices=("current", "time", "learned"),
+                    help="FST 版本级读出规则（必须与训练时一致，否则是两套方法）")
+    ap.add_argument("--read-groups", type=int, default=1,
+                    help="FST 一次读出几个事实键（多跳/多事实题 >1）")
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     ap.add_argument("--label", default="")
@@ -287,23 +306,27 @@ def main(argv=None):
     ctx = {"model": model, "tokenizer": tok, "dev": dev,
            "system_prompt": args.system_prompt, "max_new_tokens": args.max_new_tokens,
            "pad_token_id": pad_id, "layer": args.layer,
-           "text_topk": args.text_topk, "cache": {}}
+           "text_topk": args.text_topk, "cache": {},
+           # 文本 -> 载荷缓存：同一段上下文被多问共享时不重复编码（FST 每题 11s 的主因）
+           "unit_cache": {}, "read_groups": args.read_groups,
+           "ver_policy": args.ver_policy}
 
     if args.method in ("bridge", "router", "fst"):
         if not args.ckpt:
             raise SystemExit(f"--method {args.method} 必须给 --ckpt（随机权重没有任何意义）")
         reader = LM.load_latent_reader(args.ckpt, model, tok, device=dev)
+        # **bridge 不许带 router**：旧代码把 ckpt 里的 router 无条件塞进 ctx，
+        # 于是 --method bridge 实际跑的是"有路由的单槽读出"，两行结果同源，
+        # "Bridge vs Router" 这一列就不成立了（这是结果表里最贵的一处静默错误）。
+        use_router = reader.router if args.method == "router" else None
         ctx.update({"encoder": reader.encoder, "bridge": reader.bridge,
-                    "router": reader.router, "fst_router": reader.fst_router,
+                    "router": use_router, "fst_router": reader.fst_router,
                     "hist_max": args.hist_max})
         if args.method in ("router", "fst"):
             got = reader.router if args.method == "router" else reader.fst_router
             if got is None:
                 raise SystemExit(f"checkpoint {args.ckpt} 里没有 "
                                  f"{'router' if args.method == 'router' else 'fst_router'} 权重")
-        if args.method == "fst" and reader.router is not None:
-            # FST 数据集上不要拿单级 router 混进来
-            pass
 
     data = T.load_synth_jsonl(args.data, limit=args.limit, seed=args.seed)
     if not data:
