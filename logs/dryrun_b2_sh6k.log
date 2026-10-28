@@ -1,37 +1,0 @@
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<06:24,  1.03it/s]Loading weights:   1%|          | 4/398 [00:01<01:25,  4.61it/s]Loading weights:   3%|▎         | 10/398 [00:01<00:30, 12.56it/s]Loading weights:   4%|▍         | 15/398 [00:01<00:21, 18.12it/s]Loading weights:   5%|▌         | 20/398 [00:01<00:15, 24.18it/s]Loading weights:   6%|▌         | 24/398 [00:01<00:14, 25.48it/s]Loading weights:   7%|▋         | 28/398 [00:01<00:18, 20.22it/s]Loading weights:   9%|▉         | 36/398 [00:02<00:12, 29.08it/s]Loading weights:  10%|█         | 40/398 [00:02<00:12, 27.66it/s]Loading weights:  12%|█▏        | 47/398 [00:02<00:10, 33.80it/s]Loading weights:  13%|█▎        | 51/398 [00:02<00:10, 33.60it/s]Loading weights:  15%|█▍        | 58/398 [00:02<00:08, 39.16it/s]Loading weights:  16%|█▌        | 63/398 [00:02<00:08, 38.93it/s]Loading weights:  17%|█▋        | 69/398 [00:02<00:08, 39.60it/s]Loading weights:  19%|█▊        | 74/398 [00:02<00:08, 39.31it/s]Loading weights:  20%|██        | 80/398 [00:03<00:07, 41.81it/s]Loading weights:  21%|██▏       | 85/398 [00:03<00:07, 40.56it/s]Loading weights:  23%|██▎       | 91/398 [00:03<00:07, 41.98it/s]Loading weights:  24%|██▍       | 96/398 [00:03<00:07, 40.44it/s]Loading weights:  26%|██▌       | 102/398 [00:03<00:06, 42.75it/s]Loading weights:  27%|██▋       | 107/398 [00:03<00:06, 41.88it/s]Loading weights:  28%|██▊       | 112/398 [00:03<00:07, 39.37it/s]Loading weights:  29%|██▉       | 116/398 [00:04<00:07, 36.96it/s]Loading weights:  31%|███       | 124/398 [00:04<00:07, 34.38it/s]Loading weights:  32%|███▏      | 128/398 [00:04<00:09, 27.45it/s]Loading weights:  34%|███▍      | 135/398 [00:04<00:08, 32.81it/s]Loading weights:  35%|███▍      | 139/398 [00:04<00:08, 32.18it/s]Loading weights:  37%|███▋      | 146/398 [00:04<00:07, 33.15it/s]Loading weights:  38%|███▊      | 150/398 [00:05<00:07, 32.05it/s]Loading weights:  39%|███▉      | 157/398 [00:05<00:06, 37.46it/s]Loading weights:  40%|████      | 161/398 [00:05<00:08, 28.71it/s]Loading weights:  42%|████▏     | 168/398 [00:05<00:07, 31.07it/s]Loading weights:  43%|████▎     | 172/398 [00:05<00:08, 27.93it/s]Loading weights:  45%|████▌     | 180/398 [00:06<00:07, 30.45it/s]Loading weights:  46%|████▋     | 185/398 [00:06<00:06, 33.87it/s]Loading weights:  48%|████▊     | 191/398 [00:06<00:05, 35.24it/s]Loading weights:  50%|████▉     | 198/398 [00:06<00:04, 40.26it/s]Loading weights:  51%|█████     | 203/398 [00:06<00:05, 32.94it/s]Loading weights:  53%|█████▎    | 212/398 [00:06<00:04, 40.42it/s]Loading weights:  55%|█████▍    | 217/398 [00:07<00:04, 39.93it/s]Loading weights:  56%|█████▌    | 223/398 [00:07<00:04, 41.83it/s]Loading weights:  57%|█████▋    | 228/398 [00:07<00:04, 39.22it/s]Loading weights:  59%|█████▉    | 234/398 [00:07<00:03, 41.11it/s]Loading weights:  60%|██████    | 239/398 [00:07<00:03, 40.60it/s]Loading weights:  62%|██████▏   | 245/398 [00:07<00:03, 42.21it/s]Loading weights:  63%|██████▎   | 250/398 [00:07<00:03, 40.91it/s]Loading weights:  64%|██████▍   | 256/398 [00:07<00:03, 37.52it/s]Loading weights:  66%|██████▌   | 262/398 [00:08<00:03, 42.37it/s]Loading weights:  67%|██████▋   | 267/398 [00:08<00:02, 43.99it/s]Loading weights:  68%|██████▊   | 272/398 [00:08<00:02, 42.37it/s]Loading weights:  70%|██████▉   | 278/398 [00:08<00:02, 43.42it/s]Loading weights:  71%|███████   | 283/398 [00:08<00:02, 42.22it/s]Loading weights:  72%|███████▏  | 288/398 [00:08<00:02, 41.20it/s]Loading weights:  74%|███████▎  | 293/398 [00:08<00:02, 41.02it/s]Loading weights:  75%|███████▌  | 300/398 [00:08<00:02, 44.19it/s]Loading weights:  77%|███████▋  | 305/398 [00:09<00:02, 42.29it/s]Loading weights:  78%|███████▊  | 311/398 [00:09<00:02, 43.18it/s]Loading weights:  79%|███████▉  | 316/398 [00:09<00:01, 41.54it/s]Loading weights:  81%|████████  | 322/398 [00:09<00:01, 43.09it/s]Loading weights:  82%|████████▏ | 327/398 [00:09<00:01, 41.57it/s]Loading weights:  84%|████████▎ | 333/398 [00:09<00:01, 43.09it/s]Loading weights:  85%|████████▍ | 338/398 [00:09<00:01, 41.81it/s]Loading weights:  86%|████████▋ | 344/398 [00:10<00:01, 43.35it/s]Loading weights:  88%|████████▊ | 349/398 [00:10<00:01, 41.81it/s]Loading weights:  89%|████████▉ | 355/398 [00:10<00:00, 43.65it/s]Loading weights:  90%|█████████ | 360/398 [00:10<00:00, 42.22it/s]Loading weights:  92%|█████████▏| 366/398 [00:10<00:00, 43.84it/s]Loading weights:  93%|█████████▎| 371/398 [00:10<00:00, 41.93it/s]Loading weights:  94%|█████████▍| 376/398 [00:10<00:00, 41.82it/s]Loading weights:  96%|█████████▌| 381/398 [00:10<00:00, 42.48it/s]Loading weights:  97%|█████████▋| 386/398 [00:10<00:00, 43.51it/s]Loading weights:  98%|█████████▊| 391/398 [00:11<00:00, 31.34it/s]Loading weights: 100%|██████████| 398/398 [00:11<00:00, 35.09it/s]
-=== ctx[:500] ===
-Here is a list of facts:
-0. Thomas Kyd was born in the city of London.
-1. The chairperson of Fatah is Mahmoud Abbas.
-2. Amy Winehouse died in the city of Camden Town.
-3. Hines Ward plays the position of wide receiver.
-4. Bengaluru is located in the continent of Asia.
-5. Pedro Pierluisi worked in the city of Washington, D.C..
-6. Rogério Ceni plays the position of goalkeeper.
-7. The director of British Broadcasting Corporation is Tony Hall, Baron Hall of Birkenhead.
-8. Victoria Beckham is married 
-extracted facts: 455 (numbered+fallback)
-  fact[0] Thomas Kyd was born in the city of London.
-  fact[1] The chairperson of Fatah is Mahmoud Abbas.
-  fact[2] Amy Winehouse died in the city of Camden Town.
-  fact[3] Hines Ward plays the position of wide receiver.
-  fact[4] Bengaluru is located in the continent of Asia.
-streaming... THETA=0.7 POOL=512
-chunk 5/12 pool=0 ow=0 ev=0
-chunk 10/12 pool=0 ow=0 ev=0
-chunk 12/12 pool=0 ow=0 ev=0
-write done. pool_final=257 overwrites=198
-Q0: Which sport is goaltender associated with?
-  A: ['pesäpallo']
-  P: pesäpallo
-  m: {'exact_match': True, 'f1': 1.0, 'substring_exact_match': True, 'rougeL_f1': 1.0, 'rougeL_recall': 1.0, 'rougeLsum_f1': 1.0, 'rougeLsum_recall': 1.0}
-Q1: What is Nobuhiro Watsuki famous for?
-  A: ['The Fairly OddParents']
-  P: The Fairly OddParents
-  m: {'exact_match': True, 'f1': 1.0, 'substring_exact_match': True, 'rougeL_f1': 1.0, 'rougeL_recall': 1.0, 'rougeLsum_f1': 1.0, 'rougeLsum_recall': 1.0}
-Q2: Which country was rugby union created in?
-  A: ['India']
-  P: India
-  m: {'exact_match': True, 'f1': 1.0, 'substring_exact_match': True, 'rougeL_f1': 1.0, 'rougeL_recall': 1.0, 'rougeLsum_f1': 1.0, 'rougeLsum_recall': 1.0}
-FINAL groupB2 factconsolidation_sh_6k: SF=1.0000 n=3 pool=257 overwrites=198

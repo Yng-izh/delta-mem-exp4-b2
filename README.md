@@ -113,13 +113,15 @@ HotpotQA dev（dis4，100 题）首个基线：
 | `runs/run_baselines.sh`、`runs/run_mab_baselines.sh` | 两基准的明文/无记忆基线脚本 |
 | `results/RESULTS.md` | **第一版完整实验结果表**（两基准 × 四方法 × 五指标） |
 | `results/<日期>/README.md` + json | 各轮结果与逐题明细 |
-| `logs/<日期>/` | 清洗后的训练/评测日志 + 复现命令 |
+| `logs/2026-10-27/` | 清洗后的训练/评测日志 + 复现命令（唯一保留的日志轮） |
 | `tests/` | 6 个测试文件 263 项断言 |
 
 ## 已废除方案（代码已删，历史见 CHANGELOG 与 git log ≤ e290382）
 
 v5–v9 的自造数据管线（EventQA 窗口、合成事实宇宙、AR/CR 线上 runner、slotpool v6/v7/v8/v9、
-run_manifest、ar_diag 逐题诊断、LME 旧 judge、对应生成器与数据）已全部移除。
+run_manifest、ar_diag 逐题诊断、LME 旧 judge、对应生成器与数据）已全部移除；
+废案时期的跑分明细（results/groupA/groupB2/v6/v7groupB2_*.jsonl、archive、latent_min16_exp2）
+与旧训练日志（logs/ 根下 b2_*/smoke_*）也一并清除。
 废除原因与收束决策见 `ARCHITECTURE.md` §11 与 `CHANGELOG.md`。
 引用 2026-10-27 之前的任何数字前，先确认它出自哪一版管线。
 

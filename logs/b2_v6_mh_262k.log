@@ -1,135 +1,0 @@
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<02:48,  2.35it/s]Loading weights:   1%|▏         | 5/398 [00:00<00:33, 11.71it/s]Loading weights:   4%|▍         | 15/398 [00:00<00:11, 34.27it/s]Loading weights:   6%|▋         | 25/398 [00:00<00:07, 51.57it/s]Loading weights:   8%|▊         | 33/398 [00:00<00:06, 59.21it/s]Loading weights:  10%|█         | 41/398 [00:00<00:05, 64.15it/s]Loading weights:  12%|█▏        | 49/398 [00:01<00:05, 63.12it/s]Loading weights:  15%|█▍        | 59/398 [00:01<00:04, 72.95it/s]Loading weights:  17%|█▋        | 69/398 [00:01<00:04, 79.53it/s]Loading weights:  20%|█▉        | 78/398 [00:01<00:03, 81.90it/s]Loading weights:  22%|██▏       | 87/398 [00:01<00:03, 80.73it/s]Loading weights:  24%|██▍       | 96/398 [00:01<00:03, 78.06it/s]Loading weights:  26%|██▋       | 105/398 [00:01<00:03, 73.97it/s]Loading weights:  29%|██▊       | 114/398 [00:01<00:03, 76.58it/s]Loading weights:  31%|███       | 123/398 [00:01<00:03, 78.16it/s]Loading weights:  33%|███▎      | 132/398 [00:02<00:03, 79.73it/s]Loading weights:  35%|███▌      | 141/398 [00:02<00:03, 75.24it/s]Loading weights:  37%|███▋      | 149/398 [00:02<00:03, 70.63it/s]Loading weights:  40%|███▉      | 158/398 [00:02<00:03, 73.94it/s]Loading weights:  42%|████▏     | 168/398 [00:02<00:03, 75.39it/s]Loading weights:  44%|████▍     | 176/398 [00:02<00:03, 73.63it/s]Loading weights:  46%|████▌     | 184/398 [00:02<00:03, 70.94it/s]Loading weights:  48%|████▊     | 192/398 [00:02<00:03, 65.88it/s]Loading weights:  51%|█████     | 202/398 [00:03<00:02, 72.88it/s]Loading weights:  53%|█████▎    | 211/398 [00:03<00:02, 73.86it/s]Loading weights:  55%|█████▌    | 219/398 [00:03<00:02, 74.55it/s]Loading weights:  57%|█████▋    | 227/398 [00:03<00:02, 73.45it/s]Loading weights:  59%|█████▉    | 235/398 [00:03<00:02, 72.68it/s]Loading weights:  62%|██████▏   | 245/398 [00:03<00:01, 77.32it/s]Loading weights:  64%|██████▎   | 253/398 [00:03<00:01, 75.90it/s]Loading weights:  66%|██████▌   | 261/398 [00:03<00:01, 72.87it/s]Loading weights:  68%|██████▊   | 269/398 [00:04<00:01, 65.76it/s]Loading weights:  70%|███████   | 279/398 [00:04<00:01, 72.07it/s]Loading weights:  73%|███████▎  | 289/398 [00:04<00:01, 75.37it/s]Loading weights:  75%|███████▍  | 297/398 [00:04<00:01, 73.58it/s]Loading weights:  77%|███████▋  | 305/398 [00:04<00:01, 72.00it/s]Loading weights:  79%|███████▊  | 313/398 [00:04<00:01, 66.23it/s]Loading weights:  81%|████████  | 323/398 [00:04<00:01, 71.93it/s]Loading weights:  84%|████████▎ | 333/398 [00:04<00:00, 76.40it/s]Loading weights:  86%|████████▌ | 341/398 [00:04<00:00, 75.76it/s]Loading weights:  88%|████████▊ | 349/398 [00:05<00:00, 73.50it/s]Loading weights:  90%|████████▉ | 357/398 [00:05<00:00, 66.54it/s]Loading weights:  92%|█████████▏| 367/398 [00:05<00:00, 72.49it/s]Loading weights:  95%|█████████▍| 377/398 [00:05<00:00, 77.14it/s]Loading weights:  97%|█████████▋| 385/398 [00:05<00:00, 77.22it/s]Loading weights:  99%|█████████▊| 393/398 [00:05<00:00, 70.27it/s]Loading weights: 100%|██████████| 398/398 [00:05<00:00, 69.49it/s]
-=== ctx[:500] ===
-Here is a list of facts:
-0. The author of Dianetics is L. Ron Hubbard.
-1. The origianl broadcaster of Roseanne is American Broadcasting Company.
-2. Lorenzo Lamas is a citizen of United States of America.
-3. Oberliga Süd is associated with the sport of association football.
-4. Dikembe Mutombo plays the position of center.
-5. Francis, Duke of Cádiz is a citizen of Spain.
-6. The company that produced Windows 7 is Microsoft.
-7. 1986 NBA Playoffs is associated with the sport of basketball.
-8. The aut
-extracted facts: 18333 (numbered+fallback)
-  fact[0] The author of Dianetics is L. Ron Hubbard.
-  fact[1] The origianl broadcaster of Roseanne is American Broadcasting Company.
-  fact[2] Lorenzo Lamas is a citizen of United States of America.
-  fact[3] Oberliga Süd is associated with the sport of association football.
-  fact[4] Dikembe Mutombo plays the position of center.
-streaming... THETA=0.72 POOL=5000
-chunk 5/537 pool=0 ow=0 ev=0
-chunk 10/537 pool=0 ow=0 ev=0
-chunk 15/537 pool=0 ow=0 ev=0
-chunk 20/537 pool=0 ow=0 ev=0
-chunk 25/537 pool=0 ow=0 ev=0
-chunk 30/537 pool=0 ow=0 ev=0
-chunk 35/537 pool=0 ow=0 ev=0
-chunk 40/537 pool=0 ow=0 ev=0
-chunk 45/537 pool=0 ow=0 ev=0
-chunk 50/537 pool=0 ow=0 ev=0
-chunk 55/537 pool=0 ow=0 ev=0
-chunk 60/537 pool=0 ow=0 ev=0
-chunk 65/537 pool=0 ow=0 ev=0
-chunk 70/537 pool=0 ow=0 ev=0
-chunk 75/537 pool=0 ow=0 ev=0
-chunk 80/537 pool=0 ow=0 ev=0
-chunk 85/537 pool=0 ow=0 ev=0
-chunk 90/537 pool=0 ow=0 ev=0
-chunk 95/537 pool=0 ow=0 ev=0
-chunk 100/537 pool=0 ow=0 ev=0
-chunk 105/537 pool=0 ow=0 ev=0
-chunk 110/537 pool=0 ow=0 ev=0
-chunk 115/537 pool=0 ow=0 ev=0
-chunk 120/537 pool=0 ow=0 ev=0
-chunk 125/537 pool=0 ow=0 ev=0
-chunk 130/537 pool=0 ow=0 ev=0
-chunk 135/537 pool=0 ow=0 ev=0
-chunk 140/537 pool=0 ow=0 ev=0
-chunk 145/537 pool=0 ow=0 ev=0
-chunk 150/537 pool=0 ow=0 ev=0
-chunk 155/537 pool=0 ow=0 ev=0
-chunk 160/537 pool=0 ow=0 ev=0
-chunk 165/537 pool=0 ow=0 ev=0
-chunk 170/537 pool=0 ow=0 ev=0
-chunk 175/537 pool=0 ow=0 ev=0
-chunk 180/537 pool=0 ow=0 ev=0
-chunk 185/537 pool=0 ow=0 ev=0
-chunk 190/537 pool=0 ow=0 ev=0
-chunk 195/537 pool=0 ow=0 ev=0
-chunk 200/537 pool=0 ow=0 ev=0
-chunk 205/537 pool=0 ow=0 ev=0
-chunk 210/537 pool=0 ow=0 ev=0
-chunk 215/537 pool=0 ow=0 ev=0
-chunk 220/537 pool=0 ow=0 ev=0
-chunk 225/537 pool=0 ow=0 ev=0
-chunk 230/537 pool=0 ow=0 ev=0
-chunk 235/537 pool=0 ow=0 ev=0
-chunk 240/537 pool=0 ow=0 ev=0
-chunk 245/537 pool=0 ow=0 ev=0
-chunk 250/537 pool=0 ow=0 ev=0
-chunk 255/537 pool=0 ow=0 ev=0
-chunk 260/537 pool=0 ow=0 ev=0
-chunk 265/537 pool=0 ow=0 ev=0
-chunk 270/537 pool=0 ow=0 ev=0
-chunk 275/537 pool=0 ow=0 ev=0
-chunk 280/537 pool=0 ow=0 ev=0
-chunk 285/537 pool=0 ow=0 ev=0
-chunk 290/537 pool=0 ow=0 ev=0
-chunk 295/537 pool=0 ow=0 ev=0
-chunk 300/537 pool=0 ow=0 ev=0
-chunk 305/537 pool=0 ow=0 ev=0
-chunk 310/537 pool=0 ow=0 ev=0
-chunk 315/537 pool=0 ow=0 ev=0
-chunk 320/537 pool=0 ow=0 ev=0
-chunk 325/537 pool=0 ow=0 ev=0
-chunk 330/537 pool=0 ow=0 ev=0
-chunk 335/537 pool=0 ow=0 ev=0
-chunk 340/537 pool=0 ow=0 ev=0
-chunk 345/537 pool=0 ow=0 ev=0
-chunk 350/537 pool=0 ow=0 ev=0
-chunk 355/537 pool=0 ow=0 ev=0
-chunk 360/537 pool=0 ow=0 ev=0
-chunk 365/537 pool=0 ow=0 ev=0
-chunk 370/537 pool=0 ow=0 ev=0
-chunk 375/537 pool=0 ow=0 ev=0
-chunk 380/537 pool=0 ow=0 ev=0
-chunk 385/537 pool=0 ow=0 ev=0
-chunk 390/537 pool=0 ow=0 ev=0
-chunk 395/537 pool=0 ow=0 ev=0
-chunk 400/537 pool=0 ow=0 ev=0
-chunk 405/537 pool=0 ow=0 ev=0
-chunk 410/537 pool=0 ow=0 ev=0
-chunk 415/537 pool=0 ow=0 ev=0
-chunk 420/537 pool=0 ow=0 ev=0
-chunk 425/537 pool=0 ow=0 ev=0
-chunk 430/537 pool=0 ow=0 ev=0
-chunk 435/537 pool=0 ow=0 ev=0
-chunk 440/537 pool=0 ow=0 ev=0
-chunk 445/537 pool=0 ow=0 ev=0
-chunk 450/537 pool=0 ow=0 ev=0
-chunk 455/537 pool=0 ow=0 ev=0
-chunk 460/537 pool=0 ow=0 ev=0
-chunk 465/537 pool=0 ow=0 ev=0
-chunk 470/537 pool=0 ow=0 ev=0
-chunk 475/537 pool=0 ow=0 ev=0
-chunk 480/537 pool=0 ow=0 ev=0
-chunk 485/537 pool=0 ow=0 ev=0
-chunk 490/537 pool=0 ow=0 ev=0
-chunk 495/537 pool=0 ow=0 ev=0
-chunk 500/537 pool=0 ow=0 ev=0
-chunk 505/537 pool=0 ow=0 ev=0
-chunk 510/537 pool=0 ow=0 ev=0
-chunk 515/537 pool=0 ow=0 ev=0
-chunk 520/537 pool=0 ow=0 ev=0
-chunk 525/537 pool=0 ow=0 ev=0
-chunk 530/537 pool=0 ow=0 ev=0
-chunk 535/537 pool=0 ow=0 ev=0
-chunk 537/537 pool=0 ow=0 ev=0
-write done. pool_final=5000 overwrites=4469
-20/100 running SF=0.100
-40/100 running SF=0.150
-60/100 running SF=0.133
-80/100 running SF=0.125
-100/100 running SF=0.130
-FINAL groupB2 factconsolidation_mh_262k: SF=0.1300 n=100 pool=5000 overwrites=4469

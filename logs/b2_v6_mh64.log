@@ -1,54 +1,0 @@
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<03:27,  1.92it/s]Loading weights:   1%|▏         | 5/398 [00:00<00:40,  9.77it/s]Loading weights:   4%|▍         | 15/398 [00:00<00:13, 29.33it/s]Loading weights:   6%|▋         | 25/398 [00:00<00:08, 42.78it/s]Loading weights:   8%|▊         | 33/398 [00:01<00:07, 49.48it/s]Loading weights:  10%|█         | 40/398 [00:01<00:07, 50.84it/s]Loading weights:  12%|█▏        | 48/398 [00:01<00:06, 55.54it/s]Loading weights:  15%|█▍        | 58/398 [00:01<00:05, 63.37it/s]Loading weights:  16%|█▋        | 65/398 [00:01<00:05, 64.54it/s]Loading weights:  18%|█▊        | 72/398 [00:01<00:05, 57.77it/s]Loading weights:  20%|██        | 81/398 [00:01<00:05, 61.68it/s]Loading weights:  23%|██▎       | 91/398 [00:01<00:04, 67.24it/s]Loading weights:  25%|██▍       | 98/398 [00:01<00:04, 67.50it/s]Loading weights:  26%|██▋       | 105/398 [00:02<00:04, 62.47it/s]Loading weights:  29%|██▊       | 114/398 [00:02<00:04, 64.95it/s]Loading weights:  31%|███       | 124/398 [00:02<00:03, 69.30it/s]Loading weights:  33%|███▎      | 132/398 [00:02<00:03, 68.89it/s]Loading weights:  35%|███▍      | 139/398 [00:02<00:04, 62.62it/s]Loading weights:  37%|███▋      | 147/398 [00:02<00:03, 63.10it/s]Loading weights:  39%|███▉      | 155/398 [00:02<00:03, 63.05it/s]Loading weights:  41%|████▏     | 165/398 [00:03<00:03, 69.24it/s]Loading weights:  43%|████▎     | 172/398 [00:03<00:03, 64.15it/s]Loading weights:  45%|████▌     | 180/398 [00:03<00:03, 64.38it/s]Loading weights:  48%|████▊     | 190/398 [00:03<00:03, 68.85it/s]Loading weights:  50%|████▉     | 198/398 [00:03<00:02, 69.15it/s]Loading weights:  52%|█████▏    | 205/398 [00:03<00:02, 64.36it/s]Loading weights:  54%|█████▎    | 213/398 [00:03<00:02, 63.80it/s]Loading weights:  56%|█████▌    | 223/398 [00:03<00:02, 67.48it/s]Loading weights:  58%|█████▊    | 231/398 [00:04<00:02, 67.51it/s]Loading weights:  60%|█████▉    | 238/398 [00:04<00:02, 64.04it/s]Loading weights:  62%|██████▏   | 246/398 [00:04<00:02, 64.13it/s]Loading weights:  64%|██████▍   | 256/398 [00:04<00:02, 67.88it/s]Loading weights:  66%|██████▋   | 264/398 [00:04<00:01, 68.04it/s]Loading weights:  68%|██████▊   | 271/398 [00:04<00:01, 64.03it/s]Loading weights:  70%|███████   | 279/398 [00:04<00:01, 64.32it/s]Loading weights:  73%|███████▎  | 289/398 [00:04<00:01, 68.90it/s]Loading weights:  74%|███████▍  | 296/398 [00:04<00:01, 68.06it/s]Loading weights:  76%|███████▌  | 303/398 [00:05<00:01, 60.98it/s]Loading weights:  78%|███████▊  | 312/398 [00:05<00:01, 64.80it/s]Loading weights:  81%|████████  | 322/398 [00:05<00:01, 68.60it/s]Loading weights:  83%|████████▎ | 329/398 [00:05<00:01, 68.89it/s]Loading weights:  84%|████████▍ | 336/398 [00:05<00:01, 61.73it/s]Loading weights:  87%|████████▋ | 345/398 [00:05<00:00, 65.35it/s]Loading weights:  89%|████████▉ | 355/398 [00:05<00:00, 69.42it/s]Loading weights:  91%|█████████ | 363/398 [00:05<00:00, 69.00it/s]Loading weights:  93%|█████████▎| 370/398 [00:06<00:00, 65.62it/s]Loading weights:  95%|█████████▍| 378/398 [00:06<00:00, 65.76it/s]Loading weights:  97%|█████████▋| 388/398 [00:06<00:00, 71.58it/s]Loading weights:  99%|█████████▉| 396/398 [00:06<00:00, 70.64it/s]Loading weights: 100%|██████████| 398/398 [00:06<00:00, 61.43it/s]
-=== ctx[:500] ===
-Here is a list of facts:
-0. Glenn L. Martin Company was founded by Glenn L. Martin.
-1. Ian Marter died in the city of London.
-2. Katniss Everdeen was created by Suzanne Collins.
-3. Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglicanism.
-4. Edward Cullen was performed by Robert Pattinson.
-5. Macbeth was created by William Shakespeare.
-6. Shawn Bradley plays the position of center.
-7. The author of Red Storm Rising is Tom Clancy.
-8. Meilen Tu is a citizen of United St
-extracted facts: 4580 (numbered+fallback)
-  fact[0] Glenn L. Martin Company was founded by Glenn L. Martin.
-  fact[1] Ian Marter died in the city of London.
-  fact[2] Katniss Everdeen was created by Suzanne Collins.
-  fact[3] Princess Alice, Duchess of Gloucester is affiliated with the religion of Anglica
-  fact[4] Edward Cullen was performed by Robert Pattinson.
-streaming... THETA=0.72 POOL=5000
-chunk 5/131 pool=0 ow=0 ev=0
-chunk 10/131 pool=0 ow=0 ev=0
-chunk 15/131 pool=0 ow=0 ev=0
-chunk 20/131 pool=0 ow=0 ev=0
-chunk 25/131 pool=0 ow=0 ev=0
-chunk 30/131 pool=0 ow=0 ev=0
-chunk 35/131 pool=0 ow=0 ev=0
-chunk 40/131 pool=0 ow=0 ev=0
-chunk 45/131 pool=0 ow=0 ev=0
-chunk 50/131 pool=0 ow=0 ev=0
-chunk 55/131 pool=0 ow=0 ev=0
-chunk 60/131 pool=0 ow=0 ev=0
-chunk 65/131 pool=0 ow=0 ev=0
-chunk 70/131 pool=0 ow=0 ev=0
-chunk 75/131 pool=0 ow=0 ev=0
-chunk 80/131 pool=0 ow=0 ev=0
-chunk 85/131 pool=0 ow=0 ev=0
-chunk 90/131 pool=0 ow=0 ev=0
-chunk 95/131 pool=0 ow=0 ev=0
-chunk 100/131 pool=0 ow=0 ev=0
-chunk 105/131 pool=0 ow=0 ev=0
-chunk 110/131 pool=0 ow=0 ev=0
-chunk 115/131 pool=0 ow=0 ev=0
-chunk 120/131 pool=0 ow=0 ev=0
-chunk 125/131 pool=0 ow=0 ev=0
-chunk 130/131 pool=0 ow=0 ev=0
-chunk 131/131 pool=0 ow=0 ev=0
-write done. pool_final=2826 overwrites=1754
-20/100 running SF=0.500
-40/100 running SF=0.575
-60/100 running SF=0.533
-80/100 running SF=0.575
-100/100 running SF=0.590
-FINAL groupB2 factconsolidation_mh_64k: SF=0.5900 n=100 pool=2826 overwrites=1754

@@ -1,75 +1,0 @@
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<03:26,  1.92it/s]Loading weights:   1%|▏         | 5/398 [00:00<00:40,  9.63it/s]Loading weights:   4%|▍         | 15/398 [00:00<00:13, 28.56it/s]Loading weights:   6%|▋         | 25/398 [00:00<00:09, 41.38it/s]Loading weights:   8%|▊         | 33/398 [00:01<00:07, 49.01it/s]Loading weights:  10%|█         | 40/398 [00:01<00:07, 50.66it/s]Loading weights:  12%|█▏        | 48/398 [00:01<00:06, 55.95it/s]Loading weights:  15%|█▍        | 58/398 [00:01<00:05, 63.96it/s]Loading weights:  16%|█▋        | 65/398 [00:01<00:05, 65.08it/s]Loading weights:  18%|█▊        | 72/398 [00:01<00:05, 60.64it/s]Loading weights:  20%|██        | 81/398 [00:01<00:04, 65.50it/s]Loading weights:  23%|██▎       | 91/398 [00:01<00:04, 70.23it/s]Loading weights:  25%|██▍       | 99/398 [00:01<00:04, 69.00it/s]Loading weights:  27%|██▋       | 107/398 [00:02<00:04, 67.13it/s]Loading weights:  29%|██▊       | 114/398 [00:02<00:04, 65.16it/s]Loading weights:  31%|███       | 124/398 [00:02<00:03, 69.82it/s]Loading weights:  33%|███▎      | 132/398 [00:02<00:03, 69.33it/s]Loading weights:  35%|███▍      | 139/398 [00:02<00:04, 64.38it/s]Loading weights:  37%|███▋      | 147/398 [00:02<00:03, 65.24it/s]Loading weights:  39%|███▉      | 157/398 [00:02<00:03, 70.30it/s]Loading weights:  41%|████▏     | 165/398 [00:02<00:03, 69.65it/s]Loading weights:  43%|████▎     | 172/398 [00:03<00:03, 65.26it/s]Loading weights:  45%|████▌     | 180/398 [00:03<00:03, 64.88it/s]Loading weights:  48%|████▊     | 190/398 [00:03<00:02, 69.34it/s]Loading weights:  49%|████▉     | 197/398 [00:03<00:02, 68.27it/s]Loading weights:  51%|█████▏    | 204/398 [00:03<00:03, 61.11it/s]Loading weights:  54%|█████▎    | 213/398 [00:03<00:02, 64.85it/s]Loading weights:  56%|█████▌    | 223/398 [00:03<00:02, 69.43it/s]Loading weights:  58%|█████▊    | 231/398 [00:03<00:02, 69.58it/s]Loading weights:  60%|█████▉    | 238/398 [00:04<00:02, 64.97it/s]Loading weights:  62%|██████▏   | 246/398 [00:04<00:02, 65.23it/s]Loading weights:  64%|██████▍   | 256/398 [00:04<00:02, 69.63it/s]Loading weights:  66%|██████▌   | 263/398 [00:04<00:02, 65.42it/s]Loading weights:  68%|██████▊   | 270/398 [00:04<00:02, 63.06it/s]Loading weights:  70%|███████   | 279/398 [00:04<00:01, 65.42it/s]Loading weights:  73%|███████▎  | 289/398 [00:04<00:01, 68.95it/s]Loading weights:  75%|███████▍  | 297/398 [00:04<00:01, 68.93it/s]Loading weights:  76%|███████▋  | 304/398 [00:05<00:01, 64.62it/s]Loading weights:  78%|███████▊  | 312/398 [00:05<00:01, 64.48it/s]Loading weights:  81%|████████  | 322/398 [00:05<00:01, 69.02it/s]Loading weights:  83%|████████▎ | 329/398 [00:05<00:01, 68.89it/s]Loading weights:  84%|████████▍ | 336/398 [00:05<00:00, 62.11it/s]Loading weights:  87%|████████▋ | 345/398 [00:05<00:00, 65.65it/s]Loading weights:  89%|████████▉ | 355/398 [00:05<00:00, 69.89it/s]Loading weights:  91%|█████████ | 363/398 [00:05<00:00, 69.30it/s]Loading weights:  93%|█████████▎| 370/398 [00:06<00:00, 64.19it/s]Loading weights:  95%|█████████▍| 378/398 [00:06<00:00, 63.54it/s]Loading weights:  97%|█████████▋| 388/398 [00:06<00:00, 68.25it/s]Loading weights:  99%|█████████▉| 396/398 [00:06<00:00, 67.96it/s]Loading weights: 100%|██████████| 398/398 [00:06<00:00, 61.79it/s]
-=== ctx[:500] ===
-Here is a list of facts:
-0. Thomas Kyd was born in the city of London.
-1. The chairperson of Fatah is Mahmoud Abbas.
-2. Amy Winehouse died in the city of Camden Town.
-3. Hines Ward plays the position of wide receiver.
-4. Bengaluru is located in the continent of Asia.
-5. Pedro Pierluisi worked in the city of Washington, D.C..
-6. Rogério Ceni plays the position of goalkeeper.
-7. The director of British Broadcasting Corporation is Tony Hall, Baron Hall of Birkenhead.
-8. Victoria Beckham is married 
-extracted facts: 455 (numbered+fallback)
-  fact[0] Thomas Kyd was born in the city of London.
-  fact[1] The chairperson of Fatah is Mahmoud Abbas.
-  fact[2] Amy Winehouse died in the city of Camden Town.
-  fact[3] Hines Ward plays the position of wide receiver.
-  fact[4] Bengaluru is located in the continent of Asia.
-streaming... THETA=0.72 POOL=5000
-chunk 5/12 pool=0 ow=0 ev=0
-chunk 10/12 pool=0 ow=0 ev=0
-chunk 12/12 pool=0 ow=0 ev=0
-write done. pool_final=292 overwrites=163
-[smoke] Q0 block_lines=3 block_chars=142
-[smoke] Q0 input_tokens=241
-Q0: What is the country of citizenship of the spouse of the author of Our Mutual Friend?
-  A: ['Belgium']
-  P: Belgium
-[smoke] Q1 block_lines=2 block_chars=90
-[smoke] Q1 input_tokens=229
-Q1: In which location did the spouse of Igor of Kiev pass away?
-  A: ['Rodez']
-  P: Rodez
-[smoke] Q2 block_lines=3 block_chars=168
-[smoke] Q2 input_tokens=239
-Q2: Which country is the birthplace of the sport associated with Steve Sax?
-  A: ['Italy']
-  P: Italy
-[smoke] Q3 block_lines=7 block_chars=424
-[smoke] Q3 input_tokens=303
-Q3: Which city serves as the capital of the country of origin for the sport of the Tunisia national football team?
-  A: ['Russellville']
-  P: Oderzo
-[smoke] Q4 block_lines=8 block_chars=418
-[smoke] Q4 input_tokens=319
-Q4: What is the sport that Blair Walsh plays in which he is known for his position on the team?
-  A: ['rugby']
-  P: Rugby
-[smoke] Q5 block_lines=4 block_chars=295
-[smoke] Q5 input_tokens=283
-Q5: What is the name of the educational institution where the partner of Nicolae Ceaușescu was educated?
-  A: ['Baldwin Wallace University']
-  P: Baldwin Wallace University
-[smoke] Q6 block_lines=4 block_chars=197
-[smoke] Q6 input_tokens=249
-Q6: Which country does the current CEO of Twitter hold citizenship of?
-  A: ['France']
-  P: France
-[smoke] Q7 block_lines=1 block_chars=51
-[smoke] Q7 input_tokens=214
-Q7: On which continent was the place of birth of Thomas Arne located?
-  A: ['Oceania']
-  P: Answer: Asia
-[smoke] Q8 block_lines=3 block_chars=151
-[smoke] Q8 input_tokens=242
-Q8: To which continent does the country of citizenship of Colin Irwin pertain?
-  A: ['North America']
-  P: North America
-[smoke] Q9 block_lines=3 block_chars=159
-[smoke] Q9 input_tokens=246
-Q9: What is the location of work of the founder of the religion to which John Walsh belongs?
-  A: ['Berlin']
-  P: Berlin
-FINAL groupB2 factconsolidation_mh_6k: SF=0.8000 n=10 pool=292 overwrites=163

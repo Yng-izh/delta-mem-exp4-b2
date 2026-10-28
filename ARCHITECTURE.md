@@ -275,3 +275,5 @@ train_latent_memory.py --fst ...     # 独立入口，不改动阶段 A 的 trai
 | diag1_golden_chunk / diag2_sim_dist / smoke_b2 | 一次性诊断脚本，结论已固化进文档 |
 | tools/gen_fact_universe、gen_latent_exp2/min16、summarize_sweep、audit_mutations、demo_facts | 合成数据生成器/审计，玩具数据只留 smoke（fst_update + gen_synth_qa 仍在） |
 | synth/latent_exp2_*、synth/latent_min16 | 对应废案的数据 |
+| results/ 废案产物：groupA/groupB2/v6/v7groupB2_*.jsonl、summary_ar_v8.md、diag2_sim_summary.json、results/archive/、latent_min16_exp2_2026-10-24/ | 旧 B2/AR 管线的跑分明细，不支撑当前四方法结论；考古可查 git 历史 |
+| logs/ 根下 b2_*/dryrun_*/smoke_* 日志与 .pid/.start 文件 | 旧 B2 管线的训练日志，仅 v6/v7 runner 使用 |

@@ -1,30 +1,0 @@
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<03:29,  1.90it/s]Loading weights:   1%|▏         | 5/398 [00:00<00:41,  9.52it/s]Loading weights:   4%|▍         | 15/398 [00:00<00:13, 28.16it/s]Loading weights:   6%|▋         | 25/398 [00:00<00:08, 42.41it/s]Loading weights:   8%|▊         | 31/398 [00:01<00:07, 46.18it/s]Loading weights:   9%|▉         | 37/398 [00:01<00:07, 48.84it/s]Loading weights:  12%|█▏        | 47/398 [00:01<00:06, 57.59it/s]Loading weights:  14%|█▎        | 54/398 [00:01<00:05, 57.68it/s]Loading weights:  15%|█▌        | 61/398 [00:01<00:05, 57.56it/s]Loading weights:  18%|█▊        | 70/398 [00:01<00:05, 62.67it/s]Loading weights:  20%|██        | 80/398 [00:01<00:04, 67.94it/s]Loading weights:  22%|██▏       | 88/398 [00:01<00:04, 67.90it/s]Loading weights:  24%|██▍       | 95/398 [00:01<00:04, 63.60it/s]Loading weights:  26%|██▌       | 103/398 [00:02<00:04, 63.70it/s]Loading weights:  28%|██▊       | 113/398 [00:02<00:04, 68.64it/s]Loading weights:  30%|███       | 120/398 [00:02<00:04, 68.65it/s]Loading weights:  32%|███▏      | 127/398 [00:02<00:04, 61.54it/s]Loading weights:  34%|███▍      | 136/398 [00:02<00:04, 65.27it/s]Loading weights:  37%|███▋      | 146/398 [00:02<00:03, 70.23it/s]Loading weights:  39%|███▊      | 154/398 [00:02<00:03, 68.76it/s]Loading weights:  40%|████      | 161/398 [00:02<00:03, 65.25it/s]Loading weights:  42%|████▏     | 169/398 [00:03<00:03, 66.04it/s]Loading weights:  45%|████▍     | 179/398 [00:03<00:03, 70.73it/s]Loading weights:  47%|████▋     | 187/398 [00:03<00:03, 69.20it/s]Loading weights:  49%|████▊     | 194/398 [00:03<00:03, 65.07it/s]Loading weights:  51%|█████     | 202/398 [00:03<00:03, 65.27it/s]Loading weights:  53%|█████▎    | 212/398 [00:03<00:02, 69.57it/s]Loading weights:  55%|█████▌    | 219/398 [00:03<00:02, 68.83it/s]Loading weights:  57%|█████▋    | 226/398 [00:03<00:02, 62.58it/s]Loading weights:  59%|█████▉    | 235/398 [00:04<00:02, 65.84it/s]Loading weights:  62%|██████▏   | 245/398 [00:04<00:02, 69.40it/s]Loading weights:  63%|██████▎   | 252/398 [00:04<00:02, 68.78it/s]Loading weights:  65%|██████▌   | 259/398 [00:04<00:02, 62.04it/s]Loading weights:  67%|██████▋   | 268/398 [00:04<00:02, 64.35it/s]Loading weights:  70%|██████▉   | 278/398 [00:04<00:01, 69.44it/s]Loading weights:  72%|███████▏  | 285/398 [00:04<00:01, 69.41it/s]Loading weights:  73%|███████▎  | 292/398 [00:04<00:01, 62.69it/s]Loading weights:  76%|███████▌  | 301/398 [00:05<00:01, 66.22it/s]Loading weights:  78%|███████▊  | 311/398 [00:05<00:01, 70.79it/s]Loading weights:  80%|████████  | 319/398 [00:05<00:01, 68.85it/s]Loading weights:  82%|████████▏ | 326/398 [00:05<00:01, 64.16it/s]Loading weights:  84%|████████▍ | 334/398 [00:05<00:00, 64.89it/s]Loading weights:  86%|████████▋ | 344/398 [00:05<00:00, 69.26it/s]Loading weights:  88%|████████▊ | 352/398 [00:05<00:00, 68.45it/s]Loading weights:  90%|█████████ | 359/398 [00:05<00:00, 64.59it/s]Loading weights:  92%|█████████▏| 367/398 [00:06<00:00, 64.39it/s]Loading weights:  95%|█████████▍| 377/398 [00:06<00:00, 67.87it/s]Loading weights:  96%|█████████▋| 384/398 [00:06<00:00, 68.30it/s]Loading weights:  98%|█████████▊| 391/398 [00:06<00:00, 60.41it/s]Loading weights: 100%|██████████| 398/398 [00:06<00:00, 61.41it/s]
-=== ctx[:500] ===
-Here is a list of facts:
-0. Thomas Kyd was born in the city of London.
-1. The chairperson of Fatah is Mahmoud Abbas.
-2. Amy Winehouse died in the city of Camden Town.
-3. Hines Ward plays the position of wide receiver.
-4. Bengaluru is located in the continent of Asia.
-5. Pedro Pierluisi worked in the city of Washington, D.C..
-6. Rogério Ceni plays the position of goalkeeper.
-7. The director of British Broadcasting Corporation is Tony Hall, Baron Hall of Birkenhead.
-8. Victoria Beckham is married 
-extracted facts: 455 (numbered+fallback)
-  fact[0] Thomas Kyd was born in the city of London.
-  fact[1] The chairperson of Fatah is Mahmoud Abbas.
-  fact[2] Amy Winehouse died in the city of Camden Town.
-  fact[3] Hines Ward plays the position of wide receiver.
-  fact[4] Bengaluru is located in the continent of Asia.
-streaming... THETA=0.72 POOL=5000
-chunk 5/12 pool=0 ow=0 ev=0
-chunk 10/12 pool=0 ow=0 ev=0
-chunk 12/12 pool=0 ow=0 ev=0
-write done. pool_final=292 overwrites=163
-20/100 running SF=0.750
-40/100 running SF=0.775
-60/100 running SF=0.717
-80/100 running SF=0.688
-100/100 running SF=0.670
-FINAL groupB2 factconsolidation_mh_6k: SF=0.6700 n=100 pool=292 overwrites=163
