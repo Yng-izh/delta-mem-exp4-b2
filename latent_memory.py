@@ -518,19 +518,32 @@ class LatentRouter(nn.Module):
         z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
         z = z.to(device=q_vec.device, dtype=q_vec.dtype)
         n = max(1, min(int(n_hops), int(z.shape[1])))
-        used = torch.zeros(int(z.shape[1]), dtype=torch.bool, device=z.device)
+        # 用 Python set 记录已选槽，**不能**用张量就地写 used[idx]=True：
+        # 那个 bool 张量被上一跳的 masked_fill 引用进了计算图，就地改它会触发
+        #   RuntimeError: one of the variables needed for gradient computation
+        #   has been modified by an inplace operation: [CPUBoolType [1, 8]] version 2
+        # （这正是 10k 正训一 backward 就会炸的地方，冒烟先撞出来了）。
+        used_idx: set = set()
         z_list: List[torch.Tensor] = []
         logits_list: List[torch.Tensor] = []
         picks: List[int] = []
         for _ in range(n):
             logits = self.scores(q_vec, k_in)                          # [1,K]
-            logits = logits.masked_fill(used.unsqueeze(0), float("-inf"))
+            if used_idx:
+                mask = torch.zeros_like(logits, dtype=torch.bool)
+                mask[0, sorted(used_idx)] = True
+                logits = logits.masked_fill(mask, float("-inf"))
             idx = logits.argmax(dim=-1)                                # [1]
-            used[int(idx[0].item())] = True
+            used_idx.add(int(idx[0].item()))
             z_hard = z[0, idx]                                         # [1,m,d]
             if not (hard or not self.training):
                 w = torch.softmax(logits, dim=-1)
-                z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach()).unsqueeze(0)
+                # einsum "bk,bkmd->bmd" 出来已经是 [1,m,d]（b 维保留），
+                # 旧代码又 unsqueeze(0) 成 [1,1,m,d]；与 [1,m,d] 的 z_hard 相加时
+                # 广播成四维，一路传到 bridge(z) 才炸：
+                #   ValueError: z 必须是 [B,L,d] 或 [L,d]，得到 (1, 1, 4, 64)
+                # 单跳路径（同文件 497 行）没有这次 unsqueeze —— 两处必须一致。
+                z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach())
                 z_hard = z_hard + (z_soft - z_soft.detach())
             z_list.append(z_hard)
             logits_list.append(logits)
@@ -568,6 +581,13 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
     nl = emb(_tokenize_no_special(tokenizer, "\n", dev))
     pieces = []
     for j, zj in enumerate(z_list):
+        if not torch.is_tensor(zj):
+            raise TypeError(f"compose_routed_soft 第 {j} 个载荷不是张量：{type(zj)}")
+        if zj.dim() == 4:
+            # 单跳/多跳都要交 [B,m,d]。四维几乎一定是"索引时保留了多余维度"，
+            # 静默 squeeze 会掩盖上游 bug，这里直接报出来。
+            raise ValueError(f"compose_routed_soft 第 {j} 个载荷是四维 {tuple(zj.shape)}，"
+                             f"应为 [B,m,d]")
         if j:
             pieces.append(nl)
         s = bridge(zj)
@@ -998,7 +1018,7 @@ class FstRouter(nn.Module):
         wv_all = torch.softmax(lg_ver_all, dim=-1)                  # [G,V]
         zf = z_all.flatten(-2).detach()                             # [G,V,m*d]
         for j, g in enumerate(groups):
-            z_soft = torch.einsum("v,gvd->d", wv_all[g],
+            z_soft = torch.einsum("v,vd->d", wv_all[g],
                                   zf[g].to(device=wv_all.device, dtype=wv_all.dtype)
                                   ).reshape(1, self.n_slots, self.d_model)
             # STE 要求前向数值与推理逐位一致：转回载荷精度/设备再做"梯度直通"，

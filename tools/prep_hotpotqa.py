@@ -174,8 +174,9 @@ def build_item(rec, n_distractors=8, order="natural", rng=None, qid=None):
                  if u]
     leak = bool(a_norm) and any(a_norm in _norm(u) for u in dis_units)
     qtype = str(rec.get("type") or "")
+    hops = 2 if qtype in ("bridge", "comparison") else 1
     return {
-        "kind": "hotpot", "hops": 2 if qtype in ("bridge", "comparison") else 1,
+        "kind": "hotpot", "hops": hops,
         "memory": " ".join(units), "units": list(units),
         "unit_meta": umeta,
         "question": str(rec["question"]).strip(), "answer": str(ans).strip(),
@@ -184,7 +185,10 @@ def build_item(rec, n_distractors=8, order="natural", rng=None, qid=None):
                  "type": qtype, "level": str(rec.get("level") or ""),
                  "n_gold_paras": len(gold_idx), "n_distractor_paras": n_dis,
                  "order": order, "n_units": len(units),
-                 "n_gold_units": len(units) - len(dis_units), "leak": leak},
+                 "n_gold_units": len(units) - len(dis_units), "leak": leak,
+                 # hops 同时写进 meta：分层统计（2 跳子集单报指标）要用；
+                 # 只写在 item 顶层时，下游脚本很容易漏读，落表时才发现没有。
+                 "hops": hops},
     }
 
 

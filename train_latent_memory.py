@@ -75,6 +75,27 @@ import torch.nn.functional as F
 
 import latent_memory as LM
 
+
+_HOP_TYPES = ("bridge", "comparison")
+
+
+def item_hops(rec):
+    """样本的 hops（跳数）唯一入口：item["hops"] → meta["type"] → 1。
+
+    旧写法是 `int(item.get("hops", 1) or 1)`：转换器没写该字段的数据（老 synth
+    文件、MAB-CR）会被静默当成单跳，于是训练侧的 per-hop 监督、推理侧的路由链长
+    整段失效 —— 而实验结论正是"多跳是否有用"，这个默认值错一次结论就反了。
+    bridge/comparison 是 HotpotQA 的多跳类型，从 type 兜底是安全的。
+    """
+    v = rec.get("hops")
+    try:
+        if v:
+            return max(1, int(v))
+    except (TypeError, ValueError):
+        pass
+    t = str((rec.get("meta") or {}).get("type") or "").strip().lower()
+    return 2 if t in _HOP_TYPES else 1
+
 BASE = ("/share/hf_home/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/"
         "cdbee75f17c01a7cc42f958dc650907174af0554")
 ADAPTER = ("/share/hf_home/hub/models--declare-lab--delta-mem_qwen3_4b-instruct/snapshots/"
@@ -222,7 +243,7 @@ def load_synth_jsonl(path, limit=0, seed=0):
                 # 也出现过，实测会把 13.5% 的寻址标签标错 —— router 直接被教歪。
                 "evidence": [str(e).strip() for e in ev if str(e).strip()],
                 "cf": bool(rec.get("cf", False)),
-                "hops": int(rec.get("hops") or 1),
+                "hops": item_hops(rec),
                 "cluster": meta.get("cluster", (meta.get("clusters") or [None])[0]),
                 # ---- FST-Mem（阶段 B）需要的结构化字段 ----
                 # unit_meta 与 units **逐条对齐**：每条记忆单元属于哪个 (实体,属性)、
@@ -596,6 +617,60 @@ def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
     return loss
 
 
+def _safe_qfeat(model, tokenizer, question, system_prompt, layer, dev):
+    """预取线程里跑的问题特征前向：异常一律吞掉。
+
+    预取只是加速，**不能**因为它让训练挂掉 —— 真出问题主线程会自己再算一遍。
+    """
+    try:
+        query_feature_cached(model, tokenizer, question, system_prompt, layer, dev)
+    except Exception:
+        pass
+
+
+def pack_student_batch(pairs):
+    """若干净样本 (embeds[1,L,d], labels[1,L]) -> 右补 padding 的一个 batch。
+
+    必须补成 batch 而不是沿序列维 cat：这些是**独立**样本，拼成一条长序列会让
+    后面的样本通过 attention 看到前面的记忆（数据泄漏，训练分布与推理不一致）。
+    padding 位置 labels 置 -100（qa_loss 不看），mask 置 0。
+    """
+    L = max(int(e.shape[1]) for e, _ in pairs)
+    d = pairs[0][0].shape[-1]
+    dev, dtype = pairs[0][0].device, pairs[0][0].dtype
+    embs, labs, masks = [], [], []
+    for e, l in pairs:
+        n = int(e.shape[1]); pad = L - n
+        if pad:
+            e = torch.cat([e, torch.zeros(1, pad, d, device=dev, dtype=dtype)], dim=1)
+            l = torch.cat([l, torch.full((1, pad), -100, dtype=torch.long, device=dev)], dim=1)
+        embs.append(e); labs.append(l)
+        masks.append(torch.cat([torch.ones(1, n, dtype=torch.long, device=dev),
+                                torch.zeros(1, pad, dtype=torch.long, device=dev)], dim=1))
+    return torch.cat(embs, 0), torch.cat(labs, 0), torch.cat(masks, 0)
+
+
+def _packed_student_step(args, model, pend, recon_stage):
+    """把 pack 条样本的 student 前向合成**一次** 4B 前反向（--pack）。
+
+    动机：逐条跑 4B 前反向，GPU 利用率只有 31%（序列才 ~100 token，kernel 启动
+    与同步主导），把 4 条并成一个 batch 才能让 TensorCore 吃满。
+    """
+    embs, labs, mask = pack_student_batch([(p["emb"], p["lab"]) for p in pend])
+    with LM.delta_write_disabled(model):
+        s_logits = model(inputs_embeds=embs, attention_mask=mask, use_cache=False).logits
+    loss_qa = qa_loss(s_logits, labs)
+    addr = [p["addr"] for p in pend if p["addr"] is not None]
+    loss_addr = torch.stack(addr).mean() if addr else None
+    rec = [p["rec"] for p in pend if p["rec"] is not None]
+    loss_r = torch.stack(rec).mean() if rec else None
+    loss = assemble_loss(loss_qa, loss_addr, None, loss_r,
+                         addr_weight=args.addr_weight, kl_weight=0.0,
+                         recon_weight=args.recon_weight, recon_stage=recon_stage)
+    (loss / args.accum).backward()
+    return loss_qa, loss_addr, loss_r
+
+
 def qa_loss(logits, labels):
     """标准 Causal LM 交叉熵，只对答案 token（labels != -100）计算。"""
     shift_logits = logits[:, :-1].reshape(-1, logits.shape[-1])
@@ -802,7 +877,7 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
             router=router, layer=layer,
             # 多跳样本必须走链式选槽；否则只读第一跳，两跳题永远不可能对
-            hops=max(1, int(item.get("hops", 1) or 1)))
+            hops=item_hops(item))
         n += 1
         gold = item["answer"]
         if isinstance(gold, list):
@@ -901,6 +976,29 @@ def _peak_mb():
     return torch.cuda.max_memory_allocated() / 2 ** 20
 
 
+def _ensure_delta_compat():
+    """幂等注入 deltamem 兼容占位模块，返回是否可用。
+
+    `deltamem.core` 顶层硬依赖 `transformers.models.smollm3`（4.51 无此子包）。
+    真实主干加载走 `_load_backbone` → `deltamem_compat` 时才有这个占位；
+    但两条路绕过了它，冒烟把它们都撞出来了：
+      1. `--smoke-model` 在 `_load_backbone` 里提前 return，注入从未发生；
+      2. 本文件两处直接 `from deltamem.core...`（reset_delta_state 与
+         eval-after-reset）没先过兼容层 —— 前者被 try/except 吞掉（delta 状态
+         没清，评估被上一题污染），后者直接 ModuleNotFoundError 崩掉。
+    """
+    if getattr(_ensure_delta_compat, "_done", False):
+        return True
+    try:
+        import deltamem_compat as DMC
+        DMC.import_delta_mem()
+        _ensure_delta_compat._done = True
+        return True
+    except Exception as e:
+        print(f"[compat][warn] deltamem 兼容层注入失败：{e}", flush=True)
+        return False
+
+
 def reset_delta_state(model):
     """清空 Delta-Mem 在线状态（**每条样本前必须调用**）。
 
@@ -913,6 +1011,7 @@ def reset_delta_state(model):
     """
     if model is None:
         return False
+    _ensure_delta_compat()
     try:
         from deltamem.core.delta import reset_delta_mem_states as _r
     except Exception:
@@ -922,6 +1021,60 @@ def reset_delta_state(model):
         return True
     except Exception:
         return False
+
+
+def _pick_dtype(name="auto"):
+    """按显卡能力选主干精度，而不是写死。
+
+    旧代码硬编码 bfloat16：A100/H100 上是原生路径（快、稳）；但 V100/T4 没有
+    bf16 指令，只能走模拟执行，白白变慢。新机器是 A100-40G，所以 auto 会选
+    bf16；换回老卡时自动落到 fp16，不需要改代码。
+    """
+    name = str(name or "auto").lower()
+    if name in ("bf16", "bfloat16"):
+        return torch.bfloat16
+    if name in ("fp16", "float16", "half"):
+        return torch.float16
+    if name in ("fp32", "float32"):
+        return torch.float32
+    if torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)():
+        return torch.bfloat16
+    return torch.float16 if torch.cuda.is_available() else torch.float32
+
+
+def _setup_tf32(enabled=True):
+    """Ampere+（A100）开 TF32：矩阵乘走 TensorCore，本任务精度损失可忽略。
+
+    旧机器不必开（V100 无 TF32）；新机器不开等于白放一半算力。
+    """
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = bool(enabled)
+        torch.backends.cudnn.allow_tf32 = bool(enabled)
+        if enabled:
+            print("[gpu] 已启用 TF32（Ampere+ TensorCore）", flush=True)
+    except Exception:
+        pass
+
+
+def gpu_report(args, need_gb=14.0):
+    """启动即报显存实况。
+
+    目标机是 2×A100-40G 但**被别人占了约 30G**，实际可用 ~10G，而 4B 主干的
+    bf16 权重就要 7.6G。不提前报数，用户只会拿到一句 CUDA out of memory。
+    """
+    if not torch.cuda.is_available():
+        print("[gpu] 无 CUDA，走 CPU（只适合 --smoke-model 自检）", flush=True)
+        return
+    idx = int(str(getattr(args, "gpu", "0")).split(",")[0])
+    name = torch.cuda.get_device_name(idx)
+    free, total = torch.cuda.mem_get_info(idx)
+    free_gb, total_gb = free / 2 ** 30, total / 2 ** 30
+    print(f"[gpu] cuda:{idx} {name} 总 {total_gb:.1f}G / 空闲 {free_gb:.1f}G", flush=True)
+    if free_gb < need_gb:
+        print(f"[gpu][warn] 空闲 {free_gb:.1f}G < 建议 {need_gb:.0f}G"
+              f"（主干 bf16 权重 ~7.6G + 激活）。建议 --grad-checkpointing、"
+              f"--max-slots 0、--accum 8、--max-unit-tokens 32；"
+              f"仍 OOM 就等其它进程释放显卡", flush=True)
 
 
 def _load_backbone(args, dev=None):
@@ -946,9 +1099,12 @@ def _load_backbone(args, dev=None):
         return model, tokenizer, dev, hidden
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.base)
+    _dtype = _pick_dtype(getattr(args, "dtype", "auto"))
     model = AutoModelForCausalLM.from_pretrained(
-        args.base, torch_dtype=torch.bfloat16, device_map=f"cuda:{args.gpu}",
+        args.base, torch_dtype=_dtype, device_map=f"cuda:{args.gpu}",
         attn_implementation="sdpa")
+    print(f"[gpu] 主干精度 {str(_dtype).replace('torch.', '')}"
+          f"（--dtype {getattr(args, 'dtype', 'auto')}；A100 走原生 bf16）", flush=True)
     if not args.no_adapter:
         # deltamem.core 顶层硬依赖 transformers.models.smollm3（4.51 无此子包），
         # 这里经 deltamem_compat 注入最小占位后再 import，详见该模块的说明。
@@ -959,6 +1115,16 @@ def _load_backbone(args, dev=None):
         attach_delta_mem(model, cfg)
         load_delta_mem_adapter(model, input_dir=args.adapter)
     dev = torch.device(f"cuda:{args.gpu}")
+    if getattr(args, "grad_checkpointing", False):
+        # 主干权重是冻结的，但 student 前向的梯度要从 inputs_embeds 反传，
+        # 激活仍会被保存 —— 40G 卡被别人占了 30G 时这是唯一的省显存手段。
+        try:
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False})
+        except TypeError:
+            model.gradient_checkpointing_enable()
+        print("[mem] 已开启 gradient checkpointing（显存换时间）", flush=True)
+    torch.cuda.empty_cache()
     return model, tokenizer, dev, LM._model_hidden_size(model)
 
 
@@ -969,6 +1135,9 @@ def train(args):
     dev = torch.device(args.device if args.device else
                        ("cpu" if args.smoke_model else
                         ("cuda" if torch.cuda.is_available() else "cpu")))
+
+    _setup_tf32(not getattr(args, "no_tf32", False))
+    gpu_report(args)
 
     # ---- 模型 ----
     model, tokenizer, dev, hidden = _load_backbone(args, dev)
@@ -1038,8 +1207,18 @@ def train(args):
             print(f"[data][warn] 切分不干净：{prob}", flush=True)
         hops = Counter(it["hops"] for it in train_data)
         n_units = sum(len(item_units(it)) for it in train_data) / max(1, len(train_data))
+        _ks = sorted(len(item_units(it)) for it in train_data)
+        k_med, k_max = _ks[len(_ks) // 2], _ks[-1]
         print(f"[data] {args.data}: train={len(train_data)} val={len(val_data)} "
-              f"hops={dict(sorted(hops.items()))} 平均记忆单元={n_units:.1f}", flush=True)
+              f"hops={dict(sorted(hops.items()))} 平均记忆单元={n_units:.1f} "
+              f"槽位中位={k_med} max={k_max}", flush=True)
+        if args.max_slots and args.max_slots < k_med:
+            # 训练时最多只见 max_slots 个槽、评测时却要给 k_max 个槽：
+            # 槽数分布不一致会把"读对槽位"按 chance 直接稀释掉（跟路由能力无关）。
+            print(f"[data][warn] --max-slots={args.max_slots} < 训练集槽位中位 {k_med}："
+                  f"router 训练时最多只见 {args.max_slots} 槽，评测要给 {k_max} 槽，"
+                  f"train/eval 槽数分布不一致。建议 --max-slots 0"
+                  f"（课程仍在 [1,K] 内随机，只是不设上限）", flush=True)
         print(f"[data] 例：units={item_units(train_data[0])[:3]} "
               f"q={train_data[0]['question']!r} a={train_data[0]['answer']!r}", flush=True)
     else:
@@ -1062,8 +1241,11 @@ def train(args):
     opt_params = list(comp.parameters()) + list(bridge.parameters()) + \
         (list(router.parameters()) if router is not None else [])
     opt = torch.optim.AdamW([p for p in opt_params if p.requires_grad], lr=args.lr)
+    # C：单元编码本来就是批量的（encode_latent_units 一次前向跑一批），但默认
+    # batch_size=8，23 条单元要切 3 批；提到 --enc-batch 后通常一批跑完。
     encoder = LM.LatentEncoder(model, tokenizer, comp, layer=args.layer,
-                               max_unit_tokens=args.max_unit_tokens, device=dev)
+                               max_unit_tokens=args.max_unit_tokens, device=dev,
+                               batch_size=args.enc_batch)
     system_prompt = args.system_prompt
     reader_like = (comp, bridge) if router is None else (comp, bridge, router)
     rng_slots = random.Random(args.seed + 777)      # 变槽数采样的独立随机流
@@ -1092,6 +1274,20 @@ def train(args):
     step = 0
     micro = 0
     acc_items = []
+    pend = []               # --pack>1 时的待打包样本（只在一次 optimizer step 内有效）
+    q_pool = None
+    if args.prefetch:
+        from concurrent.futures import ThreadPoolExecutor
+        q_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="qpref")
+        print("[prefetch] 问题特征预取线程启动（与当前步反向重叠：GPU 只用了 32%）",
+              flush=True)
+    if args.pack > 1:
+        if args.pack != args.accum:
+            raise SystemExit(f"--pack ({args.pack}) 必须等于 --accum ({args.accum})："
+                             f"打包粒度就是梯度累积粒度，否则步数统计与 loss 缩放都会错")
+        if args.kl_weight > 0:
+            raise SystemExit("--pack>1 与 --kl-weight>0 不兼容（teacher 对齐要逐条 logits）")
+        print(f"[pack] 每 {args.pack} 条样本合成一次 4B 前反向（修 GPU 空转）", flush=True)
     grad_seen = None        # 必须在 opt.zero_grad() 之前取样，否则永远是 None -> 误报失败
     t_start = time.time()
     if args.eval_every > 0 and not args.dry_run:
@@ -1114,8 +1310,9 @@ def train(args):
     for epoch in range(args.epochs):
         order = list(range(len(train_data)))
         random.Random(args.seed + 100 + epoch).shuffle(order)
-        for i in order:
+        for _pos, i in enumerate(order):
             item = train_data[i]
+            _nxt_item = (train_data[order[_pos + 1]] if _pos + 1 < len(order) else None)
             # 每条样本前清 Delta 在线状态：状态是跨 forward 累积的模块属性，
             # 不清就会"显存慢慢涨"/"后面的样本受前面影响"（都不报错）。
             reset_delta_state(model)
@@ -1156,11 +1353,15 @@ def train(args):
                     slot_z = slot_z.detach()
                 q_feat = query_feature_cached(model, tokenizer, item["question"],
                                               system_prompt, args.layer, dev)
+                if q_pool is not None and _nxt_item is not None:
+                    # 下一条的问题特征在当前步 4B 前反向期间并行算掉
+                    q_pool.submit(_safe_qfeat, model, tokenizer, _nxt_item["question"],
+                                  system_prompt, args.layer, dev)
                 # --- 多跳必须**两跳都有监督** ---
                 # 旧代码只算第 1 跳的 CE、把 k_out 丢掉，推理侧却用 k_out 接力。
                 # 现在：hops>1 且证据链够长时按 evidence 顺序逐跳监督，
                 # 训练与推理共用 LM.compose_routed_soft（槽间插 "\n"，与推理逐位一致）。
-                n_hops = 2 if int(item.get("hops", 1) or 1) > 1 else 1
+                n_hops = 2 if item_hops(item) > 1 else 1
                 keep_pos = {int(o): j for j, o in enumerate(_keep)}
                 chain_new = [keep_pos[i] for i in chain_orig if i in keep_pos]
                 if n_hops > 1 and len(chain_new) < 2:
@@ -1177,12 +1378,16 @@ def train(args):
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt, item["question"], item["answer"])
-            with LM.delta_write_disabled(model):
-                s_logits = model(inputs_embeds=embeds,
-                                 attention_mask=torch.ones(embeds.shape[:2],
-                                                           dtype=torch.long, device=dev),
-                                 use_cache=False).logits
-            loss_qa = qa_loss(s_logits, labels)
+            if args.pack > 1:
+                s_logits = None      # 打包路径：本条只建图，攒满 pack 条后统一前反向
+                loss_qa = None
+            else:
+                with LM.delta_write_disabled(model):
+                    s_logits = model(inputs_embeds=embeds,
+                                     attention_mask=torch.ones(embeds.shape[:2],
+                                                               dtype=torch.long, device=dev),
+                                     use_cache=False).logits
+                loss_qa = qa_loss(s_logits, labels)
             loss_addr = None
             if addr_logits is not None:
                 # 显式寻址监督：让"选哪个槽"有直接梯度。只靠 QA 隐式回传时，
@@ -1233,23 +1438,45 @@ def train(args):
                     loss_r = qa_loss(r_logits, r_labels)
             # 四项损失的组合规则集中在 assemble_loss（旧代码在 KL 分支里重新赋值，
             # 把寻址项整条覆盖掉了；两阶段的重建切换规则也一并挪进来便于单测）。
-            loss = assemble_loss(loss_qa, loss_addr, loss_kl,
-                                 None if not (args.recon_weight > 0 or recon_stage) else loss_r,
-                                 addr_weight=args.addr_weight, kl_weight=args.kl_weight,
-                                 recon_weight=args.recon_weight, recon_stage=recon_stage)
-            (loss / args.accum).backward()
-            acc_items.append((float(loss_qa.detach()),
-                               None if loss_kl is None else float(loss_kl.detach()),
-                               None if loss_addr is None else float(loss_addr.detach())))
-            micro += 1
+            _recon_term = None if not (args.recon_weight > 0 or recon_stage) else loss_r
+            if args.pack > 1:
+                pend.append({"emb": embeds, "lab": labels,
+                             "addr": loss_addr, "rec": _recon_term})
+                micro += 1
+                if len(pend) < args.pack:
+                    continue
+                loss_qa, loss_addr_b, _loss_r_b = _packed_student_step(
+                    args, model, pend, recon_stage)
+                pend.clear()
+                acc_items.append((float(loss_qa.detach()), None,
+                                  None if loss_addr_b is None
+                                  else float(loss_addr_b.detach())))
+            else:
+                loss = assemble_loss(loss_qa, loss_addr, loss_kl, _recon_term,
+                                     addr_weight=args.addr_weight,
+                                     kl_weight=args.kl_weight,
+                                     recon_weight=args.recon_weight,
+                                     recon_stage=recon_stage)
+                (loss / args.accum).backward()
+                acc_items.append((float(loss_qa.detach()),
+                                   None if loss_kl is None else float(loss_kl.detach()),
+                                   None if loss_addr is None else float(loss_addr.detach())))
+                micro += 1
             if micro % args.accum == 0:
                 # 梯度范数（step 前）：.grad is not null 只说明"有梯度"，不说明"梯度可用"；
                 # 范数才知道是不是在有效学习（太小=没信号，爆炸=不稳）
-                gnorm_comp = 0.0 if (args.bridge_only or args.freeze_compressor) \
-                    else _grad_norm(comp.parameters())
-                gnorm_bridge = _grad_norm(bridge.parameters())
-                gnorm_router = (_grad_norm(router.parameters())
-                                if router is not None else 0.0)
+                # B：_grad_norm 要扫全参数并 .item() 同步，每步都算 = 每步硬等三次
+                # GPU 排空。只在要打印/要评估的步算。
+                _want_gnorm = (args.log_every <= 1 or (step + 1) % args.log_every == 0
+                               or (args.eval_every > 0 and step % args.eval_every == 0))
+                if _want_gnorm:
+                    gnorm_comp = 0.0 if (args.bridge_only or args.freeze_compressor) \
+                        else _grad_norm(comp.parameters())
+                    gnorm_bridge = _grad_norm(bridge.parameters())
+                    gnorm_router = (_grad_norm(router.parameters())
+                                    if router is not None else 0.0)
+                else:
+                    gnorm_comp = gnorm_bridge = gnorm_router = float("nan")
                 if grad_seen is None:
                     # 第一个梯度累积边界处取样：此时 .grad 已填充、尚未 step/zero_grad
                     grad_seen = {"model_has_no_grad":
@@ -1299,20 +1526,24 @@ def train(args):
                 kl_avg = sum(kls) / len(kls) if kls else None
                 addrs = [x[2] for x in acc_items if x[2] is not None]
                 addr_avg = sum(addrs) / len(addrs) if addrs else None
-                print(f"[step {step}] loss_qa={qa_avg:.4f} "
-                      f"loss_kl={'n/a' if kl_avg is None else f'{kl_avg:.4f}'} "
-                      f"loss_addr={'n/a' if addr_avg is None else f'{addr_avg:.4f}'} "
-                      f"soft_tokens={int(soft.reshape(1, -1, soft.shape[-1]).shape[1])} "
-                      f"compress={enc_info['compression_ratio']} "
-                      f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
-                      f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
-                      f"peakmem={_peak_mb():.0f}MiB "
-                      f"({time.time()-t_start:.0f}s)", flush=True)
+                if args.log_every <= 1 or step % args.log_every == 0:
+                    print(f"[step {step}] loss_qa={qa_avg:.4f} "
+                          f"loss_kl={'n/a' if kl_avg is None else f'{kl_avg:.4f}'} "
+                          f"loss_addr={'n/a' if addr_avg is None else f'{addr_avg:.4f}'} "
+                          f"soft_tokens={int(soft.reshape(1, -1, soft.shape[-1]).shape[1])} "
+                          f"compress={enc_info['compression_ratio']} "
+                          f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
+                          f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
+                          f"peakmem={_peak_mb():.0f}MiB "
+                          f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
                 if args.max_steps > 0 and step >= max_steps:
                     break
         if args.max_steps > 0 and step >= max_steps:
             break
+
+    if q_pool is not None:
+        q_pool.shutdown(wait=False)
 
     # ---- 梯度自检：Compressor / Bridge 必须真的拿到梯度，Qwen 必须没有 ----
     if grad_seen is None:
@@ -1370,6 +1601,7 @@ def train(args):
         # 钉死 delta 状态依赖：清空 delta_state 后再评一次。若从高分掉到 0，
         # 说明训出的 comp/bridge 只在"带着训练累积 delta 状态的模型"上工作 ——
         # 潜 token 本身没有携带答案信息（悬案 v2 0.9375 vs 重载 0 的根因）。
+        _ensure_delta_compat()
         from deltamem.core.delta_impl import reset_delta_mem_states as _rds
         _rds(model)
         em_rs, n_rs = evaluate(_reload_reader, model, tokenizer, val_data,
@@ -1742,6 +1974,8 @@ def train_fst(args):
     dev = torch.device(args.device if args.device else
                        ("cpu" if args.smoke_model else
                         ("cuda" if torch.cuda.is_available() else "cpu")))
+    _setup_tf32(not getattr(args, "no_tf32", False))
+    gpu_report(args)
     if not args.data:
         raise SystemExit("--fst 需要 --data（tools/gen_fst_update.py 的产出）")
     model, tokenizer, dev, hidden = _load_backbone(args, dev)
@@ -2062,6 +2296,12 @@ def parse_args(argv=None):
     ap.add_argument("--adapter", default=ADAPTER)
     ap.add_argument("--no-adapter", action="store_true", help="不挂 Delta-Mem adapter（纯 Qwen）")
     ap.add_argument("--gpu", default="0")
+    ap.add_argument("--dtype", default="auto", choices=("auto", "bf16", "fp16", "fp32"),
+                    help="主干精度（auto=A100 用 bf16，老卡自动退回 fp16）")
+    ap.add_argument("--grad-checkpointing", action="store_true",
+                    help="梯度检查点：省显存（activation 重算），显存紧张时开")
+    ap.add_argument("--no-tf32", action="store_true",
+                    help="关闭 TF32（默认开，Ampere+ 走 TensorCore）")
     ap.add_argument("--device", default="", help="显式设备（smoke 用 cpu）")
     ap.add_argument("--smoke-model", action="store_true", help="极小随机模型，CPU 自检通路")
     ap.add_argument("--dry-run", action="store_true", help="跑通自检，不写 checkpoint")
@@ -2114,8 +2354,19 @@ def parse_args(argv=None):
                     help="寻址交叉熵损失权重（router 的显式监督）")
     ap.add_argument("--freeze-compressor", action="store_true",
                     help="冻结 Compressor 主干（Phase 2：只训 router 的键/查询头）")
+    ap.add_argument("--log-every", type=int, default=10,
+                    help="每多少步算一次梯度范数并打印（1=每步；gnorm 有 GPU 同步成本）")
+    ap.add_argument("--enc-batch", type=int, default=24,
+                    help="单元编码一次前向塞多少个单元（默认 24：23 条单元一批跑完）")
+    ap.add_argument("--prefetch", action="store_true", default=True,
+                    help="1 个线程预取下一条的问题特征（与当前步反向重叠）")
+    ap.add_argument("--no-prefetch", dest="prefetch", action="store_false")
+    ap.add_argument("--pack", type=int, default=1,
+                    help="把多少条样本打包成一次 student 前反向（须等于 --accum；1=逐条）")
     ap.add_argument("--max-slots", type=int, default=0,
-                    help="变槽数采样的上限（0=用数据里的全部槽位）")
+                    help="变槽数采样的上限（0=用数据里的全部槽位，**推荐**）。"
+                         "注意：设小了会让训练期槽数 < 评测期槽数，"
+                         "读对槽位被 chance 稀释，且与路由能力无关")
     ap.add_argument("--fst", action="store_true",
                     help="FST-Mem（阶段 B）：事实键 + 状态/轨迹解耦 + 时序两级读出")
     ap.add_argument("--hist-max", type=int, default=LM.LATENT_HIST_MAX,
