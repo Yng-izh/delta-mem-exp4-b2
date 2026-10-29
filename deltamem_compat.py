@@ -30,6 +30,7 @@ PYTHONPATH 影响面太大，所以这里做**最小注入**：缺模块时往 `
 """
 from __future__ import annotations
 
+import os
 import sys
 import types
 
@@ -90,9 +91,47 @@ def ensure_smollm3_stub(verbose: bool = True) -> bool:
     return True
 
 
+def patch_kv_cache_alias() -> bool:
+    """修 `DeltaMemAttention.forward` 的 KV Cache 参数名不兼容（返回是否改动）。
+
+    transformers 4.51.3 的 `Qwen3DecoderLayer.forward` 传的是**单数**
+    `past_key_value=past_key_value`（`modeling_qwen3.py:293`），而
+    `DeltaMemAttention.forward` 声明的是**复数** `past_key_values=None`，
+    且带 `**kwargs`。于是真正的 Cache 对象被静默吞进 `kwargs`：包装器内部
+    `if past_key_values is not None` 永远为假 → 缓存永不更新 → 解码阶段每个
+    新 token 都只能看到自己，历史上下文全丢。这类错误不抛异常，只表现为
+    "开头还算正常、随后开始重复数字"的退化生成。
+
+    补丁只做参数名归一，不改注意力计算、不动 adapter 权重、不影响 checkpoint。
+    新旧 transformers 都兼容（谁传哪个都行）。
+    """
+    if os.environ.get("DELTA_NO_KV_PATCH", "") not in ("", "0"):
+        return False
+    ensure_smollm3_stub(verbose=False)
+    from deltamem.core.delta_impl import DeltaMemAttention
+
+    if getattr(DeltaMemAttention, "_cache_alias_fixed", False):
+        return False
+
+    original_forward = DeltaMemAttention.forward
+
+    def forward_compat(self, *args, past_key_value=None, past_key_values=None, **kwargs):
+        if past_key_value is not None and past_key_values is not None:
+            if past_key_value is not past_key_values:
+                raise ValueError("Conflicting KV cache arguments")
+        cache = past_key_values if past_key_values is not None else past_key_value
+        return original_forward(self, *args, past_key_values=cache, **kwargs)
+
+    forward_compat.__wrapped__ = original_forward
+    DeltaMemAttention.forward = forward_compat
+    DeltaMemAttention._cache_alias_fixed = True
+    return True
+
+
 def import_delta_mem():
     """import deltamem 的四个入口，必要时先注入 smollm3 占位模块。"""
     ensure_smollm3_stub()
+    patch_kv_cache_alias()
     from deltamem.core import HFDeltaMemConfig, attach_delta_mem
     from deltamem.core.delta_impl import load_delta_mem_adapter
     return HFDeltaMemConfig, attach_delta_mem, load_delta_mem_adapter
