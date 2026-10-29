@@ -364,6 +364,50 @@ class LatentBridge(nn.Module):
 LATENT_D_KEY = _env_int("LATENT_D_KEY", 256)
 
 
+def pool_slot_keys(payloads: Sequence[torch.Tensor]) -> torch.Tensor:
+    """per-slot payload 列表 -> **单元级寻址键** [K, m, d]（块轴 attention pooling）。
+
+    这是"键-载荷解耦"的第一半。旧实现让 `stack_payloads` 的块轴**均值**同时充当
+    寻址键和读出载荷：一条被 `--max-unit-tokens` 切成 C 块的句子，均值既把多块证据
+    压成"平均语义"去寻址，又把长句内容在读出前抹平。两件事用一个池化，等于用一个
+    通道承担两种粒度 —— 这是设计缺陷，不是调参问题。
+
+    这里的池化**无新增参数**（用块均值当查询做 softmax 加权），因此不改动任何
+    checkpoint 的参数集合；要换成可学习查询另开一轮，别偷偷加参数让旧 ckpt 静默错位。
+    """
+    if not payloads:
+        raise ValueError("pool_slot_keys 收到空列表")
+    outs = []
+    for p in payloads:
+        z = p if torch.is_tensor(p) else torch.as_tensor(p)
+        if z.dim() == 2:
+            z = z.unsqueeze(0)
+        if z.dim() != 3:
+            raise ValueError(f"payload 必须是 [k,m,d]，得到 {tuple(z.shape)}")
+        q = z.mean(dim=0)                                   # [m,d] 块轴查询
+        s = (z * q.unsqueeze(0)).sum(-1).sum(-1) / (float(z.shape[-1]) ** 0.5)
+        w = torch.softmax(s.float(), dim=0).to(z.dtype)      # [k]
+        outs.append(torch.einsum("k,kmd->md", w, z))
+    return torch.stack(outs, dim=0)
+
+
+def pack_slot_reads(payloads: Sequence[torch.Tensor]) -> list:
+    """per-slot payload 列表 -> **块级读出载荷**，每个槽保留全部 C_i*m 个向量 [C_i*m, d]。
+
+    这是"键-载荷解耦"的第二半，也是评测侧的真 bug 修复：`stack_payloads` 的均值
+    会把"哪个专有名词落在哪一块"直接抹掉，于是 `--max-unit-tokens 32` 切出来的
+    多块长句在评测时等于只剩一个平均向量。训练侧（`unit_encode_text` 多块 cat）
+    保留块，评测侧求均值 —— 两侧载荷分布不一致，读出的信息量凭空少一半。
+    """
+    reads = []
+    for p in payloads:
+        z = p if torch.is_tensor(p) else torch.as_tensor(p)
+        if z.dim() == 2:
+            z = z.unsqueeze(0)
+        reads.append(z.reshape(-1, z.shape[-1]))
+    return reads
+
+
 def stack_payloads(payloads: Sequence[torch.Tensor]) -> torch.Tensor:
     """把 encode() 返回的 per-slot payload 列表堆成 [K, m, d]。
 
@@ -499,8 +543,54 @@ class LatentRouter(nn.Module):
         z_read = z_hard + (z_soft - z_soft.detach())
         return z_read, logits, k_in, k_out
 
+    def addr_loss_set(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
+                      gold_idx: Sequence[int], n_hops: int = 2):
+        """无序第一跳 + 双向金标条件第二跳的寻址损失（**从数学上消除 loss_addr=inf**）。
+
+        旧实现的死法是确定的：它把"金标证据链按 evidence 顺序"当成跳序，第 1 跳用
+        argmax 硬选、第 2 跳用 `-inf` 屏蔽第 1 跳已选槽。只要 argmax 先落在 g2 上，
+        第 2 跳的目标 g2 自己就被屏蔽 —— logit=-inf → CE=inf → 梯度无意义。
+        10k 训练里 ~63% 的步数是 inf，寻址头整条没被训练，下游读对率 6%（随机水平）
+        就是它的直接后果。HotpotQA 的 supporting_facts 本身也**不含推理顺序**
+        （comparison 题无序、bridge 题按文档位置排），按顺序监督从一开始就是错的。
+
+        现在：第 1 跳对金标集合做负对数边缘化（顺序无关）；第 2 跳显式构造两条
+        金标引导分支，掩码只屏蔽"本分支用掉的那一跳"，目标槽永远不可能落在掩码里。
+        槽位内容对寻址损失 `detach()`：寻址梯度只更新打分头，不把压缩器内容拖走。
+        """
+        k_in, k_out = self.encode_keys(slot_z.detach() if torch.is_tensor(slot_z) else slot_z)
+        q_vec = self.encode_query(q_feat)
+        K = int(slot_z.shape[0]) if slot_z.dim() == 3 else int(slot_z.shape[1])
+        golds = [int(g) for g in gold_idx if 0 <= int(g) < K]
+        if not golds:
+            return None, {"why": "no_gold"}
+        logits1 = self.scores(q_vec, k_in)                      # [1,K]
+        dev = logits1.device
+        if int(n_hops) <= 1 or len(golds) < 2:
+            tgt = torch.tensor([golds[0]], device=dev)
+            return F.cross_entropy(logits1, tgt), {"hop1": float(
+                F.cross_entropy(logits1, tgt).detach()), "golds": golds}
+        gset = torch.tensor(golds, device=dev, dtype=torch.long)
+        l_hop1 = -torch.logsumexp(logits1[0, gset], dim=0)       # 集合边缘化
+        terms = []
+        for a in golds:
+            for b in golds:
+                if a == b:
+                    continue
+                mask = torch.zeros_like(logits1, dtype=torch.bool)
+                mask[0, a] = True                                # 只屏蔽本分支用掉的那一跳
+                q2 = torch.nn.functional.normalize(q_vec + k_out[:, a], dim=-1)
+                logits2 = self.scores(q2, k_in).masked_fill(mask, float("-inf"))
+                terms.append(F.cross_entropy(logits2, torch.tensor([b], device=dev)))
+        l_hop2 = torch.stack(terms).mean()
+        loss = l_hop1 + l_hop2
+        return loss, {"hop1": float(l_hop1.detach()), "hop2": float(l_hop2.detach()),
+                      "golds": golds, "n_branch": len(terms)}
+
     def forward_hops(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
-                     n_hops: int = 2, hard: bool = False) -> Dict[str, Any]:
+                     n_hops: int = 2, hard: bool = False,
+                     reads: Optional[Sequence[torch.Tensor]] = None,
+                     force_first: Optional[int] = None) -> Dict[str, Any]:
         """多跳前向：第 1 跳选槽 -> q' = norm(q + k_out[选中槽]) -> 第 2 跳再选槽。
 
         修的是一个**架构级缺陷**，不是调参问题：
@@ -533,7 +623,13 @@ class LatentRouter(nn.Module):
                 mask = torch.zeros_like(logits, dtype=torch.bool)
                 mask[0, sorted(used_idx)] = True
                 logits = logits.masked_fill(mask, float("-inf"))
-            idx = logits.argmax(dim=-1)                                # [1]
+            if not used_idx and force_first is not None \
+                    and 0 <= int(force_first) < int(logits.shape[-1]):
+                # 金标接地读出（训练前期）：第 1 跳强制走金标，切断"错误槽位 -> 正确答案"
+                # 的死锁；打分头的梯度由 addr_loss_set 单独给，不靠这里。
+                idx = torch.tensor([int(force_first)], device=logits.device)
+            else:
+                idx = logits.argmax(dim=-1)                            # [1]
             used_idx.add(int(idx[0].item()))
             z_hard = z[0, idx]                                         # [1,m,d]
             if not (hard or not self.training):
@@ -545,7 +641,14 @@ class LatentRouter(nn.Module):
                 # 单跳路径（同文件 497 行）没有这次 unsqueeze —— 两处必须一致。
                 z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach())
                 z_hard = z_hard + (z_soft - z_soft.detach())
-            z_list.append(z_hard)
+            # 读出载荷优先用**块级保真**版本（reads[idx]），只有拿不到时才退回块均值载荷。
+            # 键（打分）走的是单元级池化键，载荷走的是该槽全部 C_i*m 个块 —— 这正是
+            # "键-载荷解耦"在推理路径上的落点。
+            if reads is not None and int(idx[0].item()) < len(reads):
+                zr = reads[int(idx[0].item())]
+                z_list.append(zr if zr.dim() == 3 else zr.unsqueeze(0))
+            else:
+                z_list.append(z_hard)
             logits_list.append(logits)
             picks.append(int(idx[0].item()))
             # 查询更新**留在计算图里**：这是 k_out_net 唯一能拿到梯度的通路
@@ -578,7 +681,6 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
         raise ValueError("compose_routed_soft 收到空载荷列表")
     dev = _model_device(model) if dev is None else dev
     emb = model.get_input_embeddings()
-    nl = emb(_tokenize_no_special(tokenizer, "\n", dev))
     pieces = []
     for j, zj in enumerate(z_list):
         if not torch.is_tensor(zj):
@@ -588,8 +690,10 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
             # 静默 squeeze 会掩盖上游 bug，这里直接报出来。
             raise ValueError(f"compose_routed_soft 第 {j} 个载荷是四维 {tuple(zj.shape)}，"
                              f"应为 [B,m,d]")
-        if j:
-            pieces.append(nl)
+        # 槽位边界锚点：每段软 token 前插一段**原生词表**的离散嵌入。
+        # 纯软向量裸拼时，相邻槽的自注意力会互相串扰（跨槽内容被混着读），
+        # 而原生 token 会把"这是另一条事实"这件事显式写进序列，同时给出槽序号。
+        pieces.append(emb(_tokenize_no_special(tokenizer, f"\n[Fact {j + 1}]: ", dev)))
         s = bridge(zj)
         if s.dim() == 2:
             s = s.unsqueeze(0)
@@ -1928,7 +2032,8 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                            pad_token_id: Optional[int] = None,
                            router: Optional["LatentRouter"] = None,
                            q_feat: Optional[torch.Tensor] = None,
-                           layer: int = LATENT_LAYER, hops: int = 1
+                           layer: int = LATENT_LAYER, hops: int = 1,
+                           reads: Optional[Sequence[torch.Tensor]] = None
                            ) -> Tuple[str, Dict[str, Any]]:
     """潜层读出：只有 system / question 是正常 token，历史证据全部走 soft tokens。
 
@@ -1979,11 +2084,18 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                                        layer=layer, device=dev)
         if int(hops) > 1:
             # 多跳走 forward_hops：与训练侧**同一个函数**，保证 k_out 的用法一致
-            out = router.forward_hops(qf, slot_z, n_hops=int(hops), hard=True)
+            out = router.forward_hops(qf, slot_z, n_hops=int(hops), hard=True,
+                                      reads=reads)
         else:
             _z, logits, _ki, _ko = router(qf, slot_z, hard=True)
-            out = {"picks": [int(logits[0].argmax().item())],
-                   "z_list": [slot_z[:, int(logits[0].argmax().item())]]}
+            _pick = int(logits[0].argmax().item())
+            if reads is not None and _pick < len(reads):
+                # 读出用**块级保真**载荷，寻址键仍是单元级池化键（键-载荷解耦）
+                _r = reads[_pick]
+                out = {"picks": [_pick],
+                       "z_list": [_r if _r.dim() == 3 else _r.unsqueeze(0)]}
+            else:
+                out = {"picks": [_pick], "z_list": [slot_z[:, _pick]]}
         routed = list(out["picks"])
         soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev)
     elif has_payload:
@@ -1992,14 +2104,21 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
         # payloads 在评测/训练侧统一是 [1,K,m,d]，必须先归一化到 3 维再进 bridge：
         # 直接把 4 维喂给 bridge 会在 _as_3d 里抛
         # "z 必须是 [B,L,d] 或 [L,d]，得到 (1,20,4,2560)" —— bridge 评测实际就死在这。
-        pz = payloads
-        if pz.dim() == 4:
-            if int(pz.shape[0]) != 1:
-                raise ValueError(
-                    f"bridge 只支持 batch=1 的潜载荷，得到 {tuple(pz.shape)}")
-            pz = pz[0]
-        elif pz.dim() == 2:
-            pz = pz.unsqueeze(0)
+        if reads is not None and len(reads) > 0:
+            # 全槽读出：把每个槽的**全部块**按槽序拼成一段（段间仍由
+            # compose 的思路插入边界锚点在路由路径里完成；这里是无路由全给路径，
+            # 直接按块序拼接），而不是只给块均值。
+            pz = torch.cat([r if r.dim() == 2 else r.reshape(-1, r.shape[-1])
+                            for r in reads], dim=0)
+        else:
+            pz = payloads
+            if pz.dim() == 4:
+                if int(pz.shape[0]) != 1:
+                    raise ValueError(
+                        f"bridge 只支持 batch=1 的潜载荷，得到 {tuple(pz.shape)}")
+                pz = pz[0]
+            elif pz.dim() == 2:
+                pz = pz.unsqueeze(0)
         soft = bridge(pz.to(dev))                    # [K, m, d] -> [K, m, hidden]
         if soft.dim() == 3:
             soft = soft.reshape(1, -1, soft.shape[-1])

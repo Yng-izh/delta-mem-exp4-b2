@@ -255,14 +255,18 @@ def read_one(method, item, ctx):
 
     slot_z, _cat, _ei = T.encode_item_slots(ctx["encoder"], item, tag="eval",
                                             cache=ctx.get("unit_cache"))
-    slot_z = LM.stack_payloads(list(slot_z)).unsqueeze(0)     # [1,K,m,d]
+    # 键-载荷解耦：寻址键用**单元级池化键**，读出载荷用**块级保真**版本。
+    # 旧代码在评测时用 stack_payloads 的块轴均值同时当键和载荷，把
+    # --max-unit-tokens 32 切出来的多块长句内容直接抹平（训练侧是多块 cat）。
+    slot_reads = LM.pack_slot_reads(list(slot_z))
+    slot_z = LM.pool_slot_keys(list(slot_z)).unsqueeze(0)     # [1,K,m,d]
     t_enc = time.time()
     router = ctx["router"]
     pred, meta = LM.generate_latent_answer(
         model=model, tokenizer=tok, bridge=ctx["bridge"], payloads=slot_z,
         question=question, system_prompt=sysp, max_new_tokens=ctx["max_new_tokens"],
         pad_token_id=ctx["pad_token_id"], router=router, layer=ctx["layer"],
-        hops=item_hops(item))
+        hops=item_hops(item), reads=slot_reads)
     t_gen = time.time()
     _gs = gold_slots(item, units)
     _picked = [int(x) for x in (meta.get("routed") or [])]

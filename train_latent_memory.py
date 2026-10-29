@@ -677,8 +677,52 @@ def qa_loss(logits, labels):
     shift_labels = labels[:, 1:].reshape(-1)
     sel = shift_labels != -100
     if not bool(sel.any()):
-        raise ValueError("本 batch 没有可训练的答案 token（labels 全是 -100）")
+        # 命中门控可能把一整个 pack 的答案标签全部抹掉。此时 QA 项贡献 0，
+        # 本步由寻址/重建项驱动 —— 返回 0 张量而不是抛错，否则训练会因为
+        # "这批恰好全没命中"直接崩。
+        return logits.sum() * 0.0
     return F.cross_entropy(shift_logits[sel], shift_labels[sel])
+
+
+_STOPWORDS = frozenset(
+    "a an the of in on at to and or is was were be been being for by with as that "
+    "this these those from it its his her their they he she them we you i not no "
+    "do does did has have had will would can could may might there which who whom "
+    "also into over after before during between about while than then so such".split())
+
+
+def _content_weights(ids, tokenizer, ent_weight=5.0, stop_weight=0.2):
+    """重建交叉熵的**逐 token 权重**：实体词/数字 ×5，停用词 ×0.2。
+
+    为什么必须加权：Teacher Forcing 下冻结的 4B 靠真实前缀就能把语法功能词猜对，
+    token-acc 于是被 the/in/was 这类词撑到 59.6%，而决定 HotpotQA 成败的专有名词、
+    年份、数字在 512 维瓶颈里被优先丢弃。不加权的 token-acc 是个**好看但不顶用**的
+    指标，它和 QA 准确率之间几乎没有相关性 —— 实测就是 59.6% 换 16.8% EM。
+    """
+    w = []
+    for tid in ids.tolist():
+        t = tokenizer.decode([int(tid)]).strip()
+        low = t.lower()
+        if any(ch.isdigit() for ch in t) or (t[:1].isalpha() and t[:1].isupper()):
+            w.append(float(ent_weight))
+        elif low in _STOPWORDS or not low:
+            w.append(float(stop_weight))
+        else:
+            w.append(1.0)
+    return torch.tensor(w, device=ids.device, dtype=torch.float)
+
+
+def qa_loss_weighted(logits, labels, weight_fn):
+    """带权交叉熵：只算答案 token，逐 token 乘权重后按权重和归一。"""
+    shift_logits = logits[:, :-1].reshape(-1, logits.shape[-1])
+    shift_labels = labels[:, 1:].reshape(-1)
+    sel = shift_labels != -100
+    if not bool(sel.any()):
+        return logits.sum() * 0.0
+    y = shift_labels[sel]
+    ce = F.cross_entropy(shift_logits[sel], y, reduction="none")
+    w = weight_fn(y)
+    return (ce * w).sum() / w.sum().clamp_min(1e-6)
 
 
 def kl_loss(student_logits, teacher_logits, n_ans, tau=1.0):
@@ -755,7 +799,9 @@ def sample_slot_subset(payloads, target_idx, rng, max_slots=None, keep_all=False
     if keep_all or len(must) >= K:
         keep = list(range(K))
         rng.shuffle(keep)
-        return (LM.stack_payloads([payloads[i] for i in keep]), keep.index(tgt), keep)
+        sel = [payloads[i] for i in keep]
+        return (LM.pool_slot_keys(sel), LM.pack_slot_reads(sel),
+                keep.index(tgt), keep)
     hi = K if max_slots is None else max(1, min(K, int(max_slots)))
     k_cur = max(len(must), rng.randint(1, hi))
     others = [i for i in range(K) if i not in must]
@@ -763,8 +809,11 @@ def sample_slot_subset(payloads, target_idx, rng, max_slots=None, keep_all=False
     keep = sorted(must) + others[:max(0, k_cur - len(must))]
     rng.shuffle(keep)
     new_tgt = keep.index(tgt)
-    slot_z = LM.stack_payloads([payloads[i] for i in keep])       # [K_cur, m, d]
-    return slot_z, new_tgt, keep
+    sel = [payloads[i] for i in keep]
+    # 键-载荷解耦：寻址键是**单元级**（一条事实一个键），读出载荷是**块级**
+    # （该单元被 --max-unit-tokens 切成的全部块都保留）。旧代码用同一个块轴均值
+    # 兼任两职，评测时把多块长句的内容直接抹平。
+    return LM.pool_slot_keys(sel), LM.pack_slot_reads(sel), new_tgt, keep
 
 
 def evidence_slot_indices(units, evidence):
@@ -800,7 +849,8 @@ def evidence_chain_indices(units, evidence):
 
 
 def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
-                     system_prompt, dev):
+                     system_prompt, dev, gold_idx=None, ent_weight=5.0,
+                     stop_weight=0.2, corrupt_p=0.5):
     """逐单元重建：**用某个单元自己的载荷**去重建**它自己的原文**。
 
     旧实现（必须记住这个错误，它不会报错、只会让指标停在噪声水平）：
@@ -814,9 +864,21 @@ def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
     输入与目标严格同位 —— 这才是"检查压缩器符号保真"的有效监督。
     """
     n = max(1, int(n_units))
-    idxs = list(range(len(units)))
-    if n < len(idxs):
-        idxs = sorted(i for _r, i in sorted((rng.random(), i) for i in idxs)[:n])
+    idxs_all = list(range(len(units)))
+    golds = [int(g) for g in (gold_idx or []) if 0 <= int(g) < len(idxs_all)]
+    if n < len(idxs_all):
+        # 取样从"完全随机"改成"**金标证据槽优先** + 少量干扰槽"：
+        # 随机取样把重建预算平均撒在 ~23 条干扰事实上，压缩器学不到"哪句是证据"，
+        # 也学不到证据句里那些决定答案的实体/数字。
+        chosen = []
+        if golds:
+            chosen.append(int(rng.choice(golds)))
+        rest = [i for i in idxs_all if i not in set(chosen)]
+        rng.shuffle(rest)
+        chosen += rest[:max(0, n - len(chosen))]
+        idxs = sorted(set(chosen))
+    else:
+        idxs = idxs_all
     losses = []
     for i in idxs:
         p = payloads[i]
@@ -829,12 +891,29 @@ def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
         r_embeds, r_labels, _n = build_student_inputs(
             model, tokenizer, soft_u, system_prompt,
             "Repeat the memory verbatim.", str(units[i]))
+        # 前缀随机遮盖：以 corrupt_p 概率把答案段**输入侧**的 token 换成随机词表
+        # token。不这么做时，Teacher Forcing 下模型可以只靠真实前缀自回归地猜出
+        # 下一个词（语法层面的捷径），重建任务退化成语言模型练习，对"压缩器有没有
+        # 把这条事实的符号保住"没有任何约束 —— 这正是 token-acc 迟迟不转化为 EM 的原因。
+        if corrupt_p > 0.0 and rng.random() < float(corrupt_p):
+            lab_pos = (r_labels[0] != -100).nonzero().flatten()
+            n_lab = int(lab_pos.numel())
+            if n_lab > 1:
+                first = int(lab_pos[0].item())
+                rand_ids = torch.randint(0, int(model.config.vocab_size),
+                                         (1, n_lab - 1), device=dev)
+                with torch.no_grad():
+                    repl = model.get_input_embeddings()(rand_ids).to(r_embeds.dtype)
+                r_embeds = r_embeds.clone()
+                r_embeds[:, first:first + n_lab - 1] = repl
         with LM.delta_write_disabled(model):
             r_logits = model(inputs_embeds=r_embeds,
                              attention_mask=torch.ones(r_embeds.shape[:2],
                                                        dtype=torch.long, device=dev),
                              use_cache=False).logits
-        losses.append(qa_loss(r_logits, r_labels))
+        losses.append(qa_loss_weighted(
+            r_logits, r_labels,
+            lambda ids: _content_weights(ids, tokenizer, ent_weight, stop_weight)))
     return torch.stack(losses).mean()
 
 
@@ -1377,8 +1456,8 @@ def train(args):
             #    梯度检查会报 bridge_last_linear=false，且推理期用的是随机投影。
             r_logits = None
             tgt_slot = 0
-            addr_logits = None
-            addr_targets: list = []
+            addr_pre = None
+            qa_gate = 1.0
             if router is not None and payloads is not None:
                 units_now = item_units(item)
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
@@ -1387,7 +1466,7 @@ def train(args):
                 # 多跳：证据链每一跳都必须留在候选里（否则链被剪断），
                 # 其余槽位按课程随机丢 —— 这一步是"变槽数"能真正生效的关键。
                 chain_orig = evidence_chain_indices(units_now, item.get("evidence"))
-                slot_z, tgt_slot, _keep = sample_slot_subset(
+                slot_z, slot_reads, tgt_slot, _keep = sample_slot_subset(
                     payloads, (chain_orig[0] if chain_orig else tgt_slot), rng_slots,
                     args.max_slots or None,
                     must_keep=evidence_slot_indices(units_now, item.get("evidence")))
@@ -1409,17 +1488,42 @@ def train(args):
                 if n_hops > 1 and len(chain_new) < 2:
                     # 证据链不足 2 跳时**不假装多跳**：退回单跳（并在日志里看得出）
                     n_hops = 1
-                router_out = router.forward_hops(q_feat, slot_z, n_hops=n_hops, hard=False)
-                soft = LM.compose_routed_soft(model, tokenizer, bridge,
-                                              router_out["z_list"], dev=dev)
-                addr_logits = router_out["logits_list"]
-                addr_targets = (chain_new[:n_hops] if len(chain_new) >= n_hops
-                                else [int(tgt_slot)])
+                # 路径 1：寻址（只产出 L_addr，不进 QA 计算图；载荷已在函数内 detach）
+                addr_pre, _ainfo = router.addr_loss_set(
+                    q_feat, slot_z,
+                    (chain_new[:2] if n_hops > 1 else [int(tgt_slot)]),
+                    n_hops=n_hops)
+                # 路径 2：读出。前 gold_readout_ratio 的步数**强制金标接地**，
+                # 切断死锁：未收敛的 router 选错槽 -> QA loss 强迫模型从错误事实输出
+                # 正确答案 -> 模型学会无视潜向量、改背参数先验。旧混合训练里这一步
+                # 必然发生，而且训练损失照样下降，从日志上看不出来。
+                _total_opt = max(1, (int(args.n_train) // max(1, int(args.accum)))
+                                 * max(1, int(args.epochs)))
+                e2e = step >= int(round(_total_opt * float(args.gold_readout_ratio)))
+                if not e2e:
+                    use_idx = (chain_new[:n_hops] if len(chain_new) >= n_hops
+                               else [int(tgt_slot)])
+                    soft = LM.compose_routed_soft(
+                        model, tokenizer, bridge, [slot_reads[i] for i in use_idx],
+                        dev=dev)
+                else:
+                    router_out = router.forward_hops(q_feat, slot_z, n_hops=n_hops,
+                                                     hard=True, reads=slot_reads)
+                    soft = LM.compose_routed_soft(model, tokenizer, bridge,
+                                                  router_out["z_list"], dev=dev)
+                    # 命中门控：router 自选的槽与金标无交集时，本样本**禁止**计入 QA
+                    # 损失（否则又是"错误事实 -> 正确答案"的毒化）。本步只贡献寻址与重建。
+                    qa_gate = 1.0 if (set(router_out["picks"]) & set(chain_new)) else 0.0
             else:
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
             embeds, labels, n_ans = build_student_inputs(
                 model, tokenizer, soft, system_prompt, item["question"], item["answer"])
+            if qa_gate == 0.0:
+                # 命中门控生效：抹掉答案标签，本样本对 QA 交叉熵无贡献。
+                # 用抹标签而不是乘 0 系数：--pack 会把多条样本并成一个 batch 只算一次
+                # CE，逐条系数没有落点。
+                labels = torch.full_like(labels, -100)
             if args.pack > 1:
                 s_logits = None      # 打包路径：本条只建图，攒满 pack 条后统一前反向
                 loss_qa = None
@@ -1430,17 +1534,10 @@ def train(args):
                                                                dtype=torch.long, device=dev),
                                      use_cache=False).logits
                 loss_qa = qa_loss(s_logits, labels)
-            loss_addr = None
-            if addr_logits is not None:
-                # 显式寻址监督：让"选哪个槽"有直接梯度。只靠 QA 隐式回传时，
-                # 4 槽里 3 个干扰槽会把信号摊薄到学不出来（实测 target_only 直接 0%）。
-                # 多跳时**逐跳**各算一个 CE 再平均：第 2 跳的监督是 k_out_net
-                # 唯一能学到东西的地方（第 1 跳的 CE 只经过 k_in）。
-                terms = []
-                for lg, gi in zip(addr_logits, addr_targets):
-                    terms.append(F.cross_entropy(
-                        lg, torch.tensor([int(gi)], device=lg.device)))
-                loss_addr = torch.stack(terms).mean()
+            # 寻址损失已在路径 1 里按**集合口径**算好（无序首跳 + 双向金标条件次跳）。
+            # 不再用"argmax 逐跳 CE"：那条路一旦首跳命中 g2，次跳的 -inf 掩码就把
+            # 目标 g2 自己屏蔽掉，CE=inf，寻址头整条失去梯度（实测 63% 步数如此）。
+            loss_addr = addr_pre
             loss_kl = None
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
@@ -1463,9 +1560,13 @@ def train(args):
                 #    现在每个被抽中的单元用自己的载荷重建自己的原文；
                 #    --recon-units 控制条数（显存恒定，OOM 修复保持有效）。
                 if payloads is not None:
+                    _units_now = item_units(item)
                     loss_r = recon_loss_units(
-                        model, tokenizer, bridge, payloads, item_units(item),
-                        rng_recon, args.recon_units, system_prompt, dev)
+                        model, tokenizer, bridge, payloads, _units_now,
+                        rng_recon, args.recon_units, system_prompt, dev,
+                        gold_idx=evidence_slot_indices(_units_now, item.get("evidence")),
+                        ent_weight=args.ent_weight, stop_weight=args.stop_weight,
+                        corrupt_p=args.recon_corrupt)
                 else:
                     # --bridge-only / 无 router：z 本身就是整段记忆，目标 = 整段原文，
                     # 输入与目标仍是同一条记忆，不存在"用 A 重建 B"的问题。
@@ -2376,6 +2477,15 @@ def parse_args(argv=None):
     ap.add_argument("--kl-weight", type=float, default=0.0)
     ap.add_argument("--kl-tau", type=float, default=1.0)
     ap.add_argument("--recon-weight", type=float, default=0.0)
+    ap.add_argument("--gold-readout-ratio", type=float, default=0.7,
+                    help="前这么多比例的优化步**强制用金标槽读出**（切断"
+                         "'错误槽位->正确答案'的毒化）；之后切到 router 自选+命中门控")
+    ap.add_argument("--ent-weight", type=float, default=5.0,
+                    help="重建损失里实体词/数字的权重（停用词用 --stop-weight）")
+    ap.add_argument("--stop-weight", type=float, default=0.2,
+                    help="重建损失里停用词的权重")
+    ap.add_argument("--recon-corrupt", type=float, default=0.5,
+                    help="重建时把答案段输入侧 token 随机替换的概率（切断前缀自回归捷径）")
     ap.add_argument("--recon-units", type=int, default=2,
                     help="recon 每次只重建这么多条记忆单元（0=整段；整段在长记忆上会 OOM）")
     ap.add_argument("--counterfactual", action="store_true",

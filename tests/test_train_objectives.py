@@ -188,7 +188,7 @@ def test_slot_curriculum():
     rng = random.Random(0)
     seen_sizes = set()
     for _ in range(200):
-        slot_z, new_tgt, keep = T.sample_slot_subset(
+        slot_z, _slot_reads, new_tgt, keep = T.sample_slot_subset(
             payloads, 7, rng, max_slots=8, must_keep=[7, 11])
         seen_sizes.add(len(keep))
         if not ({7, 11} <= set(keep)):
@@ -205,11 +205,11 @@ def test_slot_curriculum():
     # R4：没有 must_keep 时也必含目标
     rng2 = random.Random(1)
     for _ in range(50):
-        slot_z, new_tgt, keep = T.sample_slot_subset(payloads, 3, rng2, max_slots=4)
+        slot_z, _slot_reads, new_tgt, keep = T.sample_slot_subset(payloads, 3, rng2, max_slots=4)
         assert 3 in keep and float(slot_z[new_tgt][0, 0]) == 3.0
 
     # R5：keep_all 仍然全留（兼容旧行为）
-    slot_z, new_tgt, keep = T.sample_slot_subset(payloads, 5, random.Random(2),
+    slot_z, _slot_reads, new_tgt, keep = T.sample_slot_subset(payloads, 5, random.Random(2),
                                                  keep_all=True)
     ok("R5 keep_all=True 仍保留全部 23 槽", len(keep) == 23)
 
