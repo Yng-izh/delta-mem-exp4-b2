@@ -1892,7 +1892,13 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
     pad = pad_token_id
     if pad is None:
         pad = getattr(tokenizer, "eos_token_id", None) or getattr(tokenizer, "pad_token_id", None) or 0
-    with torch.no_grad():
+    # 生成期必须关掉 Delta 写入：upstream 的 write_enabled 默认 True，`model.generate`
+    # 会边读 prompt 边更新在线状态、再把 Delta 读出加回 q/o 注意力。而训练侧的记忆
+    # 编码 / 问题特征 / student 前向全都在 delta_write_disabled 下进行 —— 两侧不一致时，
+    # adapter 等于在评测时额外开了一套训练时从未使用的记忆系统，指标会以"全方法一起
+    # 退化、输出塌成固定 token"的形式坏掉，且看不出是这里的问题。
+    # 只读策略下没有预先写入的状态，Delta 读出应为零，生成行为回到纯主干。
+    with delta_write_disabled(model), torch.no_grad():
         out = model.generate(inputs_embeds=input_embeds, attention_mask=attention_mask,
                              max_new_tokens=int(max_new_tokens), do_sample=False,
                              use_cache=True, pad_token_id=pad)

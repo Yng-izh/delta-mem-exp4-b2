@@ -1077,6 +1077,47 @@ def gpu_report(args, need_gb=14.0):
               f"仍 OOM 就等其它进程释放显卡", flush=True)
 
 
+def _verify_delta_adapter(model, adapter_dir, filename="delta_mem_adapter.pt"):
+    """adapter 加载后逐个键校验存在性与形状。
+
+    为什么必须显式校验：加载器是按 checkpoint 键名去定位参数的，**缺失的键不会被主动
+    检查**（未知键才报错）。于是"少加载了一部分参数"与"完整加载"在运行时毫无差别，
+    只表现为"某组结果莫名其妙全错"。本仓库已经踩过：主干被不匹配的 adapter 污染后，
+    所有方法一起退化、输出塌成同一个 token，而 loss 曲线完全正常。
+    """
+    path = os.path.join(str(adapter_dir), filename)
+    if not os.path.exists(path):
+        raise RuntimeError(f"adapter 校验失败：找不到 {path}")
+    ckpt = torch.load(path, map_location="cpu")
+    if isinstance(ckpt, dict) and isinstance(ckpt.get("state_dict"), dict):
+        ckpt = ckpt["state_dict"]
+    missing, bad = [], []
+    n_ok = 0
+    for k, v in ckpt.items():
+        if not torch.is_tensor(v):
+            continue
+        try:
+            p = model.get_parameter(k)
+        except AttributeError:
+            missing.append(k)
+            continue
+        if tuple(p.shape) != tuple(v.shape):
+            bad.append((k, tuple(p.shape), tuple(v.shape)))
+        else:
+            n_ok += 1
+    total = n_ok + len(missing) + len(bad)
+    if missing or bad:
+        msg = (f"adapter 校验失败：{len(missing)} 个键在模型里不存在、"
+               f"{len(bad)} 个形状不符（共 {total} 个张量，仅 {n_ok} 个对上）")
+        if missing:
+            msg += "\n  缺失示例：" + ", ".join(missing[:5])
+        if bad:
+            msg += "\n  形状不符示例：" + ", ".join(
+                f"{k}: ckpt{s} vs model{m}" for k, s, m in bad[:5])
+        raise RuntimeError(msg)
+    print(f"[adapter] 校验通过：{n_ok}/{total} 个张量与模型参数一一对应", flush=True)
+
+
 def _load_backbone(args, dev=None):
     """加载冻结主干（Qwen 或 --smoke-model 的极小随机模型）。返回 (model, tok, dev, hidden)。
 
@@ -1114,6 +1155,7 @@ def _load_backbone(args, dev=None):
         cfg = HFDeltaMemConfig.from_pretrained(args.adapter)
         attach_delta_mem(model, cfg)
         load_delta_mem_adapter(model, input_dir=args.adapter)
+        _verify_delta_adapter(model, args.adapter)
     dev = torch.device(f"cuda:{args.gpu}")
     if getattr(args, "grad_checkpointing", False):
         # 主干权重是冻结的，但 student 前向的梯度要从 inputs_embeds 反传，
@@ -1405,7 +1447,9 @@ def train(args):
                 t_embeds, t_n = build_teacher_inputs(
                     model, tokenizer, item["memory"], system_prompt,
                     item["question"], item["answer"])
-                with torch.no_grad():
+                # teacher 也必须关 Delta 写入：只加 no_grad 只能停梯度，挡不住
+                # write_enabled=True 时对在线状态的更新（那会污染后续样本的前向）。
+                with LM.delta_write_disabled(model), torch.no_grad():
                     t_logits = model(inputs_embeds=t_embeds,
                                      attention_mask=torch.ones(t_embeds.shape[:2],
                                                                dtype=torch.long, device=dev),
@@ -2358,8 +2402,11 @@ def parse_args(argv=None):
                     help="每多少步算一次梯度范数并打印（1=每步；gnorm 有 GPU 同步成本）")
     ap.add_argument("--enc-batch", type=int, default=24,
                     help="单元编码一次前向塞多少个单元（默认 24：23 条单元一批跑完）")
-    ap.add_argument("--prefetch", action="store_true", default=True,
-                    help="1 个线程预取下一条的问题特征（与当前步反向重叠）")
+    ap.add_argument("--prefetch", action="store_true", default=False,
+                    help="1 个线程预取下一条的问题特征（与当前步反向重叠）。"
+                         "默认关闭：delta_write_disabled 只改共享模块上的 write_enabled "
+                         "布尔属性，没有线程隔离，预取线程与主线程会互相把写入开关改回来；"
+                         "挂 adapter 时开启等于放弃'训练全程只读主干'的保证。")
     ap.add_argument("--no-prefetch", dest="prefetch", action="store_false")
     ap.add_argument("--pack", type=int, default=1,
                     help="把多少条样本打包成一次 student 前反向（须等于 --accum；1=逐条）")
