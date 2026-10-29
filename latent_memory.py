@@ -1987,7 +1987,20 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
         routed = list(out["picks"])
         soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev)
     elif has_payload:
-        soft = bridge(payloads.to(dev))              # [K, m, d] -> [K*m, d]
+        # bridge 不做内容寻址：整库所有槽位**全给**，K*m 个软 token 一起注入，
+        # 这是 bridge 的设计语义（"压缩后整段送去读"），不是遗漏了截断。
+        # payloads 在评测/训练侧统一是 [1,K,m,d]，必须先归一化到 3 维再进 bridge：
+        # 直接把 4 维喂给 bridge 会在 _as_3d 里抛
+        # "z 必须是 [B,L,d] 或 [L,d]，得到 (1,20,4,2560)" —— bridge 评测实际就死在这。
+        pz = payloads
+        if pz.dim() == 4:
+            if int(pz.shape[0]) != 1:
+                raise ValueError(
+                    f"bridge 只支持 batch=1 的潜载荷，得到 {tuple(pz.shape)}")
+            pz = pz[0]
+        elif pz.dim() == 2:
+            pz = pz.unsqueeze(0)
+        soft = bridge(pz.to(dev))                    # [K, m, d] -> [K, m, hidden]
         if soft.dim() == 3:
             soft = soft.reshape(1, -1, soft.shape[-1])
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,

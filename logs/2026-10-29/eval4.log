@@ -1,0 +1,16 @@
+===== none =====
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| none | 500 | 11.2 | 11.2 | 19.5 | n/a | n/a | n/a | n/a | n/a | 0.0 | 21.6 | 676 |
+{"label": "none", "n": 500, "acc": 0.112, "pair_acc": null, "pair_n": 0, "mem_tokens": 0.0, "prompt_tokens": 21.574, "ms_mean": 675.8491, "ms_p50": 412.41, "pre_ms_mean": 0.0, "read_acc": null, "em": 0.112, "f1": 0.1948, "full_recall": null, "n_leq2": 339, "full_recall_leq2": null, "n_h2": 500, "acc_h2": 0.112}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_none.json
+===== text =====
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| text | 500 | 31.2 | 32.0 | 45.9 | 36.0 | 47.8 | n/a | n/a | n/a | 151.2 | 185.8 | 681 |
+{"label": "text", "n": 500, "acc": 0.312, "pair_acc": null, "pair_n": 0, "mem_tokens": 151.198, "prompt_tokens": 185.772, "ms_mean": 681.1301, "ms_p50": 482.2319, "pre_ms_mean": 678.0334, "read_acc": 0.36, "em": 0.32, "f1": 0.4592, "full_recall": 0.36, "n_leq2": 339, "full_recall_leq2": 0.4779, "n_h2": 500, "acc_h2": 0.312, "read_acc_h2": 0.36}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_text.json
+===== oracle =====
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| oracle | 500 | 54.6 | 55.4 | 72.4 | 100.0 | 100.0 | n/a | n/a | n/a | 91.3 | 125.9 | 514 |
+{"label": "oracle", "n": 500, "acc": 0.546, "pair_acc": null, "pair_n": 0, "mem_tokens": 91.296, "prompt_tokens": 125.87, "ms_mean": 514.0364, "ms_p50": 403.1401, "pre_ms_mean": 511.4056, "read_acc": 1.0, "em": 0.554, "f1": 0.7242, "full_recall": 1.0, "n_leq2": 339, "full_recall_leq2": 1.0, "n_h2": 500, "acc_h2": 0.546, "read_acc_h2": 1.0}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_oracle.json
+===== EVAL4 DONE =====

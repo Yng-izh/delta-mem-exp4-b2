@@ -1,0 +1,19 @@
+===== none =====
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| none | 500 | 11.2 | 11.2 | 19.5 | n/a | n/a | n/a | n/a | n/a | 0.0 | 21.6 | 644 |
+{"label": "none", "n": 500, "acc": 0.112, "pair_acc": null, "pair_n": 0, "mem_tokens": 0.0, "prompt_tokens": 21.574, "ms_mean": 644.4764, "ms_p50": 390.7092, "pre_ms_mean": 0.0, "read_acc": null, "em": 0.112, "f1": 0.1948, "full_recall": null, "n_leq2": 0, "full_recall_leq2": null, "n_h2": 500, "acc_h2": 0.112}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_none.json
+===== text-top4 =====
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| text-top4 | 500 | 31.2 | 32.0 | 45.9 | 36.0 | n/a | n/a | n/a | n/a | 151.2 | 185.8 | 672 |
+{"label": "text-top4", "n": 500, "acc": 0.312, "pair_acc": null, "pair_n": 0, "mem_tokens": 151.198, "prompt_tokens": 185.772, "ms_mean": 672.476, "ms_p50": 474.5212, "pre_ms_mean": 670.4378, "read_acc": 0.36, "em": 0.32, "f1": 0.4592, "full_recall": null, "n_leq2": 0, "full_recall_leq2": null, "n_h2": 500, "acc_h2": 0.312, "read_acc_h2": 0.36}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_text_top4.json
+===== oracle =====
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| oracle | 500 | 54.6 | 55.4 | 72.4 | 100.0 | n/a | n/a | n/a | n/a | 91.3 | 125.9 | 491 |
+{"label": "oracle", "n": 500, "acc": 0.546, "pair_acc": null, "pair_n": 0, "mem_tokens": 91.296, "prompt_tokens": 125.87, "ms_mean": 491.1054, "ms_p50": 385.227, "pre_ms_mean": 489.6095, "read_acc": 1.0, "em": 0.554, "f1": 0.7242, "full_recall": null, "n_leq2": 0, "full_recall_leq2": null, "n_h2": 500, "acc_h2": 0.546, "read_acc_h2": 1.0}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_oracle.json
+===== EVAL3 DONE =====

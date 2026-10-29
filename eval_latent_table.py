@@ -217,7 +217,12 @@ def read_one(method, item, ctx):
                 # **没检索到**还是**读到了但答错**无法区分。
                 # 多跳口径统一：整条证据链都被取回才算读对（与潜层列同一条规则）。
                 "read_ok": ((bool(_gs2 <= set(idx)) if len(_gs2) > 1
-                             else bool(set(idx) & _gs2)) if _gs2 else None)}
+                             else bool(set(idx) & _gs2)) if _gs2 else None),
+                # 完整证据召回：整条证据链都被取回才算。必须与潜层同一条规则落盘，
+                # 否则 summarize 的 fa（read_all is not None）在这一支永远为空，
+                # 于是 text/oracle 的 full_recall 恒为 null —— 表现为"这列没算"。
+                "read_all": bool(_gs2 <= set(idx)) if _gs2 else None,
+                "picked": list(idx), "gold": sorted(_gs2)}
         return pred, info
 
     # ---- 潜层：先编码（所有潜层方法都要付这笔前向） ----
@@ -312,8 +317,11 @@ def summarize(rows, label):
     # 物理上不可能全覆盖；混在一起算会把"口径缺陷"读成"机制缺陷"。
     fa = [r for r in rows if r.get("read_all") is not None]
     out["full_recall"] = (sum(int(r["read_all"]) for r in fa) / len(fa)) if fa else None
+    # n_leq2 是**数据集属性**（金标证据句数 ≤2 的样本数），不能从 fa 里数：
+    # none 这种"不注入记忆"的方法没有 read_all，从 fa 数会得到 0，
+    # 让"本集有多少样本在 2 跳预算内可全覆盖"这个分母凭空消失。
+    out["n_leq2"] = sum(1 for r in rows if 0 < int(r.get("n_ev") or 0) <= 2)
     sub_ = [r for r in fa if int(r.get("n_ev") or 0) <= 2]
-    out["n_leq2"] = len(sub_)
     out["full_recall_leq2"] = (sum(int(r["read_all"]) for r in sub_) / len(sub_)) if sub_ else None
     # ---- 两跳子集单报（本轮核心变量：混在总数里看不出多跳有没有生效） ----
     h2 = [r for r in rows if int(r.get("hops") or 1) > 1]

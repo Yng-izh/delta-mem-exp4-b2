@@ -1,0 +1,9 @@
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bridge-v2 | 500 | 16.4 | 16.8 | 25.7 | 0.0 | 0.0 | n/a | n/a | n/a | 95.5 | 95.5 | 2337 |
+{"label": "bridge-v2", "n": 500, "acc": 0.164, "pair_acc": null, "pair_n": 0, "mem_tokens": 95.536, "prompt_tokens": 95.536, "ms_mean": 2336.8411, "ms_p50": 2246.3207, "pre_ms_mean": 1953.1982, "read_acc": 0.0, "em": 0.168, "f1": 0.257, "full_recall": 0.0, "n_leq2": 339, "full_recall_leq2": 0.0, "n_h2": 500, "acc_h2": 0.164, "read_acc_h2": 0.0}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_bridge.json
+===== BRIDGE EVAL DONE =====

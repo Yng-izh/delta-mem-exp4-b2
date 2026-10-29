@@ -16,6 +16,11 @@
 # 用法：
 #   bash run_train_v2_bridge.sh > logs/train_10k_v2_bridge.log 2>&1 &      # 自动等 router
 #   WAIT_ROUTER=0 bash run_train_v2_bridge.sh ...                          # 不等，直接跑
+#   WAIT_ROUTER=0 GRAD_CKPT=1 bash ...                                     # 与另一条训练并行时省显存
+#
+# 并行注意：pack 4 的单条训练峰值约 15G，GPU0 只有 40G 且常驻别人的 ~6G 进程，
+#   两条训练并行会顶到 ~36G。GRAD_CKPT=1 用重算换显存（数值等价，只影响步时），
+#   是并行时唯一安全的做法；对 bridge/router 公平对照无影响。
 #
 # 训练完的评测（口径与 router 一致，同一份 500 题）：
 #   python eval_latent_table.py --method bridge --ckpt ckpt/hotpot_bridge_10k_v2.pt \
@@ -40,6 +45,12 @@ if [ "${WAIT_ROUTER:-1}" != "0" ]; then
   sleep 10
 fi
 
+EXTRA=""
+if [ "${GRAD_CKPT:-0}" != "0" ]; then
+  EXTRA="--grad-checkpointing"
+  echo "[mem] GRAD_CKPT=1：开启 gradient checkpointing（并行训练省显存）"
+fi
+
 nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
 echo "[$(date +%H:%M:%S)] BRIDGE-10K-V2 START"
 
@@ -53,7 +64,7 @@ echo "[$(date +%H:%M:%S)] BRIDGE-10K-V2 START"
   --recon-weight 0.3 --recon-units 2 --addr-weight 1.0 --kl-weight 0 \
   --m 4 --layer 18 --inner-dim 512 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \
-  --out $B/ckpt/hotpot_bridge_10k_v2.pt --save-every 250
+  --out $B/ckpt/hotpot_bridge_10k_v2.pt --save-every 250 $EXTRA
 # 注：--router 缺失即 Bridge 分支；--addr-weight 在无 router 时不产生损失项，
 #     这里保留 1.0 只是为了让本文件与 run_train_v2.sh 逐行可 diff，不代表 bridge 受了寻址监督。
 #     --prefetch 同样未开：delta_write_disabled 改的是模块级共享 bool，无线程隔离，

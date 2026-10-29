@@ -1,0 +1,9 @@
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| router-v2 | 500 | 16.0 | 16.4 | 24.7 | 6.0 | 8.8 | n/a | n/a | n/a | 9.0 | 9.0 | 2582 |
+{"label": "router-v2", "n": 500, "acc": 0.16, "pair_acc": null, "pair_n": 0, "mem_tokens": 9.0, "prompt_tokens": 9.0, "ms_mean": 2582.0827, "ms_p50": 2492.8119, "pre_ms_mean": 2104.0224, "read_acc": 0.06, "em": 0.164, "f1": 0.2472, "full_recall": 0.06, "n_leq2": 339, "full_recall_leq2": 0.0885, "n_h2": 500, "acc_h2": 0.16, "read_acc_h2": 0.06}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_router.json
+===== ROUTER EVAL DONE =====
