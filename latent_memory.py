@@ -571,7 +571,12 @@ class LatentRouter(nn.Module):
             return F.cross_entropy(logits1, tgt), {"hop1": float(
                 F.cross_entropy(logits1, tgt).detach()), "golds": golds}
         gset = torch.tensor(golds, device=dev, dtype=torch.long)
-        l_hop1 = -torch.logsumexp(logits1[0, gset], dim=0)       # 集合边缘化
+        # **必须**先 log_softmax 再 logsumexp：直接对原始 logits 做 logsumexp 得到的是
+        # "金标 logit 的负 log-sum-exp"，不是 -log P(G|q)。那样第一跳只要把金标 logit
+        # 一起抬高就能降损失，根本不必学会把金标与干扰槽分开，损失甚至能一路变成大负数；
+        # 再叠上可学习温度（log_temp），这个目标会被彻底玩坏。集合边缘化必须落在概率上。
+        logp1 = F.log_softmax(logits1, dim=-1)
+        l_hop1 = -torch.logsumexp(logp1[0, gset], dim=0)         # -log Σ_{g∈G} P(g|q)
         terms = []
         for a in golds:
             for b in golds:

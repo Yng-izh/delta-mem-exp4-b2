@@ -946,17 +946,24 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
         reset_delta_state(model)     # 样本间隔离：上一题的在线状态不许泄进下一题
         if bridge_only:
             z, _info = encode_item_raw_embed(model, tokenizer, item)
+            z_keys, z_reads = z, None
         else:
             # 必须传 **per-slot 列表**：encode_item 返回的是 cat 后的 [Σk,m,d]，
             # 槽位一旦被切成多块（unit 超 max_unit_tokens），Σk>槽数，generate 会把
             # "块"当成"槽"去路由，选中半条事实。列表形式才能把边界带过去。
             z, _zcat, _info = encode_item_slots(enc, item, tag="val")
+            # 训练期验证**必须**与正式评测构造同一份输入：单元级池化键 + 块级保真
+            # 载荷。旧代码把原始 payload 列表直接交给 generate_latent_answer，内部
+            # 退回 stack_payloads 的块轴均值，长句分块被平均掉 —— 训练日志里的 EM
+            # 曲线与 eval_latent_table.py 的数字因此不是同一种读出方法，不可比。
+            z_reads = LM.pack_slot_reads(list(z))
+            z_keys = LM.pool_slot_keys(list(z)).unsqueeze(0)
         pred, _meta = LM.generate_latent_answer(
-            model=model, tokenizer=tokenizer, bridge=bridge, payloads=z,
+            model=model, tokenizer=tokenizer, bridge=bridge, payloads=z_keys,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
             router=router, layer=layer,
             # 多跳样本必须走链式选槽；否则只读第一跳，两跳题永远不可能对
-            hops=item_hops(item))
+            hops=item_hops(item), reads=z_reads)
         n += 1
         gold = item["answer"]
         if isinstance(gold, list):
@@ -1500,20 +1507,42 @@ def train(args):
                 _total_opt = max(1, (int(args.n_train) // max(1, int(args.accum)))
                                  * max(1, int(args.epochs)))
                 e2e = step >= int(round(_total_opt * float(args.gold_readout_ratio)))
+                def _gold_order():
+                    """金标读出的槽序：两跳时按 50% 概率交换。
+
+                    寻址监督已改成**无序**（集合口径），读出侧却一直按 chain_new 的
+                    固定顺序拼接 —— Bridge 只见过一种排列，而推理时 router 允许先
+                    命中任一金标槽。不随机交换，读出分布就带着训练期独有的顺序先验。
+                    """
+                    idxs = list(chain_new[:n_hops] if len(chain_new) >= n_hops
+                                else [int(tgt_slot)])
+                    if len(idxs) >= 2 and rng_slots.random() < 0.5:
+                        idxs[0], idxs[1] = idxs[1], idxs[0]
+                    return idxs
+
                 if not e2e:
-                    use_idx = (chain_new[:n_hops] if len(chain_new) >= n_hops
-                               else [int(tgt_slot)])
+                    use_idx = _gold_order()
                     soft = LM.compose_routed_soft(
                         model, tokenizer, bridge, [slot_reads[i] for i in use_idx],
                         dev=dev)
                 else:
                     router_out = router.forward_hops(q_feat, slot_z, n_hops=n_hops,
                                                      hard=True, reads=slot_reads)
-                    soft = LM.compose_routed_soft(model, tokenizer, bridge,
-                                                  router_out["z_list"], dev=dev)
-                    # 命中门控：router 自选的槽与金标无交集时，本样本**禁止**计入 QA
-                    # 损失（否则又是"错误事实 -> 正确答案"的毒化）。本步只贡献寻址与重建。
-                    qa_gate = 1.0 if (set(router_out["picks"]) & set(chain_new)) else 0.0
+                    picks = [int(p) for p in router_out["picks"]]
+                    gold_set = set(int(g) for g in chain_new[:n_hops])
+                    # 命中门控收紧为**完整命中**：两跳题往往需要两条证据一起才能回答，
+                    # 只命中一条时另一条仍是无关事实 —— 用它算 QA 依旧是"错误证据强迫
+                    # 预测正确答案"。未完整命中就**回退金标接地读出**：既不污染 QA，
+                    # 也不浪费后 30% 的样本（旧写法是把整条样本的 QA 项直接丢掉）。
+                    if picks and len(gold_set) > 0 and set(picks) == gold_set \
+                            and len(picks) == len(gold_set):
+                        soft = LM.compose_routed_soft(
+                            model, tokenizer, bridge, router_out["z_list"], dev=dev)
+                    else:
+                        use_idx = _gold_order()
+                        soft = LM.compose_routed_soft(
+                            model, tokenizer, bridge,
+                            [slot_reads[i] for i in use_idx], dev=dev)
             else:
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）

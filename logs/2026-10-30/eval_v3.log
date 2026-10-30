@@ -1,0 +1,33 @@
+[00:14:08] AUTO-EVAL 等待 v3 训练完成…
+[03:00:10] v3 ckpt 就绪：
+-rw-rw-r--+ 1 zhangjiayang zhangjiayang 30501319 Oct 30 02:58 /data/zhangjiayang/yyz3/ckpt/hotpot_bridge_10k_v3.pt
+-rw-rw-r--+ 1 zhangjiayang zhangjiayang 57512816 Oct 30 01:23 /data/zhangjiayang/yyz3/ckpt/hotpot_router_10k_v3.pt
+[03:00:10] ==== BRIDGE-V3 EVAL (500 题) ====
+[slots] 评测集 units 中位=23 max=97；训练侧 --max-slots=不设上限；金标证据句数>2 的样本 161/500（32.2%，固定 2 跳读出的覆盖上限）
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bridge-v3 | 500 | 16.0 | 16.6 | 24.9 | 0.0 | 0.0 | n/a | n/a | n/a | 95.5 | 95.5 | 2444 |
+{"label": "bridge-v3", "n": 500, "acc": 0.16, "pair_acc": null, "pair_n": 0, "mem_tokens": 95.536, "prompt_tokens": 95.536, "ms_mean": 2443.6874, "ms_p50": 2361.8209, "pre_ms_mean": 2050.2388, "read_acc": 0.0, "em": 0.166, "f1": 0.2489, "full_recall": 0.0, "n_leq2": 339, "full_recall_leq2": 0.0, "n_h2": 500, "acc_h2": 0.16, "read_acc_h2": 0.0}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_bridge_v3.json
+[03:20:41] ==== BRIDGE-V3 EVAL DONE ====
+[03:20:41] ==== ROUTER-V3 EVAL (500 题) ====
+[slots] 评测集 units 中位=23 max=97；训练侧 --max-slots=不设上限；金标证据句数>2 的样本 161/500（32.2%，固定 2 跳读出的覆盖上限）
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| router-v3 | 500 | 12.6 | 12.8 | 22.0 | 5.6 | 8.3 | n/a | n/a | n/a | 22.0 | 22.0 | 2716 |
+{"label": "router-v3", "n": 500, "acc": 0.126, "pair_acc": null, "pair_n": 0, "mem_tokens": 22.0, "prompt_tokens": 22.0, "ms_mean": 2716.3191, "ms_p50": 2655.8414, "pre_ms_mean": 2051.26, "read_acc": 0.056, "em": 0.128, "f1": 0.2197, "full_recall": 0.056, "n_leq2": 339, "full_recall_leq2": 0.0826, "n_h2": 500, "acc_h2": 0.126, "read_acc_h2": 0.056}
+[out] -> /data/zhangjiayang/yyz3/results/exp1_router_v3.json
+[03:43:28] ==== ROUTER-V3 EVAL DONE ====
+[03:43:28] AUTO-EVAL ALL DONE
