@@ -245,7 +245,54 @@ def select_facts(facts, question, gold_idx, cap):
     return sorted(keep)
 
 
-def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
+def select_facts_stream(facts, question, cap=0):
+    """**不看答案**地挑可见事实集（P04 的修复点）。
+
+    旧实现 select_facts(facts, question, gold_idx, cap) 把 gold_idx 当输入：
+    金标与"同键全部版本"无条件优先进入上下文，于是"上下文里到底有几种冲突版本"
+    是由**答案**决定的。这既是一处数据泄漏（模型看不到的东西被答案决定了），
+    也让 --cap 变成"按答案裁剪" —— cap 越小，越会把本来该考的干扰版本挡在外面，
+    指标随 cap 单调上升，看起来像"上下文干净就好"。
+
+    新实现只用问题与事实本身：
+      1. 问题里出现的实体（词元完全包含）及其**全部版本** —— 这是"覆盖旧值"
+         要考的东西，它由问题锚定，不需要答案；
+      2. 这些事实的值向上游追 2 跳（确定性的实体链接，同样不看答案）；
+      3. 其余按 BM25 相关度降序填满 cap。
+    cap<=0 表示不截断（全给）。返回 (keep, 诊断信息)。
+    """
+    by_idx = {f["idx"]: f for f in facts}
+    q_toks = set(_toks(question))
+    seeds = {f["idx"] for f in facts
+             if _norm(f["entity"]) and set(_toks(f["entity"])) <= q_toks} if q_toks else set()
+    keep = set(seeds)
+    # 被问题锚定的实体：把它的**所有版本**都放进来（不需要知道哪条是最新/正确）
+    for i in list(seeds):
+        k = key_of(by_idx[i])
+        for f in facts:
+            if key_of(f) == k:
+                keep.add(f["idx"])
+    chain = set(chain_indices(facts, sorted(keep), max_hops=2)) if keep else set()
+    keep |= chain
+    if cap and cap > 0:
+        scores = bm25_scores(facts, question)
+        rest = sorted(((scores[i], -by_idx[i]["idx"]) for i in by_idx if i not in keep),
+                      reverse=True)
+        for _sc, negi in rest:
+            if len(keep) >= cap:
+                break
+            keep.add(-negi)
+        if len(keep) > cap:
+            # 锚定实体 + 链已经超过 cap：不静默截断（截断会把冲突版本整组切掉，
+            # 让样本变成无解），而是明确报出来由调用方决定。
+            raise ValueError(f"问题锚定事实已 {len(keep)} 条 > cap={cap}，请调大 cap "
+                             f"或改用 --cap 0（不截断）")
+    return sorted(keep), {"n_anchor": len(seeds), "n_chain": len(chain),
+                          "n_keep": len(keep)}
+
+
+def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid,
+               hops=1):
     sel = [f for f in facts if f["idx"] in keep]
     units = [f["text"] for f in sel]
     ev = [f["text"] for f in sel if f["idx"] in gold_idx]
@@ -265,7 +312,10 @@ def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
         "question": question,
         "answer": gold_val,
         "evidence": ev,
-        "hops": 1,
+        # 跳数按 MAB 的任务子类给（FC-SH=单跳 / FC-MH=多跳），不再一律写 1：
+        # 旧脚本把每条样本都标成 hops=1，于是训练侧的多跳分支永远不触发、
+        # 评测的"两跳子集"永远为空 —— 多跳能力根本没被测量过。
+        "hops": int(hops),
         # CR 只考"当前值"（答案是覆盖后的最新值）；MAB 没有"访问历史旧值"的题，
         # 所以 probe 固定 current，历史访问准确率这一列在 CR 上是 n/a（在 FST 合成集与
         # 后续 LME knowledge-update 上才报）。
@@ -287,6 +337,13 @@ def build_item(facts, keep, question, answers, gold_idx, gold_val, meta, qid):
     }
 
 
+def _hops_hist(items):
+    h = {}
+    for it in items:
+        h[it["hops"]] = h.get(it["hops"], 0) + 1
+    return h
+
+
 def load_rows(path=None, task="cr"):
     if path is None:
         path = f"/share/latent/MemoryAgentBench/data/{'Conflict_Resolution' if task == 'cr' else 'Accurate_Retrieval'}-00000-of-00001.parquet"
@@ -297,7 +354,8 @@ def load_rows(path=None, task="cr"):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--parquet", default=None)
-    ap.add_argument("--cap", type=int, default=32, help="每条样本最多可见事实数")
+    ap.add_argument("--cap", type=int, default=0,
+                    help="每条样本最多可见事实数；0=不截断（v4 默认全给，避免 cap 与答案耦合）")
     ap.add_argument("--limit-questions", type=int, default=0, help="每组只取前 N 问")
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=0)
@@ -308,6 +366,7 @@ def main(argv=None):
     print(f"[in] {path} 组数={len(rows)}", flush=True)
 
     items, dropped, other_rels = [], 0, 0
+    n_unanswerable = 0
     caps = [args.cap] + ([int(x) for x in args.all_caps.split(",") if x.strip()]
                          if args.all_caps else [])
     extra = {c: [] for c in caps[1:]}
@@ -327,14 +386,24 @@ def main(argv=None):
             qid = f"{source}_q{qi}"
             for cap in caps:
                 try:
-                    keep = select_facts(facts, q, gold_idx, cap)
+                    keep, _sel = select_facts_stream(facts, q, cap)
                 except ValueError as e:
                     dropped += 1
                     print(f"[skip] {qid} cap={cap}: {e}", file=sys.stderr)
                     continue
+                if not set(gold_idx) <= set(keep):
+                    # 不拿答案挑上下文，就必然有样本"答案值不在上下文里"。
+                    # 这类样本**不能静默丢**：它是"该题在 cap 下不可解"的证据，
+                    # 必须单独计数并报出来（否则数据集的难度被悄悄改写）。
+                    n_unanswerable += 1
+                    continue
+                _hops = 2 if "mh" in str(source).lower() else 1
+                _meta = {"source": source, "cap": cap,
+                         "n_facts_total": len(facts),
+                         "selection": "question_only",
+                         "gold_in_context": bool(set(gold_idx) <= keep)}
                 it = build_item(facts, keep, q, ans, gold_idx, gold_val,
-                                {"source": source, "cap": cap,
-                                 "n_facts_total": len(facts)}, qid)
+                                _meta, qid, hops=_hops)
                 if cap == caps[0]:
                     items.append(it)
                 else:
@@ -357,7 +426,10 @@ def main(argv=None):
     n_conf = sum(1 for it in items if it["meta"]["max_versions"] > 1) / max(1, len(items))
     print(f"[out] {len(items)} 条 -> {args.out} | cap={args.cap} "
           f"平均可见事实={nu:.1f} 含冲突版本样本={n_conf:.1%} "
-          f"解析失败关系={other_rels / nf:.1%} 丢弃={dropped}", flush=True)
+          f"解析失败关系={other_rels / nf:.1%} 丢弃={dropped} "
+          f"不可解(答案值不在上下文)={n_unanswerable} "
+          f"hops 分布={{{', '.join(f'{h}:{c}' for h, c in sorted(_hops_hist(items).items()))}}}",
+          flush=True)
     return 0
 
 

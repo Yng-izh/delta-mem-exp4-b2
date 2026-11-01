@@ -1,0 +1,23 @@
+# delta-mem-exp4 运行环境基线
+# 实测可用组合（v3/v4 训练与评测都在此组合上跑出数字）：
+#   Python 3.10~3.12 + torch 2.8.0+cu126 + transformers 4.51.3
+# 说明见 SETUP.md；版本不要随意升级，跨版本数字不可直接比较。
+
+torch==2.8.0
+transformers==4.51.3
+tokenizers==0.21.0
+accelerate>=0.33.0
+safetensors>=0.4.3
+huggingface_hub>=0.24.0
+numpy<2
+pandas>=2.0
+pyarrow>=15.0
+datasets>=2.20.0
+# protobuf 7.x 会让 transformers 4.51 的 tokenizer 反序列化在加载阶段直接崩，必须钉住
+protobuf==4.25.9
+
+# ---- 仅 delta-mem 的 post_process / 评测脚本需要（可选）----
+# nltk
+# rouge_score
+# editdistance
+# tiktoken

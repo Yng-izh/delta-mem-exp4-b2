@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## v4 重构轮（2026-11-01）——按 P01~P12 诊断修掉"训练分布 ≠ 推理分布"的四处结构性缺陷
+
+**一句话**：v3 的 12.8% EM 不是"潜层表征不够强"，而是**读出与寻址各自被训练成了
+推理期不会遇到的样子**：读出只在 100% 纯净金标上训过（≥98% 的步数），寻址永远
+看不到"字面相同、语义不同"的干扰，多跳接力的代码从未被执行，压缩维度又把信息
+挤在 512 维瓶颈里。本轮四处改动全部围绕同一件事：**让训练时模型看到的东西等于
+推理时会遇到的东西**。目标（待重训验证）：`oracle_latent` EM 28%→45%+、
+完整证据召回 5.6%→45%+、e2e EM 34–38%、查询延迟 <400 ms。
+
+| 诊断 | 现象（v3 实测） | 根因 | 本轮修法 | 落点文件 |
+|---|---|---|---|---|
+| P01 训练/推理分布错配 | e2e EM 12.8% < v2 16.4%；oracle-text 55.4%，条件 EM 28.6% | `--gold-readout-ratio 0.7` + "完整命中才用自主路由" ⇒ 完整召回仅 5.6%，**≥98% 的 QA 步只见过纯净金标**；推理时一混入干扰槽就串扰 | **金标永远在输入里 + 每步混 1–2 个 router 高分非金标槽 + 槽序随机**（`--hard-neg-k 2 --gold-readout-ratio 0.1`）；不再有"回退金标"分支 | `train_latent_memory.py` 读出段；`runs/run_train_v4.sh` |
+| P02 寻址键来自被压缩的表征 | 4 槽 target_end 0/16，位置敏感 | `k_in/k_out` 由压缩器潜载荷派生，而压缩器为"重建"训练，槽间区分度被 m=4 压平 | 新增 `HybridLatentRouter`：键由**冻结** `h0+h18` token 特征经注意力池化构造，与压缩器解耦 | `latent_memory.py:HybridLatentRouter`、`slot_token_features` |
+| P03 FST 多跳是死分支 | FST ≈ 单次静态 Top-K | 一上来就 `k_groups=n_read`，`while len(picked) < n_read` 恒 False | 首跳 `k_groups=1`，其后用**潜层** `k_ver` 出键更新查询 `q ← norm(q + k_out)` 接力，`used_groups` 屏蔽已选；`meta.chain_log/chain_via` 记录每跳来源 | `latent_memory.py:generate_latent_answer_fst` |
+| P04 数据侧答案泄漏 | cap 越小指标越好 | `select_facts(facts, question, gold_idx, cap)` 用答案挑上下文 | `select_facts_stream`：只用问题锚定实体 + 同键全版本 + 值→实体 2 跳链 + BM25，`--cap 0` 默认不截断；不可解样本单独计数报出 | `tools/prep_mab.py` |
+| P05 跳数标错 | 两跳子集恒为空 | `prep_mab` 把所有样本写成 `hops: 1` | 由任务子类给（FC-MH→2，其余 1），并在汇总里打 hops 分布 | `tools/prep_mab.py` |
+| P06 压缩瓶颈 | 直通信息量 < 明文 | `inner_dim=512` + 读出只经 `z_sem` | `inner_dim 512→1024`；新增 **h0 符号直通**：`A∈R^{m×L}` 聚合**未投影** h0 得 `Z_lex`，`E = Bridge(Z_sem) + α·LN(Z_lex)`（单位球上按方向混合，α→0 逐位等价 v3） | `latent_memory.py:LatentCompressor.forward_split / LatentBridge` |
+| P07 明文接力 | 值写法与实体不一致即静默断链 | 用 `slot_values` 字符串匹配下一跳 | 改为纯潜层接力（见 P03）；`chain_values` 降级为诊断字段 | 同上 |
+| P08 编码未批处理 | 4B 前向主导延迟 | 逐条编码 | `encode_full` 一次性编码 + `--enc-batch 24`；载荷/直通/特征一次前向产出 | `latent_memory.py:LatentEncoder.encode_full` |
+| P10 槽位互相可见 | 跨槽串扰 | 软 token 平铺，无隔离 | `build_block_diag_mask` + `_emit_latent(isolate=)`：**prefill 阶段**块对角 + 因果；SDPA 不支持 4D 掩码时明确降级为围栏并存 `meta.slot_isolation` | `latent_memory.py:_emit_latent` |
+| P11 读出上限 2 槽 | 多跳题物理上读不全 | `forward_hops` 每跳取 1 | `topk_per_hop=2`：2 跳共 4 槽（global beam、去重、按分值取前 `n_hops*topk`） | `latent_memory.py:forward_hops` |
+| P12 记账不统一 | token 列无法与明文对照 | `prompt_tokens` 被写成 `n_soft` | `mem_tokens`（软 token）/ `mem_plain_tokens`（明文）/ `prompt_tokens = meta.n_in`；`enc_ms` 与 `gen_ms` 分列 | `eval_latent_table.py` |
+
+**新增诊断模式**：`python eval_latent_table.py --mode oracle_latent --ckpt ...`
+= 金标槽直接进 bridge（不做寻址），其余逐位同 router。它把"寻址瓶颈"与"读出瓶颈"
+分开：`oracle_latent` 与 `oracle` 的差距 = 寻址损失；`oracle_latent` 自身偏低 = 压缩/桥接损失。
+
+**训练配方（v4）**：`--kl-weight 1.0 --recon-weight 0.5 --epochs 3 --hard-neg-k 2
+--topk-per-hop 2 --router-kind hybrid --inner-dim 1024`（`runs/run_train_v4.sh`）。
+打包与蒸馏现在可以并存：teacher 按同一套打包规则一起前向，只在答案位置（`labels != -100`）
+算 KL —— 旧实现用 `SystemExit` 直接拒绝 `--pack>1` + `--kl-weight>0` 的组合。
+
+**版本策略**：`--ver-policy hybrid`（新默认）= 问题里出现回溯意图（年份/ago/before the/
+previously/"used to"…）才走 `time`，否则确定性取当前版本。依据：learned 版本分类器
+0.525 vs 恒取最新 0.885 —— "取最新"是数据里已知的确定性结构，不该再交给一个 softmax 去学。
+
+**接口变化（向后兼容）**
+
+- 保留：`LatentCompressor.forward_with_info`（仍返回 2 元组）、`encode_item_slots`
+  （仍返回 3 元组）、`forward_hops(topk_per_hop=1)` 的行为（argmax 级联，与 v3 可比）。
+- 新增：`forward_split`、`LatentBridge(z, z_lex=None)`、`HybridLatentRouter`、
+  `maxsim`、`build_block_diag_mask`、`slot_token_features`、`extract_query_feature_ex`、
+  `LatentEncoder.encode_full`、`encode_item_slots_full`、`query_feature_ex_cached`、
+  `LatentSlotBank.{payload_lex,gather_lex}`、`LatentStateTrajectoryBank.{payload_lex_at,lex_for,gather_all_versions_lex}`、
+  `prep_mab.select_facts_stream`、`--router-kind/--addr-maxsim/--addr-gamma/--hard-neg-k/
+  --topk-per-hop/--slot-isolation/--no-lex-skip`、评测 `--mode oracle_latent`。
+- checkpoint：`config` 记录 `lex_skip/bridge_lex_skip/router_kind`；`load_latent_reader`
+  按 `router_kind` 选类重建（选错会在 strict 加载时直接报错，而不是静默退回基类）。
+
+
 ## 架构修正轮（2026-10-28）——按代码评审修掉 9 处"不报错但让结论作废"的实现缺陷
 
 **一句话**：2026-10-27 的四方法结果表（HotpotQA dis4 100q：none 12.0 / text-top4 36.0 /

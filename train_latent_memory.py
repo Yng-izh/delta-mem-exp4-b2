@@ -330,6 +330,50 @@ def encode_item(encoder, item, tag="fact", grad=False):
 # =====================================================================
 # 2) 序列构造：soft tokens + 答案 token 的标签
 # =====================================================================
+def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None):
+    """同 encode_item_slots，但额外返回逐槽冻结特征与直通载荷。
+
+    返回 (payloads, z, info, kfeat, lex_payloads)：
+      - payloads/z/info：与 encode_item_slots 完全一致（语义载荷）
+      - kfeat：HybridLatentRouter 的键来源（冻结 h0/h18 token 特征，与压缩器无关）
+      - lex_payloads：bridge 的 h0 符号直通载荷（lex_skip=0 时为 None）
+    cache 命中时特征从缓存槽位拿不到，因此**缓存路径不返回 kfeat**（None）：
+    路由在训练里必须用当步真特征，缓存只服务"同一段上下文被多个问题共享"的
+    纯读出场景（MAB-CR / FST），那种场景不需要逐槽键。
+    """
+    units = item_units(item)
+    texts = [unit_encode_text(item, i) for i in range(len(units))]
+    if cache is not None and not grad:
+        payloads, lex_list, hits = [], [], 0
+        want_lex = bool(getattr(encoder.compressor, "lex_skip", False))
+        for k, t in enumerate(texts):
+            key = (str(t), int(getattr(encoder, "layer", -1)), str(tag))
+            hit = cache.get(key)
+            if hit is None:
+                p, lx, _kf, _i = encoder.encode_full(
+                    [t], parent_ids=[f"{tag}:{k}"], grad=False)
+                hit = (p[0].detach(),
+                       (lx[0].detach() if lx is not None else None))
+                cache[key] = hit
+            else:
+                hits += 1
+            payloads.append(hit[0])
+            lex_list.append(hit[1])
+        if not payloads:
+            raise RuntimeError("encode 未返回任何 payload")
+        z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
+        # 直通载荷随缓存一起复用：FST 评估里同一段上下文被上百个问题共享，
+        # 每条事实重算一次直通投影就是白烧 GPU（正是 11s/题的来源之一）。
+        lex_out = lex_list if (want_lex and any(x is not None for x in lex_list)) else None
+        return payloads, z, {"cache_hits": hits, "cache_n": len(texts)}, None, lex_out
+    payloads, lex_payloads, kfeat, info = encoder.encode_full(
+        texts, parent_ids=[f"{tag}:{k}" for k in range(len(texts))], grad=grad)
+    if not payloads:
+        raise RuntimeError("encode 未返回任何 payload")
+    z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
+    return payloads, z, info, kfeat, lex_payloads
+
+
 def encode_item_slots(encoder, item, tag="fact", grad=False, cache=None):
     """编码一条样本，返回 (per-slot payload 列表, 拼接后的 z, info)。
 
@@ -366,22 +410,34 @@ def encode_item_slots(encoder, item, tag="fact", grad=False, cache=None):
     return payloads, z, info
 
 
-_QF_CACHE: Dict[Any, torch.Tensor] = {}
+_QF_CACHE: Dict[Any, Dict[str, torch.Tensor]] = {}
+# 训练期验证（evaluate）与训练循环共用同一套读出配置（topk_per_hop / slot_isolation）。
+# 用全局引用而不是给 evaluate 加参数：evaluate 被日志/外部脚本按位置调用，
+# 加参数会静默改变调用方语义，而"日志里的 EM 与产品评测不同源"正是 v3 的教训。
+_ARGS_REF: List[Any] = [None]
 
 
-def query_feature_cached(model, tokenizer, question, system_prompt, layer, device):
-    """问题特征缓存：同一问题在训练里会被反复采样，重复跑 L0/L18 前向纯属浪费。
+def query_feature_ex_cached(model, tokenizer, question, system_prompt, layer, device):
+    """问题特征缓存（含**token 级** h0）：HybridLatentRouter 的 MaxSim 要用 token 轴。
 
     缓存键含 system_prompt 与 layer —— 换了提示词或取层，特征必须重算（否则会拿
     另一套配置的查询向量去和当前键打分，路由悄悄错位而指标看不出来）。
+    一次性把 pooled 与 token 级特征都取回来，避免为同一条问题跑两次 Qwen 前向。
     """
     key = (str(question), str(system_prompt), int(layer), str(device))
     hit = _QF_CACHE.get(key)
     if hit is None:
-        hit = LM.extract_query_feature(model, tokenizer, question, system_prompt,
-                                       layer=layer, device=device)
-        _QF_CACHE[key] = hit.detach()
+        ex = LM.extract_query_feature_ex(model, tokenizer, question, system_prompt,
+                                         layer=layer, device=device)
+        hit = {k: (v.detach() if torch.is_tensor(v) else v) for k, v in ex.items()}
+        _QF_CACHE[key] = hit
     return _QF_CACHE[key]
+
+
+def query_feature_cached(model, tokenizer, question, system_prompt, layer, device):
+    """只要 [1,2d] 池化查询特征（与 v3 口径同一个东西）。"""
+    return query_feature_ex_cached(model, tokenizer, question, system_prompt,
+                                   layer, device)["pooled"]
 
 
 def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer):
@@ -664,11 +720,44 @@ def _packed_student_step(args, model, pend, recon_stage):
     loss_addr = torch.stack(addr).mean() if addr else None
     rec = [p["rec"] for p in pend if p["rec"] is not None]
     loss_r = torch.stack(rec).mean() if rec else None
-    loss = assemble_loss(loss_qa, loss_addr, None, loss_r,
-                         addr_weight=args.addr_weight, kl_weight=0.0,
+    # KL 蒸馏与打包并存：旧实现直接 `SystemExit("--pack>1 与 --kl-weight>0 不兼容")`，
+    # 于是"开蒸馏"和"打包提速"二选一 —— 而蒸馏恰恰是 v3 把 kl_weight 设成 0 之后
+    # 丢掉的信号，两个都不能省。这里把 teacher 也按**同一套打包规则**拼起来，
+    # 只在答案位置（labels != -100）上算 KL：位置口径与学生侧完全一致。
+    loss_kl = None
+    if getattr(args, "kl_weight", 0.0) > 0 and all("temb" in p for p in pend):
+        t_embs, t_labs, t_mask = pack_student_batch([(p["temb"], p["tlab"]) for p in pend])
+        if tuple(t_embs.shape) == tuple(embs.shape):
+            with LM.delta_write_disabled(model), torch.no_grad():
+                t_logits = model(inputs_embeds=t_embs, attention_mask=t_mask,
+                                 use_cache=False).logits
+            loss_kl = kl_loss_masked(s_logits, t_logits, labs, tau=args.kl_tau)
+        else:
+            # 形状对不上（teacher 段更长/更短）时不硬算，明确记 n/a，由日志暴露
+            print(f"[kl] 打包形状不一致 student={tuple(embs.shape)} "
+                  f"teacher={tuple(t_embs.shape)}，本步跳过 KL", flush=True)
+    loss = assemble_loss(loss_qa, loss_addr, loss_kl, loss_r,
+                         addr_weight=args.addr_weight, kl_weight=args.kl_weight,
                          recon_weight=args.recon_weight, recon_stage=recon_stage)
     (loss / args.accum).backward()
-    return loss_qa, loss_addr, loss_r
+    return loss_qa, loss_addr, loss_r, loss_kl
+
+
+def kl_loss_masked(s_logits, t_logits, labels, tau=1.0):
+    """只在**答案位置**上算 KL(teacher || student)（打包路径用）。
+
+    与 kl_loss 的区别只在"位置怎么选"：打包后每个样本的答案落在不同位置，
+    逐样本传 n_ans 已经不成立，因此直接用 labels != -100 选位置 —— 这跟 QA 交叉熵
+    的位置口径逐位相同，不会出现"KL 在 prompt 上、CE 在答案上"这种错位。
+    """
+    m = labels != -100
+    if int(m.sum().item()) == 0:
+        return None
+    s = s_logits[m] / float(tau)
+    t = t_logits[m]
+    logp_t = torch.log_softmax(t.float(), dim=-1)
+    logp_s = torch.log_softmax(s.float(), dim=-1)
+    return (logp_t.exp() * (logp_t - logp_s)).sum(dim=-1).mean()
 
 
 def qa_loss(logits, labels):
@@ -951,19 +1040,31 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
             # 必须传 **per-slot 列表**：encode_item 返回的是 cat 后的 [Σk,m,d]，
             # 槽位一旦被切成多块（unit 超 max_unit_tokens），Σk>槽数，generate 会把
             # "块"当成"槽"去路由，选中半条事实。列表形式才能把边界带过去。
-            z, _zcat, _info = encode_item_slots(enc, item, tag="val")
+            z, _zcat, _info, kfeat, lex_payloads = encode_item_slots_full(
+                enc, item, tag="val")
             # 训练期验证**必须**与正式评测构造同一份输入：单元级池化键 + 块级保真
             # 载荷。旧代码把原始 payload 列表直接交给 generate_latent_answer，内部
             # 退回 stack_payloads 的块轴均值，长句分块被平均掉 —— 训练日志里的 EM
             # 曲线与 eval_latent_table.py 的数字因此不是同一种读出方法，不可比。
             z_reads = LM.pack_slot_reads(list(z))
             z_keys = LM.pool_slot_keys(list(z)).unsqueeze(0)
+            qf_ex = LM.extract_query_feature_ex(model, tokenizer, item["question"],
+                                                system_prompt, layer=layer)
+        _kw = {}
+        if not bridge_only:
+            # 训练中验证必须和正式评测喂同一份东西：冻结 token 特征、直通载荷、
+            # 4 槽读出、隔离开关 —— 任何一项不一致，日志里的 EM 曲线就不是
+            # eval_latent_table.py 的那个方法（v3 时期就吃过这个亏）。
+            _kw = {"kfeat": kfeat, "q_tok": qf_ex.get("h0_tok"),
+                   "lex_reads": lex_payloads,
+                   "topk_per_hop": int(getattr(_args_ref[0], "topk_per_hop", 1) or 1),
+                   "isolate": int(getattr(_args_ref[0], "slot_isolation", 0) or 0)}
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z_keys,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
             router=router, layer=layer,
             # 多跳样本必须走链式选槽；否则只读第一跳，两跳题永远不可能对
-            hops=item_hops(item), reads=z_reads)
+            hops=item_hops(item), reads=z_reads, **_kw)
         n += 1
         gold = item["answer"]
         if isinstance(gold, list):
@@ -1258,6 +1359,7 @@ def _load_backbone(args, dev=None):
 
 def train(args):
     t0 = time.time()
+    _ARGS_REF[0] = args
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     dev = torch.device(args.device if args.device else
@@ -1274,7 +1376,8 @@ def train(args):
 
     # ---- 可训练模块 ----
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
-                               num_heads=args.heads).to(dev)
+                               num_heads=args.heads,
+                               lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
     # 软 token 的范数必须对齐真实 token embedding 的尺度，否则会变成 attention sink
     # 把真实 token 淹没（实测未约束时软 token 范数 96~159，而真实 embedding 约 1.05，
     # 结果：loss 降到 2.8 但同一批样本 200 条只答对 1~3 条，加宽 m 完全无效）。
@@ -1282,12 +1385,18 @@ def train(args):
         _emb_w = model.get_input_embeddings().weight
         target_norm = float(_emb_w.float().norm(dim=-1).mean())
     bridge = LM.LatentBridge(hidden, bottleneck=args.bottleneck,
-                             target_norm=target_norm).to(dev)
+                             target_norm=target_norm,
+                             lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
     print(f"[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 {target_norm:.4f}"
-          f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）", flush=True)
+          f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）；"
+          f"h0 直通 lex_skip={bool(getattr(args, 'lex_skip', True))} "
+          f"α0={float(bridge.alpha()):.3f}", flush=True)
     router = None
     if args.router:
-        router = LM.LatentRouter(hidden, n_slots=args.m, d_key=args.d_key).to(dev)
+        _rcls = (LM.HybridLatentRouter if str(args.router_kind) == "hybrid"
+                 else LM.LatentRouter)
+        _rkw = ({"gamma": float(args.addr_gamma)} if _rcls is LM.HybridLatentRouter else {})
+        router = _rcls(hidden, n_slots=args.m, d_key=args.d_key, **_rkw).to(dev)
         print(f"[router] LatentRouter 启用：d_key={args.d_key} τ0="
               f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
               f"{'（Compressor 主干冻结）' if args.freeze_compressor else ''}", flush=True)
@@ -1397,7 +1506,14 @@ def train(args):
                 "steps": steps_done, "epochs": args.epochs, "seed": args.seed,
                 "smoke_model": bool(args.smoke_model),
                 "router": bool(args.router), "d_key": int(args.d_key),
-                "addr_weight": float(args.addr_weight)}
+                "addr_weight": float(args.addr_weight),
+                "lex_skip": bool(getattr(args, "lex_skip", True)),
+                "addr_maxsim": int(getattr(args, "addr_maxsim", 1)),
+                "addr_gamma": float(getattr(args, "addr_gamma", LM.LATENT_ADDR_GAMMA)),
+                "hard_neg_k": int(getattr(args, "hard_neg_k", 0)),
+                "topk_per_hop": int(getattr(args, "topk_per_hop", 1)),
+                "slot_isolation": int(getattr(args, "slot_isolation", 0)),
+                "router_kind": str(getattr(args, "router_kind", "latent"))}
 
     step = 0
     micro = 0
@@ -1414,7 +1530,11 @@ def train(args):
             raise SystemExit(f"--pack ({args.pack}) 必须等于 --accum ({args.accum})："
                              f"打包粒度就是梯度累积粒度，否则步数统计与 loss 缩放都会错")
         if args.kl_weight > 0:
-            raise SystemExit("--pack>1 与 --kl-weight>0 不兼容（teacher 对齐要逐条 logits）")
+            # 旧实现直接拒绝这个组合，等于逼人在"蒸馏"和"打包提速"里二选一。
+            # 现在两者可以并存（见 _packed_student_step 里 teacher 的同步打包），
+            # 只提示一句，不再中断训练。
+            print("[pack] kl_weight>0：teacher 会按同一套打包规则一起前向（答案位置对齐）",
+                  flush=True)
         print(f"[pack] 每 {args.pack} 条样本合成一次 4B 前反向（修 GPU 空转）", flush=True)
     grad_seen = None        # 必须在 opt.zero_grad() 之前取样，否则永远是 None -> 误报失败
     t_start = time.time()
@@ -1453,7 +1573,7 @@ def train(args):
             elif router is not None:
                 # 路由需要每个槽独立成形 [m,d]，所以保留 per-slot payload。
                 # Phase 2 冻结压缩器时用 grad=False：反正要 detach，建图纯浪费显存。
-                payloads, z, enc_info = encode_item_slots(
+                payloads, z, enc_info, kfeat, lex_payloads = encode_item_slots_full(
                     encoder, item, tag="fact", grad=not args.freeze_compressor)
             else:
                 z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
@@ -1465,6 +1585,8 @@ def train(args):
             tgt_slot = 0
             addr_pre = None
             qa_gate = 1.0
+            kfeat = None
+            lex_payloads = None
             if router is not None and payloads is not None:
                 units_now = item_units(item)
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
@@ -1479,8 +1601,19 @@ def train(args):
                     must_keep=evidence_slot_indices(units_now, item.get("evidence")))
                 if args.freeze_compressor:
                     slot_z = slot_z.detach()
-                q_feat = query_feature_cached(model, tokenizer, item["question"],
-                                              system_prompt, args.layer, dev)
+                # 逐槽特征 / 直通载荷必须跟着**同一套** keep 下标走：
+                # sample_slot_subset 会随机丢槽，若 kfeat/lex 仍按原始顺序对齐，
+                # 路由键就会指向另一条事实的 token（形状合法、语义全错，最难查的一类 bug）。
+                if kfeat is not None:
+                    kfeat = {kk: (vv[_keep] if torch.is_tensor(vv) else vv)
+                             for kk, vv in kfeat.items()}
+                if lex_payloads is not None:
+                    lex_payloads = [lex_payloads[i] for i in _keep]
+                lex_reads = lex_payloads
+                qf_ex = query_feature_ex_cached(model, tokenizer, item["question"],
+                                                system_prompt, args.layer, dev)
+                q_feat = qf_ex["pooled"]
+                q_tok = qf_ex.get("h0_tok") if bool(args.addr_maxsim) else None
                 if q_pool is not None and _nxt_item is not None:
                     # 下一条的问题特征在当前步 4B 前反向期间并行算掉
                     q_pool.submit(_safe_qfeat, model, tokenizer, _nxt_item["question"],
@@ -1499,50 +1632,45 @@ def train(args):
                 addr_pre, _ainfo = router.addr_loss_set(
                     q_feat, slot_z,
                     (chain_new[:2] if n_hops > 1 else [int(tgt_slot)]),
-                    n_hops=n_hops)
-                # 路径 2：读出。前 gold_readout_ratio 的步数**强制金标接地**，
-                # 切断死锁：未收敛的 router 选错槽 -> QA loss 强迫模型从错误事实输出
-                # 正确答案 -> 模型学会无视潜向量、改背参数先验。旧混合训练里这一步
-                # 必然发生，而且训练损失照样下降，从日志上看不出来。
+                    n_hops=n_hops, kfeat=kfeat, q_tok=q_tok)
+                # 路径 2：读出 —— **金标永远在输入里 + 难负例混入 + 槽序随机**。
+                # 旧写法（P01 暴露偏差）：前 70% 步数强制金标；后 30% 只有"router
+                # 完整命中金标集合"才用自主路由，否则回退金标。而 router 的完整召回率
+                # 只有 5.6%，于是 ≥98% 的 QA 步看到的都是 100% 纯净金标 ——
+                # 推理期一旦混进一个干扰槽，Bridge 的跨槽注意力立刻串扰，
+                # 这就是 v3 的 EM 从 v2 的 16.4% 掉到 12.8% 的机制。
+                #
+                # 新写法：每一步都保留金标（绝不逼模型从错误事实编答案），同时从
+                # router 当前打分最高、但**不是**金标的槽里抽 1~2 个难负例，
+                # 并随机打乱槽序。于是"从 4 个槽里无视 2 个高相似干扰"这件事
+                # 每一步都被训练到，而不是训练时从没出现、推理时才第一次遇到。
                 _total_opt = max(1, (int(args.n_train) // max(1, int(args.accum)))
                                  * max(1, int(args.epochs)))
-                e2e = step >= int(round(_total_opt * float(args.gold_readout_ratio)))
-                def _gold_order():
-                    """金标读出的槽序：两跳时按 50% 概率交换。
-
-                    寻址监督已改成**无序**（集合口径），读出侧却一直按 chain_new 的
-                    固定顺序拼接 —— Bridge 只见过一种排列，而推理时 router 允许先
-                    命中任一金标槽。不随机交换，读出分布就带着训练期独有的顺序先验。
-                    """
-                    idxs = list(chain_new[:n_hops] if len(chain_new) >= n_hops
+                n_warm = int(round(_total_opt * float(args.gold_readout_ratio)))
+                gold_idx = list(chain_new[:n_hops] if len(chain_new) >= n_hops
                                 else [int(tgt_slot)])
-                    if len(idxs) >= 2 and rng_slots.random() < 0.5:
-                        idxs[0], idxs[1] = idxs[1], idxs[0]
-                    return idxs
-
-                if not e2e:
-                    use_idx = _gold_order()
-                    soft = LM.compose_routed_soft(
-                        model, tokenizer, bridge, [slot_reads[i] for i in use_idx],
-                        dev=dev)
-                else:
-                    router_out = router.forward_hops(q_feat, slot_z, n_hops=n_hops,
-                                                     hard=True, reads=slot_reads)
-                    picks = [int(p) for p in router_out["picks"]]
-                    gold_set = set(int(g) for g in chain_new[:n_hops])
-                    # 命中门控收紧为**完整命中**：两跳题往往需要两条证据一起才能回答，
-                    # 只命中一条时另一条仍是无关事实 —— 用它算 QA 依旧是"错误证据强迫
-                    # 预测正确答案"。未完整命中就**回退金标接地读出**：既不污染 QA，
-                    # 也不浪费后 30% 的样本（旧写法是把整条样本的 QA 项直接丢掉）。
-                    if picks and len(gold_set) > 0 and set(picks) == gold_set \
-                            and len(picks) == len(gold_set):
-                        soft = LM.compose_routed_soft(
-                            model, tokenizer, bridge, router_out["z_list"], dev=dev)
-                    else:
-                        use_idx = _gold_order()
-                        soft = LM.compose_routed_soft(
-                            model, tokenizer, bridge,
-                            [slot_reads[i] for i in use_idx], dev=dev)
+                use_idx = list(dict.fromkeys(int(x) for x in gold_idx))
+                n_neg = 0 if step < n_warm else max(0, int(args.hard_neg_k))
+                if n_neg > 0:
+                    with torch.no_grad():
+                        _qi = router.encode_query(q_feat)
+                        _ki, _ko = router.encode_keys(slot_z, kfeat=kfeat)
+                        _lg = router.scores(_qi, _ki, q_tok=q_tok, kfeat=kfeat)[0]
+                    for cand in [int(v) for v in _lg.argsort(descending=True).tolist()]:
+                        if len(use_idx) >= len(gold_idx) + n_neg:
+                            break
+                        if cand in use_idx:
+                            continue
+                        use_idx.append(cand)
+                # 槽序随机：读出侧固定顺序会让 Bridge 学到"金标排第几位"这个
+                # 训练期独有的先验（寻址监督早已改成集合口径，读出必须跟上）。
+                rng_slots.shuffle(use_idx)
+                soft = LM.compose_routed_soft(
+                    model, tokenizer, bridge, [slot_reads[i] for i in use_idx],
+                    dev=dev,
+                    lex_list=([lex_reads[i] for i in use_idx]
+                              if lex_reads is not None else None),
+                    isolate=bool(args.slot_isolation))
             else:
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
@@ -1568,19 +1696,29 @@ def train(args):
             # 目标 g2 自己屏蔽掉，CE=inf，寻址头整条失去梯度（实测 63% 步数如此）。
             loss_addr = addr_pre
             loss_kl = None
+            t_embeds = t_labels = None
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
                 t_embeds, t_n = build_teacher_inputs(
                     model, tokenizer, item["memory"], system_prompt,
                     item["question"], item["answer"])
-                # teacher 也必须关 Delta 写入：只加 no_grad 只能停梯度，挡不住
-                # write_enabled=True 时对在线状态的更新（那会污染后续样本的前向）。
-                with LM.delta_write_disabled(model), torch.no_grad():
-                    t_logits = model(inputs_embeds=t_embeds,
-                                     attention_mask=torch.ones(t_embeds.shape[:2],
-                                                               dtype=torch.long, device=dev),
-                                     use_cache=False).logits
-                loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)], tau=args.kl_tau)
+                if args.pack > 1:
+                    # 打包路径：teacher 的 logits 必须和**同一批** student 一起算，
+                    # 因此这里只准备输入，真正的前向在 _packed_student_step 里做。
+                    t_labels = torch.full((1, int(t_embeds.shape[1])), -100,
+                                          dtype=torch.long, device=dev)
+                    t_labels[:, int(t_embeds.shape[1]) - int(t_n):] = 0
+                else:
+                    # teacher 也必须关 Delta 写入：只加 no_grad 只能停梯度，挡不住
+                    # write_enabled=True 时对在线状态的更新（那会污染后续样本的前向）。
+                    with LM.delta_write_disabled(model), torch.no_grad():
+                        t_logits = model(inputs_embeds=t_embeds,
+                                         attention_mask=torch.ones(t_embeds.shape[:2],
+                                                                   dtype=torch.long,
+                                                                   device=dev),
+                                         use_cache=False).logits
+                    loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)],
+                                      tau=args.kl_tau)
             recon_stage = args.recon_only_steps > 0 and step < args.recon_only_steps
             if args.recon_weight > 0 or recon_stage:
                 # ⑤ 事实重建辅助任务：**输入与目标必须同位**（见 recon_loss_units）。
@@ -1614,15 +1752,20 @@ def train(args):
             # 把寻址项整条覆盖掉了；两阶段的重建切换规则也一并挪进来便于单测）。
             _recon_term = None if not (args.recon_weight > 0 or recon_stage) else loss_r
             if args.pack > 1:
-                pend.append({"emb": embeds, "lab": labels,
-                             "addr": loss_addr, "rec": _recon_term})
+                _p = {"emb": embeds, "lab": labels,
+                      "addr": loss_addr, "rec": _recon_term}
+                if t_embeds is not None and t_labels is not None:
+                    _p["temb"] = t_embeds
+                    _p["tlab"] = t_labels
+                pend.append(_p)
                 micro += 1
                 if len(pend) < args.pack:
                     continue
-                loss_qa, loss_addr_b, _loss_r_b = _packed_student_step(
+                loss_qa, loss_addr_b, _loss_r_b, loss_kl_b = _packed_student_step(
                     args, model, pend, recon_stage)
                 pend.clear()
-                acc_items.append((float(loss_qa.detach()), None,
+                acc_items.append((float(loss_qa.detach()),
+                                  None if loss_kl_b is None else float(loss_kl_b.detach()),
                                   None if loss_addr_b is None
                                   else float(loss_addr_b.detach())))
             else:
@@ -1873,8 +2016,8 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
     主要来源）。写入顺序、状态转移、版本淘汰全部保持原样，只是**没变的载荷不再重算**。
     """
     units, ums = fst_units_and_meta(item)
-    payloads, _z, info = encode_item_slots(encoder, item, tag=tag, grad=grad,
-                                           cache=cache)
+    payloads, _z, info, _kfeat, lex_payloads = encode_item_slots_full(
+        encoder, item, tag=tag, grad=grad, cache=cache)
     if len(payloads) != len(units):
         raise RuntimeError(f"编码返回 {len(payloads)} 个槽位，但样本有 {len(units)} 条记忆")
     order = list(range(len(units)))
@@ -1891,7 +2034,8 @@ def build_fst_bank(encoder, item, hist_max, tag="fst", grad=False,
         # value 一起存：多跳第二跳要靠"上一跳的值 = 下一跳的实体"做确定性接力。
         bank.write(k, payloads[i], time=um.get("time", ""), detach=not grad,
                    entity=um["entity"], relation=um["relation"],
-                   value=um.get("value"))
+                   value=um.get("value"),
+                   lex=(lex_payloads[i] if lex_payloads is not None else None))
     keys = bank.group_keys()
     ent = {k: bank.group_text(k)[0] for k in keys}
     rel = {k: bank.group_text(k)[1] for k in keys}
@@ -2157,12 +2301,14 @@ def train_fst(args):
     print(f"[freeze] 冻结参数 {n_frozen/1e6:.1f}M（Delta 写入同时关闭）", flush=True)
 
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
-                               num_heads=args.heads).to(dev)
+                               num_heads=args.heads,
+                               lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
     with torch.no_grad():
         _emb_w = model.get_input_embeddings().weight
         target_norm = float(_emb_w.float().norm(dim=-1).mean())
     bridge = LM.LatentBridge(hidden, bottleneck=args.bottleneck,
-                             target_norm=target_norm).to(dev)
+                             target_norm=target_norm,
+                             lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
     fst_router = LM.FstRouter(hidden, n_slots=args.m, d_key=args.d_key).to(dev)
     if args.init:
         blob = LM._safe_torch_load(args.init)
@@ -2506,6 +2652,20 @@ def parse_args(argv=None):
     ap.add_argument("--kl-weight", type=float, default=0.0)
     ap.add_argument("--kl-tau", type=float, default=1.0)
     ap.add_argument("--recon-weight", type=float, default=0.0)
+    ap.add_argument("--router-kind", choices=["latent", "hybrid"], default="hybrid",
+                    help="latent=纯稠密内积（v3）；hybrid=冻结特征双键 + h0 MaxSim 底盘（v4）")
+    ap.add_argument("--addr-maxsim", type=int, default=1,
+                    help="1=Hybrid 路由开启 h0 Token-MaxSim 底盘（0=纯稠密，做消融用）")
+    ap.add_argument("--addr-gamma", type=float, default=LM.LATENT_ADDR_GAMMA,
+                    help="MaxSim 与稠密内积的混合初值 γ（可学习，sigmoid 夹在 (0,1)）")
+    ap.add_argument("--hard-neg-k", type=int, default=2,
+                    help="金标之外再混入几个 router 高分干扰槽（0=不混，回到 v3 的纯净金标）")
+    ap.add_argument("--topk-per-hop", type=int, default=2,
+                    help="每跳读出几个槽（1=v3 的两槽上限；2=两跳共 4 槽）")
+    ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
+                    help="1=读出侧尝试槽位块对角隔离（eager 后端生效，否则降级为围栏）")
+    ap.add_argument("--no-lex-skip", dest="lex_skip", action="store_false", default=True,
+                    help="关闭 h0 符号直通（消融：回到纯 512 维瓶颈）")
     ap.add_argument("--gold-readout-ratio", type=float, default=0.7,
                     help="前这么多比例的优化步**强制用金标槽读出**（切断"
                          "'错误槽位->正确答案'的毒化）；之后切到 router 自选+命中门控")
@@ -2561,10 +2721,11 @@ def parse_args(argv=None):
                     help="消融：丢掉查询里的时间条件（版本级只看问题+载荷，不看年份）")
     ap.add_argument("--ver-weight", type=float, default=1.0,
                     help="版本级（时间）寻址的交叉熵权重（仅 --ver-policy learned 生效）")
-    ap.add_argument("--ver-policy", default="current",
-                    choices=("current", "time", "learned"),
-                    help="版本级读出规则：current=取当前版本（默认，结构规则）/"
-                         "time=有查询时间时按时间匹配，否则当前/learned=交给分类器（消融）")
+    ap.add_argument("--ver-policy", default="hybrid",
+                    choices=("current", "time", "learned", "hybrid"),
+                    help="版本级读出规则：hybrid=按问题是否有回溯意图自动选 current/time"
+                         "（默认）/ current=恒取当前版本 / time=按时间匹配 / "
+                         "learned=交给分类器（消融，实测 0.525 远低于恒取最新 0.885）")
     ap.add_argument("--read-groups", type=int, default=1,
                     help="一次读出几个事实键（多跳/多事实题 >1；旧接口硬编码 1）")
     ap.add_argument("--system-prompt",

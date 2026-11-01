@@ -53,7 +53,7 @@ import torch
 import latent_memory as LM
 import train_latent_memory as T
 
-METHODS = ("none", "text", "oracle", "bridge", "router", "fst")
+METHODS = ("none", "text", "oracle", "oracle_latent", "bridge", "router", "fst")
 
 # ---------------------------------------------------------------------
 # 指标与字段口径
@@ -187,8 +187,10 @@ def read_one(method, item, ctx):
         pred, meta = LM._emit_latent(model, tok, None, question, sysp,
                                      max_new_tokens=ctx["max_new_tokens"],
                                      pad_token_id=ctx["pad_token_id"])
-        info = {"mem_tokens": 0, "prompt_tokens": n_tokens_of(tok, question, dev),
-                "pre_ms": 0.0, "total_ms": (time.time() - t0) * 1e3,
+        info = {"mem_tokens": 0, "mem_plain_tokens": 0,
+                "prompt_tokens": n_tokens_of(tok, question, dev),
+                "pre_ms": 0.0, "enc_ms": 0.0, "gen_ms": (time.time() - t0) * 1e3,
+                "total_ms": (time.time() - t0) * 1e3,
                 "n_read_units": 0, "decode_mode": meta.get("decode_mode")}
         return pred, info
 
@@ -207,10 +209,12 @@ def read_one(method, item, ctx):
                                      pad_token_id=ctx["pad_token_id"])
         t_gen = time.time()
         _gs2 = gold_slots(item, units)
-        info = {"mem_tokens": n_tokens_of(tok, memory_block(units, idx), dev),
+        _n_mem = n_tokens_of(tok, memory_block(units, idx), dev)
+        info = {"mem_tokens": _n_mem, "mem_plain_tokens": _n_mem,
                 "prompt_tokens": n_tokens_of(tok, sys_full, dev)
                 + n_tokens_of(tok, question, dev),
-                "pre_ms": (t_gen - t_pre) * 1e3, "total_ms": (time.time() - t0) * 1e3,
+                "pre_ms": 0.0, "enc_ms": 0.0, "gen_ms": (t_gen - t_pre) * 1e3,
+                "total_ms": (time.time() - t0) * 1e3,
                 "n_read_units": len(idx), "decode_mode": meta.get("decode_mode"),
                 # 与潜层方法的"读对槽位"可直接比较的可部署指标：取回的 top-k 里
                 # 有没有黄金事实。不设这一列的话，"文本 RAG 掉点"到底是因为
@@ -238,12 +242,20 @@ def read_one(method, item, ctx):
             pad_token_id=ctx["pad_token_id"], layer=ctx["layer"], device=dev,
             query_time=item.get("as_of"), feat_cache=ctx["cache"],
             hops=max(1, int(ctx.get("read_groups") or 1)),
-            ver_policy=str(ctx.get("ver_policy") or "current"))
+            ver_policy=str(ctx.get("ver_policy") or "hybrid"))
         t_gen = time.time()
         _groups = [int(x) for x in (meta.get("groups_picked") or [meta["group_picked"]])]
         _g_ok = bool(meta["group_keys"][int(meta["group_picked"])] == fi["tgt_key"])
-        info = {"mem_tokens": int(meta["n_soft"]), "prompt_tokens": int(meta["n_soft"]),
-                "pre_ms": (t_enc - t0) * 1e3, "total_ms": (time.time() - t0) * 1e3,
+        # 统一 token 口径：mem_tokens = 注入的**软** token 数；prompt_tokens =
+        # 这次前向实际吃进去的全部上下文（软 token + system + question），
+        # 取 meta["n_in"]。旧代码把 prompt_tokens 也写成 n_soft，
+        # 于是"潜层只占 m 个 token"与"整个 prompt 有多长"两件事被混成一个数，
+        # 表里的 token 列无法与明文基线对照（明文那列是真·上下文长度）。
+        info = {"mem_tokens": int(meta["n_soft"]), "mem_plain_tokens": 0,
+                "prompt_tokens": int(meta.get("n_in", meta["n_soft"])),
+                "pre_ms": (t_enc - t0) * 1e3,
+                "enc_ms": (t_enc - t0) * 1e3, "gen_ms": (t_gen - t_enc) * 1e3,
+                "total_ms": (time.time() - t0) * 1e3,
                 "n_read_units": len(_groups),
                 # 更新/历史口径的判定用得到（答案对 + 读对版本才算"更新准确率"）
                 "group_ok": _g_ok,
@@ -253,8 +265,8 @@ def read_one(method, item, ctx):
                 "read_ok": _g_ok}
         return pred, info
 
-    slot_z, _cat, _ei = T.encode_item_slots(ctx["encoder"], item, tag="eval",
-                                            cache=ctx.get("unit_cache"))
+    slot_z, _cat, _ei, kfeat, lex_payloads = T.encode_item_slots_full(
+        ctx["encoder"], item, tag="eval", cache=ctx.get("unit_cache"))
     # 键-载荷解耦：寻址键用**单元级池化键**，读出载荷用**块级保真**版本。
     # 旧代码在评测时用 stack_payloads 的块轴均值同时当键和载荷，把
     # --max-unit-tokens 32 切出来的多块长句内容直接抹平（训练侧是多块 cat）。
@@ -262,17 +274,59 @@ def read_one(method, item, ctx):
     slot_z = LM.pool_slot_keys(list(slot_z)).unsqueeze(0)     # [1,K,m,d]
     t_enc = time.time()
     router = ctx["router"]
-    pred, meta = LM.generate_latent_answer(
-        model=model, tokenizer=tok, bridge=ctx["bridge"], payloads=slot_z,
-        question=question, system_prompt=sysp, max_new_tokens=ctx["max_new_tokens"],
-        pad_token_id=ctx["pad_token_id"], router=router, layer=ctx["layer"],
-        hops=item_hops(item), reads=slot_reads)
+    qf_ex = LM.extract_query_feature_ex(model, tok, question, sysp, layer=ctx["layer"])
+    _gs = gold_slots(item, units)
+    if method == "oracle_latent":
+        # ---- 诊断模式：完美寻址下的**读出上界** ----
+        # 直接把金标槽送进 bridge（不做任何寻址），其余（bridge、软 token 注入、
+        # 解码）与 router 方法逐位相同。它回答的是唯一一个问题：
+        # "如果寻址全对，这套潜层读出能到多少？"
+        # oracle_latent ≈ oracle 但 router 差 => 瓶颈全在寻址（P01/P02 的方向）；
+        # oracle_latent 也低          => bridge/压缩本身丢了信息（P06 的方向）。
+        # 没有 evidence 就没有"黄金槽位"这回事：不拿 slot 0 冒充（那会把一根
+        # 无关事实当成上界，凭空抬高或压低 oracle_latent），显式记账为无上界样本。
+        _idx = [i for i in sorted(_gs) if i < len(slot_reads)]
+        if not _idx:
+            info_no_oracle = {"oracle_no_evidence": True, "mem_tokens": 0,
+                              "mem_plain_tokens": 0, "prompt_tokens": 0,
+                              "pre_ms": 0.0, "enc_ms": (t_enc - t0) * 1e3,
+                              "gen_ms": 0.0, "total_ms": (time.time() - t0) * 1e3,
+                              "n_read_units": 0, "read_ok": None, "read_all": None,
+                              "picked": [], "gold": []}
+            return "", info_no_oracle
+        _z = [slot_reads[i] for i in _idx]
+        _lx = ([lex_payloads[i] for i in _idx if i < len(lex_payloads)]
+               if lex_payloads is not None else None)
+        soft = LM.compose_routed_soft(model, tok, ctx["bridge"], _z, dev=dev,
+                                     lex_list=_lx,
+                                     isolate=bool(ctx.get("slot_isolation")))
+        pred, meta = LM._emit_latent(
+            model, tok, soft, question, sysp,
+            max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
+            extra_meta={"has_payload": True, "routed": _idx,
+                        "hops": item_hops(item), "oracle_addressing": True})
+        meta = dict(meta)
+        meta["routed"] = _idx
+    else:
+        pred, meta = LM.generate_latent_answer(
+            model=model, tokenizer=tok, bridge=ctx["bridge"], payloads=slot_z,
+            question=question, system_prompt=sysp, q_feat=qf_ex["pooled"],
+            max_new_tokens=ctx["max_new_tokens"],
+            pad_token_id=ctx["pad_token_id"], router=router, layer=ctx["layer"],
+            hops=item_hops(item), reads=slot_reads, kfeat=kfeat,
+            q_tok=qf_ex.get("h0_tok"), lex_reads=lex_payloads,
+            topk_per_hop=int(ctx.get("topk_per_hop") or 1),
+            isolate=int(ctx.get("slot_isolation") or 0))
+        # q_feat 已由 extract_query_feature_ex 算好并显式传入，避免 generate 内重跑前向
     t_gen = time.time()
     _gs = gold_slots(item, units)
     _picked = [int(x) for x in (meta.get("routed") or [])]
     needs_full = len(_gs) > 1          # 多跳：证据链是**一组**槽位，不是随便一条
-    info = {"mem_tokens": int(meta.get("n_soft", 0)), "prompt_tokens": int(meta.get("n_soft", 0)),
-            "pre_ms": (t_enc - t0) * 1e3, "total_ms": (time.time() - t0) * 1e3,
+    info = {"mem_tokens": int(meta.get("n_soft", 0)), "mem_plain_tokens": 0,
+            "prompt_tokens": int(meta.get("n_in", meta.get("n_soft", 0))),
+            "pre_ms": (t_enc - t0) * 1e3,
+            "enc_ms": (t_enc - t0) * 1e3, "gen_ms": (time.time() - t_enc) * 1e3,
+            "total_ms": (time.time() - t0) * 1e3,
             "n_read_units": max(1, len(_picked)),
             "decode_mode": meta.get("decode_mode"),
             # 多跳样本：只有**整条证据链**都被读到才算"读对"。
@@ -306,7 +360,12 @@ def summarize(rows, label):
         "pair_acc": (pair_ok / len(real)) if real else None,
         "pair_n": len(real),
         "mem_tokens": sum(r["mem_tokens"] for r in rows) / n,
+        "mem_plain_tokens": sum(int(r.get("mem_plain_tokens") or 0) for r in rows) / n,
         "prompt_tokens": sum(r["prompt_tokens"] for r in rows) / n,
+        # 编码前向 vs 解码前向分开报：潜层的"多付一次编码"全部落在 enc_ms 上，
+        # 合成一个 total_ms 就没法回答"400ms 预算里到底哪一段超了"。
+        "enc_ms_mean": sum(float(r.get("enc_ms") or 0.0) for r in rows) / n,
+        "gen_ms_mean": sum(float(r.get("gen_ms") or 0.0) for r in rows) / n,
         "ms_mean": sum(lat) / n,
         "ms_p50": lat[n // 2],
         "pre_ms_mean": sum(r["pre_ms"] for r in rows) / n,
@@ -355,12 +414,14 @@ def fmt_line(s):
             f" | {pct(s.get('pair_acc'))}"
             f" | {pct(s.get('update_acc'))} | {pct(s.get('hist_acc'))}"
             f" | {s['mem_tokens']:.1f} | {s['prompt_tokens']:.1f}"
+            f" | {s.get('enc_ms_mean', 0.0):.0f} | {s.get('gen_ms_mean', 0.0):.0f}"
             f" | {s['ms_mean']:.0f} |")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", required=True, choices=METHODS)
+    ap.add_argument("--method", "--mode", dest="method", required=True, choices=METHODS,
+                    help="评测方法；--mode 是同一参数（与方案文档里的 `--mode oracle_latent` 对齐）")
     ap.add_argument("--data", required=True)
     ap.add_argument("--ckpt", default="", help="潜层方法必需（bridge/router/fst）")
     ap.add_argument("--limit", type=int, default=200)
@@ -379,11 +440,15 @@ def main(argv=None):
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--text-topk", type=int, default=5, help="text 方法的检索条数（0=全给）")
     ap.add_argument("--hist-max", type=int, default=LM.LATENT_HIST_MAX)
-    ap.add_argument("--ver-policy", default="current",
-                    choices=("current", "time", "learned"),
+    ap.add_argument("--ver-policy", default="hybrid",
+                    choices=("current", "time", "learned", "hybrid"),
                     help="FST 版本级读出规则（必须与训练时一致，否则是两套方法）")
     ap.add_argument("--read-groups", type=int, default=1,
                     help="FST 一次读出几个事实键（多跳/多事实题 >1）")
+    ap.add_argument("--topk-per-hop", type=int, default=2,
+                    help="路由方法每跳读出几个槽（1=v3 上限 2 槽；2=两跳共 4 槽）")
+    ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
+                    help="1=尝试槽位块对角隔离（仅 eager 后端生效，否则降级并记账）")
     ap.add_argument("--train-max-slots", type=int, default=0,
                     help="训练时用的 --max-slots，仅用于 train/eval 槽数一致性告警")
     ap.add_argument("--system-prompt",
@@ -408,9 +473,11 @@ def main(argv=None):
            "text_topk": args.text_topk, "cache": {},
            # 文本 -> 载荷缓存：同一段上下文被多问共享时不重复编码（FST 每题 11s 的主因）
            "unit_cache": {}, "read_groups": args.read_groups,
-           "ver_policy": args.ver_policy}
+           "ver_policy": args.ver_policy,
+           "topk_per_hop": int(args.topk_per_hop),
+           "slot_isolation": int(args.slot_isolation)}
 
-    if args.method in ("bridge", "router", "fst"):
+    if args.method in ("bridge", "router", "fst", "oracle_latent"):
         if not args.ckpt:
             raise SystemExit(f"--method {args.method} 必须给 --ckpt（随机权重没有任何意义）")
         reader = LM.load_latent_reader(args.ckpt, model, tok, device=dev)
@@ -418,6 +485,8 @@ def main(argv=None):
         # 于是 --method bridge 实际跑的是"有路由的单槽读出"，两行结果同源，
         # "Bridge vs Router" 这一列就不成立了（这是结果表里最贵的一处静默错误）。
         use_router = reader.router if args.method == "router" else None
+        # oracle_latent 刻意**不带 router**：它要测的是"给定正确槽位时的读出上界"，
+        # 一旦让 router 参与，它就不再是无寻址误差的量。
         ctx.update({"encoder": reader.encoder, "bridge": reader.bridge,
                     "router": use_router, "fst_router": reader.fst_router,
                     "hist_max": args.hist_max})

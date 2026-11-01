@@ -65,7 +65,10 @@ def _env_str(name: str, default: str) -> str:
 # 初始配置（数值是起点，不是结论：训练时长/显存需要实测 profiling）
 LATENT_M               = _env_int("LATENT_M", 4)                # 每个单元的潜槽位数 m
 LATENT_LAYER           = _env_int("LATENT_LAYER", 18)           # 取第几层隐状态（0 层恒为 embedding）
-LATENT_INNER_DIM       = _env_int("LATENT_INNER_DIM", 512)      # 压缩器内部宽度
+# 压缩器内部宽度。v3 是 512：两个方向（h0->m=4 个槽）的 cross-attention 把整段
+# 事实塞进 512 维瓶颈，是 P06 量化出的信息损失来源之一，v4 默认加宽到 1024。
+# runs/run_train_v3.sh 显式传 --inner-dim 512，所以旧结果仍可复现。
+LATENT_INNER_DIM       = _env_int("LATENT_INNER_DIM", 1024)
 LATENT_N_HEADS         = _env_int("LATENT_N_HEADS", 8)          # cross-attention 头数
 LATENT_BOTTLENECK      = _env_int("LATENT_BOTTLENECK", 512)     # Bridge 瓶颈宽度
 LATENT_MAX_UNIT_TOKENS = _env_int("LATENT_MAX_UNIT_TOKENS", 64) # 单块最多 token 数（超出要再分块，不截断）
@@ -77,6 +80,21 @@ LATENT_CKPT            = _env_str("LATENT_CKPT", "")            # 压缩器+桥�
 # FST-Mem：每个 (实体,属性) 事实键保留多少条**历史**版本（当前状态不计入）。
 # =0 表示"硬覆写，历史全丢"，是做对照的合法取值，不是错误。
 LATENT_HIST_MAX        = _env_int("LATENT_HIST_MAX", 4)
+# ---- v4 手术一：h0 符号直通（Lexical Skip-Connection） ----
+# 压缩器把 h0/h18 一起投到 inner_dim 再还原，等于给"人名/地名/数字"加了一道低通滤波：
+# 金标证据命中的 28 题里仍有 20 题答错（条件 EM 28.6% vs oracle 明文 55.4%）。h0 本身
+# 就在冻结模型输入嵌入所在的流形上，所以把交叉注意力的权重直接拿去聚合**未降维的**
+# h0，再从 bridge 输出端加回来，可以做到"注意力头挑中的那几个 token 零失真直达生成端"。
+LATENT_LEX_SKIP        = _env_int("LATENT_LEX_SKIP", 1)         # 1=启用直通，0=退回纯语义分支
+LATENT_LEX_GATE_INIT   = _env_float("LATENT_LEX_GATE_INIT", 0.1)  # 门控 α 的初值（sigmoid 前）
+# ---- v4 手术二：HybridLatentRouter 的 h0 Token-MaxSim 底盘 ----
+LATENT_ADDR_GAMMA      = _env_float("LATENT_ADDR_GAMMA", 0.5)   # γ 初值：MaxSim 占比（可学习）
+LATENT_MS_TAU          = _env_float("LATENT_MS_TAU", 0.2)       # MaxSim 的固定逆温度
+LATENT_KEY_TOKENS      = _env_int("LATENT_KEY_TOKENS", 64)      # 每个槽位留多少 token 做寻址键
+# ---- v4 手术三：槽位间块对角隔离 ----
+# 1=尝试在读出侧对不同槽位的软 token 加块对角掩码（需要 4D attention mask，
+# 只有 eager 注意力实现支持；不支持时自动降级为原生隔离栅栏并在 meta 里写明）。
+LATENT_SLOT_ISOLATION  = _env_int("LATENT_SLOT_ISOLATION", 0)
 # >0 时只编码前 N 个槽位（smoke / 大池调试用）；0 = 不限制。
 LATENT_BANK_MAX = int(os.environ.get("LATENT_BANK_MAX", "0"))
 LATENT_DTYPE           = _env_str("LATENT_DTYPE", "bf16").lower()
@@ -107,6 +125,11 @@ def latent_config() -> Dict[str, Any]:
         "bank_max": int(LATENT_BANK_MAX),
         "hist_max": int(LATENT_HIST_MAX),
         "dtype": LATENT_DTYPE,
+        "lex_skip": int(LATENT_LEX_SKIP),
+        "key_tokens": int(LATENT_KEY_TOKENS),
+        "addr_gamma": float(LATENT_ADDR_GAMMA),
+        "ms_tau": float(LATENT_MS_TAU),
+        "slot_isolation": int(LATENT_SLOT_ISOLATION),
     }
 
 
@@ -215,7 +238,8 @@ class LatentCompressor(nn.Module):
     """
 
     def __init__(self, hidden_size: int, n_slots: int = LATENT_M,
-                 inner_dim: int = LATENT_INNER_DIM, num_heads: int = LATENT_N_HEADS):
+                 inner_dim: int = LATENT_INNER_DIM, num_heads: int = LATENT_N_HEADS,
+                 lex_skip: bool = bool(LATENT_LEX_SKIP)):
         super().__init__()
         if int(hidden_size) <= 0:
             raise ValueError(f"hidden_size 必须为正，得到 {hidden_size}")
@@ -229,6 +253,9 @@ class LatentCompressor(nn.Module):
         self.n_slots = int(n_slots)
         self.inner_dim = int(inner_dim)
         self.num_heads = int(num_heads)
+        # h0 符号直通（v4）：见文件头 LATENT_LEX_SKIP 的说明。关闭时 z_lex=None，
+        # 下游 bridge 行为与 v3 逐位一致（旧 checkpoint 因此可以原样加载）。
+        self.lex_skip = bool(lex_skip)
         self.input_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.hidden_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.queries = nn.Parameter(torch.randn(self.n_slots, self.inner_dim) * 0.02)
@@ -239,12 +266,29 @@ class LatentCompressor(nn.Module):
 
     def forward(self, h0: torch.Tensor, h18: torch.Tensor,
                 attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        z, _info = self.forward_with_info(h0, h18, attention_mask)
-        return z
+        z_sem, _lex, _info = self.forward_split(h0, h18, attention_mask)
+        return z_sem
 
     def forward_with_info(self, h0: torch.Tensor, h18: torch.Tensor,
                           attention_mask: Optional[torch.Tensor] = None
                           ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """兼容旧接口：只返回语义分支 (z_sem, info)。直通分支走 forward_split。"""
+        z_sem, _lex, info = self.forward_split(h0, h18, attention_mask)
+        return z_sem, info
+
+    def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
+                      attention_mask: Optional[torch.Tensor] = None
+                      ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
+        """返回 (z_sem [B,m,d], z_lex [B,m,d] 或 None, info)。
+
+        z_lex = A · h0，其中 A 是**同一个**交叉注意力头对单元 token 的（去 padding、
+        按 token 轴重新归一化的）权重，h0 是**未经降维**的第 0 层词嵌入/embedding。
+
+        为什么这条路必须绕开 inner_dim 瓶颈：h0 已经处在冻结 Qwen 的输入嵌入流形上，
+        它和 `inputs_embeds` 是同一个空间。走一遍 input_proj -> 512 -> output_proj
+        再回到 d_model，等价于对"专有名词的词形"做了一次低通滤波 —— HotpotQA 的
+        人名/地名/年份正好活在这个被滤掉的高频段里。直通分支不做任何投影。
+        """
         h0 = _as_3d(h0, "h0")
         h18 = _as_3d(h18, "h18")
         if tuple(h0.shape) != tuple(h18.shape):
@@ -282,15 +326,46 @@ class LatentCompressor(nn.Module):
         x = (self.input_proj(h0.to(device=dev_p, dtype=p.dtype))
              + self.hidden_proj(h18.to(device=dev_p, dtype=p.dtype)))
         q = self.queries.unsqueeze(0).expand(B, -1, -1)
-        z, _w = self.attn(q, x, x, key_padding_mask=~safe_mask, need_weights=False)
+        # lex_skip 打开时必须同时取出注意力权重（need_weights=True）：这条路径多付一次
+        # 权重回传，但省掉"再跑一次注意力"的整段开销，而且**与语义分支共用同一份
+        # 注意力**，所以"挑哪些 token"和"压哪些 token"不会各说各话。
+        z, w = self.attn(q, x, x, key_padding_mask=~safe_mask,
+                         need_weights=bool(self.lex_skip),
+                         average_attn_weights=True)
         z = self.norm(self.output_proj(z))
         z = torch.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
         if bool(empty.any()):
             z = z.masked_fill(empty.view(B, 1, 1), 0.0)
+
+        z_lex: Optional[torch.Tensor] = None
+        if self.lex_skip:
+            if w is None:
+                raise RuntimeError("lex_skip=True 但注意力权重为 None（need_weights 未生效）")
+            if tuple(w.shape)[1:] != (self.n_slots, L):
+                # batch_first=True 下权重应是 [B, m, L]；不同 torch 版本偶有 [B, L, m]，
+                # 静默广播会得到"用错轴聚合"的载荷（形状合法、语义全错），因此显式校正。
+                if tuple(w.shape)[1:] == (L, self.n_slots):
+                    w = w.transpose(1, 2)
+                else:
+                    raise ValueError(f"注意力权重形状异常：{tuple(w.shape)}，"
+                                     f"期望 [B,{self.n_slots},{L}]")
+            # 被 mask 掉的位置权重必须清零再归一化：否则 padding token 会分走一部分
+            # 聚合质量，而 h0 在 padding 位上是 0 向量 —— 表现为"直通分支整体变暗"。
+            w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
+            w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+            z_lex = torch.einsum("bml,bld->bmd",
+                                 w.to(dtype=h0.dtype if h0.dtype.is_floating_point
+                                      else p.dtype),
+                                 h0.to(device=w.device, dtype=p.dtype))
+            z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
+            if bool(empty.any()):
+                z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
+
         info = {"n_rows": int(B), "seq_len": int(L),
                 "n_tokens": [int(v) for v in mask.sum(dim=1).tolist()],
-                "n_empty_rows": int(empty.sum().item())}
-        return z, info
+                "n_empty_rows": int(empty.sum().item()),
+                "lex_skip": bool(self.lex_skip)}
+        return z, z_lex, info
 
 
 def _as_3d(t: torch.Tensor, name: str) -> torch.Tensor:
@@ -326,7 +401,9 @@ class LatentBridge(nn.Module):
     NORM_MAX = 4.0
 
     def __init__(self, hidden_size: int, bottleneck: int = LATENT_BOTTLENECK,
-                 target_norm: float = LATENT_TARGET_NORM):
+                 target_norm: float = LATENT_TARGET_NORM,
+                 lex_skip: bool = bool(LATENT_LEX_SKIP),
+                 lex_gate_init: float = LATENT_LEX_GATE_INIT):
         super().__init__()
         if int(hidden_size) <= 0 or int(bottleneck) <= 0:
             raise ValueError(f"hidden_size/bottleneck 必须为正：{hidden_size}/{bottleneck}")
@@ -342,12 +419,25 @@ class LatentBridge(nn.Module):
         )
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
         self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
+        # ---- v4：h0 直通的**方向**门控 ----
+        # 为什么是"方向混合"而不是"范数相加"：这个类存在的唯一理由是让软 token 的
+        # 每向量范数与真实 embedding 对齐（1.05）；直接 `out + α·LN(z_lex)` 会把范数
+        # 推到 60+，软 token 立刻退化成 attention sink（本类文档里那组实测数据）。
+        # 因此在单位球面上做门控插值：方向由语义/符号两支按 α 竞争，范数仍由受限标量
+        # 给出。α→0 时结果与 v3 逐位相同（unit(out)·scale，归一化是幂等的）。
+        self.lex_skip = bool(lex_skip)
+        self.lex_gate = nn.Parameter(torch.tensor(float(lex_gate_init)))
 
     def scale(self) -> torch.Tensor:
         """当前生效的范数（已夹在 [NORM_MIN, NORM_MAX] 内）。"""
         return self.out_norm.clamp(self.NORM_MIN, self.NORM_MAX)
 
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
+    def alpha(self) -> torch.Tensor:
+        """h0 直通门控 α ∈ (0,1)（sigmoid 保证语义/符号两支都不会被负权重抵消）。"""
+        return torch.sigmoid(self.lex_gate)
+
+    def forward(self, z: torch.Tensor, z_lex: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Z [B,m,d]（+ 可选 z_lex [B,m,d]）-> soft tokens [B,m,d]，范数对齐真实 embedding。"""
         z = _as_3d(z, "z")
         if z.shape[-1] != self.hidden_size:
             raise ValueError(f"z 的最后一维 {z.shape[-1]} != hidden_size={self.hidden_size}")
@@ -357,7 +447,19 @@ class LatentBridge(nn.Module):
         # 方向保留、范数对齐到真实 embedding 尺度（见类文档里的实测数据）
         n = out.norm(dim=-1, keepdim=True)
         unit = out / n.clamp_min(1e-6)
-        return unit * self.scale().to(device=out.device, dtype=out.dtype)
+        if z_lex is not None and self.lex_skip:
+            lex = _as_3d(z_lex, "z_lex")
+            if tuple(lex.shape) != tuple(z.shape):
+                raise ValueError(f"z_lex 形状 {tuple(lex.shape)} 必须与 z {tuple(z.shape)} 一致")
+            lex = lex.to(device=unit.device, dtype=unit.dtype)
+            ln = lex.norm(dim=-1, keepdim=True)
+            lex_unit = lex / ln.clamp_min(1e-6)
+            # 空槽（全零直通向量）不参与混合：否则 normalize 出来的方向是噪声
+            valid = (ln > 1e-6).to(unit.dtype)
+            a = self.alpha().to(device=unit.device, dtype=unit.dtype) * valid
+            mixed = unit + a * lex_unit
+            unit = mixed / mixed.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+        return unit * self.scale().to(device=unit.device, dtype=unit.dtype)
 
 
 # ----------------------------- 2.5) 潜空间内容寻址（Router） -----------------------------
@@ -481,8 +583,14 @@ class LatentRouter(nn.Module):
         return torch.nn.functional.normalize(
             self.q_net(q_feat.to(device=p.device, dtype=p.dtype)), dim=-1)
 
-    def encode_keys(self, slot_z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """slot_z: [B, K, m, d] -> (k_in [B,K,d_key], k_out [B,K,d_key])，均已归一化。"""
+    def encode_keys(self, slot_z: torch.Tensor,
+                    kfeat: Optional[Dict[str, Any]] = None
+                    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """slot_z: [B, K, m, d] -> (k_in [B,K,d_key], k_out [B,K,d_key])，均已归一化。
+
+        kfeat 见 scores 的说明：基类不用，HybridLatentRouter 用它把键的输入从
+        "压缩器潜载荷"换成"冻结模型的 h0/h18 特征"。
+        """
         slot_z = torch.as_tensor(slot_z)
         if slot_z.dim() == 3:
             slot_z = slot_z.unsqueeze(0)
@@ -497,13 +605,22 @@ class LatentRouter(nn.Module):
         k_out = torch.nn.functional.normalize(self.k_out_net(flat), dim=-1)
         return k_in, k_out
 
-    def scores(self, q_vec: torch.Tensor, k_in: torch.Tensor) -> torch.Tensor:
-        """集合打分 s_k = <q, k_in_k> / tau，形状 [B, K]（与 K、与顺序无关）。"""
+    def scores(self, q_vec: torch.Tensor, k_in: torch.Tensor,
+               q_tok: Optional[torch.Tensor] = None,
+               kfeat: Optional[Dict[str, Any]] = None) -> torch.Tensor:
+        """集合打分 s_k = <q, k_in_k> / tau，形状 [B, K]（与 K、与顺序无关）。
+
+        q_tok / kfeat 是给 HybridLatentRouter 的 h0 Token-MaxSim 底盘留的口子；
+        基类（纯稠密内积）用不到，接收后忽略 —— 这样上层调用点只有一份，
+        不会出现"v3 走一条、v4 走另一条"的双实现漂移。
+        """
         tau = self.log_temp.exp().clamp_min(1e-4)
         return torch.einsum("bd,bkd->bk", q_vec, k_in.to(q_vec.dtype)) / tau
 
     def forward(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
-                hard: bool = False, target_idx: Optional[torch.Tensor] = None
+                hard: bool = False, target_idx: Optional[torch.Tensor] = None,
+                kfeat: Optional[Dict[str, Any]] = None,
+                q_tok: Optional[torch.Tensor] = None
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """返回 (z_read [B,m,d], 路由 logits [B,K], k_in, k_out)。
 
@@ -525,8 +642,8 @@ class LatentRouter(nn.Module):
             （况且路由本身还有 loss_addr 的显式 CE 监督）。
         """
         q_vec = self.encode_query(q_feat)
-        k_in, k_out = self.encode_keys(slot_z)
-        logits = self.scores(q_vec, k_in)
+        k_in, k_out = self.encode_keys(slot_z, kfeat=kfeat)
+        logits = self.scores(q_vec, k_in, q_tok=q_tok, kfeat=kfeat)
         z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
         z = z.to(device=q_vec.device, dtype=q_vec.dtype)
         idx = logits.argmax(dim=-1)                                   # [B]
@@ -544,7 +661,9 @@ class LatentRouter(nn.Module):
         return z_read, logits, k_in, k_out
 
     def addr_loss_set(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
-                      gold_idx: Sequence[int], n_hops: int = 2):
+                      gold_idx: Sequence[int], n_hops: int = 2,
+                      kfeat: Optional[Dict[str, Any]] = None,
+                      q_tok: Optional[torch.Tensor] = None):
         """无序第一跳 + 双向金标条件第二跳的寻址损失（**从数学上消除 loss_addr=inf**）。
 
         旧实现的死法是确定的：它把"金标证据链按 evidence 顺序"当成跳序，第 1 跳用
@@ -558,13 +677,14 @@ class LatentRouter(nn.Module):
         金标引导分支，掩码只屏蔽"本分支用掉的那一跳"，目标槽永远不可能落在掩码里。
         槽位内容对寻址损失 `detach()`：寻址梯度只更新打分头，不把压缩器内容拖走。
         """
-        k_in, k_out = self.encode_keys(slot_z.detach() if torch.is_tensor(slot_z) else slot_z)
+        k_in, k_out = self.encode_keys(slot_z.detach() if torch.is_tensor(slot_z) else slot_z,
+                                       kfeat=kfeat)
         q_vec = self.encode_query(q_feat)
         K = int(slot_z.shape[0]) if slot_z.dim() == 3 else int(slot_z.shape[1])
         golds = [int(g) for g in gold_idx if 0 <= int(g) < K]
         if not golds:
             return None, {"why": "no_gold"}
-        logits1 = self.scores(q_vec, k_in)                      # [1,K]
+        logits1 = self.scores(q_vec, k_in, q_tok=q_tok, kfeat=kfeat)   # [1,K]
         dev = logits1.device
         if int(n_hops) <= 1 or len(golds) < 2:
             tgt = torch.tensor([golds[0]], device=dev)
@@ -585,7 +705,8 @@ class LatentRouter(nn.Module):
                 mask = torch.zeros_like(logits1, dtype=torch.bool)
                 mask[0, a] = True                                # 只屏蔽本分支用掉的那一跳
                 q2 = torch.nn.functional.normalize(q_vec + k_out[:, a], dim=-1)
-                logits2 = self.scores(q2, k_in).masked_fill(mask, float("-inf"))
+                logits2 = self.scores(q2, k_in, q_tok=q_tok, kfeat=kfeat).masked_fill(
+                    mask, float("-inf"))
                 terms.append(F.cross_entropy(logits2, torch.tensor([b], device=dev)))
         l_hop2 = torch.stack(terms).mean()
         loss = l_hop1 + l_hop2
@@ -595,7 +716,11 @@ class LatentRouter(nn.Module):
     def forward_hops(self, q_feat: torch.Tensor, slot_z: torch.Tensor,
                      n_hops: int = 2, hard: bool = False,
                      reads: Optional[Sequence[torch.Tensor]] = None,
-                     force_first: Optional[int] = None) -> Dict[str, Any]:
+                     force_first: Optional[int] = None,
+                     kfeat: Optional[Dict[str, Any]] = None,
+                     q_tok: Optional[torch.Tensor] = None,
+                     topk_per_hop: int = 1,
+                     lex_reads: Optional[Sequence[torch.Tensor]] = None) -> Dict[str, Any]:
         """多跳前向：第 1 跳选槽 -> q' = norm(q + k_out[选中槽]) -> 第 2 跳再选槽。
 
         修的是一个**架构级缺陷**，不是调参问题：
@@ -606,13 +731,19 @@ class LatentRouter(nn.Module):
             HotpotQA 的现象正对得上：第一跳寻址在涨（read_acc 35%→50%）、
             答案准确率不动。单跳监督永远学不会"第二跳该读哪条事实"。
 
-        返回每一跳的 logits（训练侧逐跳算 CE）与载荷（推理侧用同一套拼接）。
+        topk_per_hop（v4 手术）：每跳取 top-b 个槽。`b=1` 时与本文件此前版本
+        **逐位等价**；`b=2, n_hops=2` 时一次读出 4 个槽 —— 这是覆盖 HotpotQA 里
+        161/500 条"金标证据 >2 句"的题的唯一物理手段（2 槽的读出带宽装不下 3 句话）。
+        4 槽 = 16 个软 token（m=4），仍远小于 BM25-top4 的 151 个明文 token。
         """
-        q_vec = self.encode_query(q_feat)
-        k_in, k_out = self.encode_keys(slot_z)
+        q_vec0 = self.encode_query(q_feat)
+        k_in, k_out = self.encode_keys(slot_z, kfeat=kfeat)
         z = slot_z if slot_z.dim() == 4 else slot_z.unsqueeze(0)
-        z = z.to(device=q_vec.device, dtype=q_vec.dtype)
-        n = max(1, min(int(n_hops), int(z.shape[1])))
+        z = z.to(device=q_vec0.device, dtype=q_vec0.dtype)
+        K = int(z.shape[1])
+        n = max(1, min(int(n_hops), K))
+        b = max(1, min(int(topk_per_hop), K))
+        max_picks = max(1, min(int(n) * int(b), K))
         # 用 Python set 记录已选槽，**不能**用张量就地写 used[idx]=True：
         # 那个 bool 张量被上一跳的 masked_fill 引用进了计算图，就地改它会触发
         #   RuntimeError: one of the variables needed for gradient computation
@@ -620,73 +751,301 @@ class LatentRouter(nn.Module):
         # （这正是 10k 正训一 backward 就会炸的地方，冒烟先撞出来了）。
         used_idx: set = set()
         z_list: List[torch.Tensor] = []
-        logits_list: List[torch.Tensor] = []
+        lex_list: List[torch.Tensor] = []
+        logits_list: List[Any] = []
         picks: List[int] = []
-        for _ in range(n):
-            logits = self.scores(q_vec, k_in)                          # [1,K]
-            if used_idx:
-                mask = torch.zeros_like(logits, dtype=torch.bool)
-                mask[0, sorted(used_idx)] = True
-                logits = logits.masked_fill(mask, float("-inf"))
-            if not used_idx and force_first is not None \
-                    and 0 <= int(force_first) < int(logits.shape[-1]):
-                # 金标接地读出（训练前期）：第 1 跳强制走金标，切断"错误槽位 -> 正确答案"
-                # 的死锁；打分头的梯度由 addr_loss_set 单独给，不靠这里。
-                idx = torch.tensor([int(force_first)], device=logits.device)
-            else:
-                idx = logits.argmax(dim=-1)                            # [1]
-            used_idx.add(int(idx[0].item()))
-            z_hard = z[0, idx]                                         # [1,m,d]
-            if not (hard or not self.training):
-                w = torch.softmax(logits, dim=-1)
-                # einsum "bk,bkmd->bmd" 出来已经是 [1,m,d]（b 维保留），
-                # 旧代码又 unsqueeze(0) 成 [1,1,m,d]；与 [1,m,d] 的 z_hard 相加时
-                # 广播成四维，一路传到 bridge(z) 才炸：
-                #   ValueError: z 必须是 [B,L,d] 或 [L,d]，得到 (1, 1, 4, 64)
-                # 单跳路径（同文件 497 行）没有这次 unsqueeze —— 两处必须一致。
-                z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach())
-                z_hard = z_hard + (z_soft - z_soft.detach())
-            # 读出载荷优先用**块级保真**版本（reads[idx]），只有拿不到时才退回块均值载荷。
-            # 键（打分）走的是单元级池化键，载荷走的是该槽全部 C_i*m 个块 —— 这正是
-            # "键-载荷解耦"在推理路径上的落点。
-            if reads is not None and int(idx[0].item()) < len(reads):
-                zr = reads[int(idx[0].item())]
-                z_list.append(zr if zr.dim() == 3 else zr.unsqueeze(0))
-            else:
-                z_list.append(z_hard)
-            logits_list.append(logits)
-            picks.append(int(idx[0].item()))
-            # 查询更新**留在计算图里**：这是 k_out_net 唯一能拿到梯度的通路
-            q_vec = torch.nn.functional.normalize(
-                q_vec + k_out[:, int(idx[0].item())], dim=-1)
-        return {"z_list": z_list, "logits_list": logits_list, "picks": picks,
-                "k_in": k_in, "k_out": k_out}
+        # 分支状态：(查询向量 [1,dk], 该分支已选路径)。b=1 时分支数恒为 1，退化为原实现。
+        branches: List[Tuple[torch.Tensor, Tuple[int, ...]]] = [(q_vec0, ())]
+        for hop in range(n):
+            if len(picks) >= max_picks:
+                break
+            # 1) 每个分支各自打分，收集候选 (logit, 槽号, 分支号)
+            cands: List[Tuple[float, int, int]] = []
+            gold_first = (hop == 0 and force_first is not None
+                          and 0 <= int(force_first) < K)
+            for bi, (qv, _path) in enumerate(branches):
+                if gold_first:
+                    cands.append((float("inf"), int(force_first), bi))
+                    break
+                logits = self.scores(qv, k_in, q_tok=q_tok, kfeat=kfeat)     # [1,K]
+                if used_idx:
+                    mask = torch.zeros_like(logits, dtype=torch.bool)
+                    mask[0, sorted(used_idx)] = True
+                    logits = logits.masked_fill(mask, float("-inf"))
+                vals, idxs = logits[0].topk(min(int(b) + len(used_idx), K))
+                for v, i in zip(vals.tolist(), idxs.tolist()):
+                    if i in used_idx:
+                        continue
+                    cands.append((float(v), int(i), bi))
+            if not cands:
+                break
+            # 2) 全局取"至多 b 个**新**槽"：同一个槽被多个分支选中时只读一次
+            cands.sort(key=lambda x: (-x[0], x[1]))
+            take: List[Tuple[int, int]] = []
+            for _v, i, bi in cands:
+                if i in used_idx:
+                    continue
+                used_idx.add(i)
+                take.append((i, bi))
+                if len(take) >= b or (len(picks) + len(take)) >= max_picks:
+                    break
+            if not take:
+                break
+            # 3) 逐槽建图：STE 的软期望必须用"该槽被选中那一刻"的 logits
+            new_branches: List[Tuple[torch.Tensor, Tuple[int, ...]]] = []
+            for i, bi in take:
+                qv, path = branches[bi]
+                idx = torch.tensor([int(i)], device=q_vec0.device)
+                z_hard = z[0, idx]                                       # [1,m,d]
+                logits_here = None
+                if not (hard or not self.training):
+                    # 重算这一分支的 logits 只为取软权重（K 很小，代价可忽略）。
+                    # 千万不要复用一个已被 masked_fill 就地改过的张量：那会让
+                    # 计算图里的旧引用失效（见上面 used_idx 的注释）。
+                    lg = self.scores(qv, k_in, q_tok=q_tok, kfeat=kfeat)
+                    if path:
+                        m2 = torch.zeros_like(lg, dtype=torch.bool)
+                        m2[0, sorted(set(path))] = True
+                        lg = lg.masked_fill(m2, float("-inf"))
+                    w = torch.softmax(lg, dim=-1)
+                    # einsum "bk,bkmd->bmd" 出来已经是 [1,m,d]（b 维保留），
+                    # 旧代码又 unsqueeze(0) 成 [1,1,m,d]；与 [1,m,d] 的 z_hard 相加时
+                    # 广播成四维，一路传到 bridge(z) 才炸：
+                    #   ValueError: z 必须是 [B,L,d] 或 [L,d]，得到 (1, 1, 4, 64)
+                    # 单跳路径（同文件 497 行）没有这次 unsqueeze —— 两处必须一致。
+                    z_soft = torch.einsum("bk,bkmd->bmd", w, z.detach())
+                    z_hard = z_hard + (z_soft - z_soft.detach())
+                    logits_here = lg
+                logits_list.append(logits_here)
+                # 读出载荷优先用**块级保真**版本（reads[idx]），只有拿不到时才退回块均值载荷。
+                # 键（打分）走的是单元级池化键，载荷走的是该槽全部 C_i*m 个块 —— 这正是
+                # "键-载荷解耦"在推理路径上的落点。
+                if reads is not None and int(i) < len(reads):
+                    zr = reads[int(i)]
+                    z_list.append(zr if zr.dim() == 3 else zr.unsqueeze(0))
+                else:
+                    z_list.append(z_hard)
+                if lex_reads is not None and int(i) < len(lex_reads):
+                    lr = lex_reads[int(i)]
+                    lex_list.append(lr if lr.dim() == 3 else lr.unsqueeze(0))
+                picks.append(int(i))
+                # 查询更新**留在计算图里**：这是 k_out_net 唯一能拿到梯度的通路
+                new_branches.append((torch.nn.functional.normalize(
+                    qv + k_out[:, int(i)], dim=-1), tuple(path) + (int(i),)))
+            # 分支数上限 = b：b=2、3 跳时若不截断会指数膨胀（每跳 ×b）
+            branches = new_branches[:b]
+        return {"z_list": z_list, "lex_list": (lex_list or None),
+                "logits_list": logits_list, "picks": picks,
+                "k_in": k_in, "k_out": k_out,
+                "topk_per_hop": int(b), "n_hops": int(n)}
 
     @torch.no_grad()
-    def chain(self, q_feat: torch.Tensor, slot_z: torch.Tensor, hops: int = 2
-              ) -> List[int]:
+    def chain(self, q_feat: torch.Tensor, slot_z: torch.Tensor, hops: int = 2,
+              kfeat: Optional[Dict[str, Any]] = None,
+              q_tok: Optional[torch.Tensor] = None,
+              topk_per_hop: int = 1) -> List[int]:
         """多跳推理：直接复用训练用的 forward_hops（同一套打分与查询更新规则）。
 
         旧实现自己维护了一份循环，与训练侧根本不是同一条路径 ——
         推理用 k_out、训练不监督 k_out，两份代码让这个错误一直看不出来。
         """
-        return self.forward_hops(q_feat, slot_z, n_hops=hops, hard=True)["picks"]
+        return self.forward_hops(q_feat, slot_z, n_hops=hops, hard=True, kfeat=kfeat,
+                                 q_tok=q_tok, topk_per_hop=topk_per_hop)["picks"]
+
+
+class HybridLatentRouter(LatentRouter):
+    """混合双塔寻址器（v4）：**寻址特征与压缩通路解耦**。
+
+    为什么必须解耦（实测证据）
+    --------------------------
+    v3 的 k_in/k_out 是用"压缩器输出的 m×d 潜向量"摊平后投影出来的。于是寻址头的
+    输入分布随压缩器一起漂移：压缩器还在学的时候，键每天都在变；而把整句 4 个向量
+    压成**一个** k_out，等于要求"句首主语"和"句尾桥接实体"共用一个向量 ——
+    多跳的 q' = norm(q + k_out) 于是退化成噪声叠加。v3 在 500 题上的完整证据召回
+    5.6%、比 v2 的 6.0% 还低，而 BM25-top4 不训练就有 36.0%，说明问题不在"没学好"，
+    而在"学的东西里有损且不稳定"。
+
+    两个分支
+    --------
+    1. 稀疏精确分支（**免训练**）：问题 token 与单元 token 在归一化 h0 上的词级
+       MaxSim。h0 是词形嵌入，专有名词/数字在这里几乎不受上下文平滑影响。这一项
+       让 Router 在**第 0 步**就有 ≈BM25 的底盘召回，而不是从 5.6% 的盲选开始。
+    2. 稠密多跳分支（可学习）：cat(h0,h18) 的 token 特征经两组注意力池化出
+       k_in（聚焦句首/锚点）与 k_out（聚焦句尾/专名），再做内积。
+    最终 s = γ·MaxSim/τ_ms + (1-γ)·<q,k_in>/τ，γ 可学习但被 sigmoid 夹在 (0,1)。
+
+    键的输入是**冻结模型特征**，与压缩器无关：即使压缩器今天还没收敛，寻址也不会
+    跟着一起坏。这也是"两个通路各管一件事"的落地方式。
+    """
+
+    def __init__(self, d_model: int, n_slots: int = LATENT_M, d_key: int = LATENT_D_KEY,
+                 init_temp: float = 0.07, gamma: float = LATENT_ADDR_GAMMA,
+                 ms_tau: float = LATENT_MS_TAU):
+        super().__init__(d_model, n_slots, d_key, init_temp)
+        if not (0.0 < float(gamma) < 1.0):
+            raise ValueError(f"gamma 必须落在 (0,1)，得到 {gamma}")
+        self.ms_tau = float(ms_tau)
+        d2 = int(d_model) * 2
+        # —— 稠密多跳分支：两组独立的注意力池化头（入键 / 出键）——
+        self.pool_in = nn.Sequential(nn.Linear(d2, self.d_key), nn.SiLU(),
+                                     nn.Linear(self.d_key, 1))
+        self.pool_out = nn.Sequential(nn.Linear(d2, self.d_key), nn.SiLU(),
+                                      nn.Linear(self.d_key, 1))
+        self.proj_in = nn.Linear(d2, self.d_key)
+        self.proj_out = nn.Linear(d2, self.d_key)
+        # 位置先验（两个标量）：入键压句首的锚点/标题，出键压句尾的桥接实体。
+        # 用**学习到的偏置**而不是写死"取第 0 个 token"：单元文本总以 "[anchor] " 开头，
+        # 但分块后第 0 块以外的块并不以锚点开头，硬取第 0 位会在长单元上取错位置。
+        self.bias_in = nn.Parameter(torch.zeros(2))
+        self.bias_out = nn.Parameter(torch.zeros(2))
+        # —— 稀疏精确分支：γ（MaxSim 占比）——
+        self.gamma_logit = nn.Parameter(torch.tensor(float(math.log(gamma / (1 - gamma)))))
+
+    # ---- 打分 ----
+    def gamma(self) -> torch.Tensor:
+        return torch.sigmoid(self.gamma_logit)
+
+    @staticmethod
+    def maxsim(q_tok: torch.Tensor, k_tok: torch.Tensor, k_mask: Any) -> torch.Tensor:
+        """词级 MaxSim：mean_{q token}( max_{unit token}( cos ) )，返回 [B,K]。
+
+        "max 而不是 mean"是关键：一句事实里只有一两个 token 与问题里的实体对应，
+        平均池化会把它们稀释掉（这正是 v3 稠密内积丢掉稀有实体匹配的机制）。
+        """
+        q = torch.as_tensor(q_tok)
+        k = torch.as_tensor(k_tok)
+        if q.dim() == 3:
+            q = q[0]
+        if k.dim() == 2:
+            k = k.unsqueeze(0)
+        K, T, _d = (int(v) for v in k.shape)
+        qn = torch.nn.functional.normalize(q.to(k.dtype), dim=-1)          # [Tq,d]
+        kn = torch.nn.functional.normalize(k.to(qn.dtype), dim=-1)         # [K,T,d]
+        sim = torch.einsum("td,ktd->tkt", qn, kn)                          # [Tq,K,T]
+        if k_mask is not None:
+            m = torch.as_tensor(k_mask).to(sim.device).bool()
+            if m.dim() == 1:
+                m = m.unsqueeze(0)
+            sim = sim.masked_fill(~m.unsqueeze(0), float("-inf"))
+        best = sim.max(dim=-1).values                                      # [Tq,K]
+        best = torch.nan_to_num(best, neginf=-1.0)
+        return best.mean(dim=0).unsqueeze(0)                               # [1,K]
+
+    def encode_keys(self, slot_z: torch.Tensor,
+                    kfeat: Optional[Dict[str, Any]] = None
+                    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """优先用**冻结特征** kfeat 出键；拿不到时才退回潜载荷（与基类同路径）。"""
+        if kfeat is None:
+            return super().encode_keys(slot_z)
+        h0 = torch.as_tensor(kfeat["h0"])
+        h18 = torch.as_tensor(kfeat["h18"])
+        if h0.dim() != 3 or h18.dim() != 3:
+            raise ValueError(f"kfeat 的 h0/h18 必须是 [K,T,d]，得到 {tuple(h0.shape)}/"
+                             f"{tuple(h18.shape)}")
+        if tuple(h0.shape) != tuple(h18.shape):
+            raise ValueError("kfeat 的 h0/h18 形状不一致")
+        K, T, d = (int(v) for v in h0.shape)
+        if d != self.d_model:
+            raise ValueError(f"kfeat 的 hidden={d} 与 router.d_model={self.d_model} 不一致")
+        p = next(self.parameters())
+        m = kfeat.get("mask")
+        mask = (torch.ones((K, T), dtype=torch.bool, device=p.device) if m is None
+                else torch.as_tensor(m).to(p.device).bool())
+        x = torch.cat([h0.to(device=p.device, dtype=p.dtype),
+                       h18.to(device=p.device, dtype=p.dtype)], dim=-1)     # [K,T,2d]
+        # 位置先验：第 1 个有效 token / 最后一个有效 token
+        ar = torch.arange(T, device=p.device).unsqueeze(0)
+        first = mask & (ar == 0)
+        last_pos = (mask.to(torch.long) * ar).max(dim=1, keepdim=True).values
+        last = mask & (ar == last_pos)
+        neg_inf = torch.finfo(x.dtype).min
+
+        def _pool(net: nn.Sequential, proj: nn.Linear, bias: nn.Parameter):
+            a = net(x).squeeze(-1)                                          # [K,T]
+            a = a + bias[0] * first.to(a.dtype) + bias[1] * last.to(a.dtype)
+            a = a.masked_fill(~mask, neg_inf)
+            w = torch.softmax(a.float(), dim=-1).to(x.dtype)                # [K,T]
+            z = torch.einsum("kt,ktd->kd", w, x)
+            return torch.nn.functional.normalize(proj(z), dim=-1)
+
+        k_in = _pool(self.pool_in, self.proj_in, self.bias_in)
+        k_out = _pool(self.pool_out, self.proj_out, self.bias_out)
+        return k_in.unsqueeze(0), k_out.unsqueeze(0)
+
+    def scores(self, q_vec: torch.Tensor, k_in: torch.Tensor,
+               q_tok: Optional[torch.Tensor] = None,
+               kfeat: Optional[Dict[str, Any]] = None) -> torch.Tensor:
+        dense = super().scores(q_vec, k_in)
+        if q_tok is None or kfeat is None:
+            return dense
+        ms = self.maxsim(q_tok, kfeat["h0"], kfeat.get("mask")).to(dense.dtype)
+        g = self.gamma().to(dense.dtype)
+        # MaxSim ∈ [-1,1]，要变成 logit 必须给逆温度；用固定 τ_ms 而不是可学习的 log_temp，
+        # 因为 log_temp 已被稠密分支用来调温度 —— 两者共用一个参数会让"混合比例"
+        # 和"尖锐度"纠缠在一起，任何一方都学不动。
+        return g * (ms / float(self.ms_tau)) + (1.0 - g) * dense
+
+
+def build_block_diag_mask(seg_ids: Sequence[int], dtype: Any = torch.float32,
+                          device: Any = None) -> torch.Tensor:
+    """段编号 -> 块对角**加性**注意力掩码 [1,1,L,L]（0 / finfo.min）。
+
+    语义：不同槽位的软 token 之间**互不可见**；同一槽位内部、以及问题/答案对所有
+    槽位可见。返回的是"已取反"的加性掩码（0 表示可见），与 HF eager 实现的
+    `_update_causal_mask` 对 4D 输入的约定一致。
+
+    注意（必须写清楚，不许含糊）：SDPA/FlashAttention 后端**不接受** 4D 掩码，
+    所以这个函数只在 eager 后端可用；`_emit_latent` 会先探测后端，不可用时降级为
+    "原生隔离栅栏"（每槽前后插 [Fact j] 标记）并在 meta 里写明降级原因。
+    """
+    ids = [int(v) for v in (seg_ids or [])]
+    L = len(ids)
+    if L <= 0:
+        raise ValueError("build_block_diag_mask 需要非空的段编号")
+    dev = torch.device(device) if device is not None else None
+    seg = torch.tensor(ids, dtype=torch.long, device=dev)
+    same = seg.unsqueeze(0) == seg.unsqueeze(1)                 # [L,L]
+    # ---- 共享段 0 必须双向全见，否则这个掩码会把整个读出打死 ----
+    # 段 0 = system / 围栏 / 问题（非槽位 token）。若只写 `causal & same`，
+    # 问题（段 0）就**看不到任何槽位**（槽位是 1..K），槽位也看不到 system ——
+    # 语义上等价于"记忆被整段屏蔽"，模型只能凭参数知识答，指标会掉回 no-memory
+    # 水平，而这在日志里表现为"隔离一开就掉点"，很容易被误读成"隔离有害"。
+    # 正确关系：seg_j == 0（共享键）对所有人可见；seg_i == 0（共享查询）可见所有
+    # 因果允许的键；只有**两个不同槽位之间**才互不可见。
+    causal = torch.tril(torch.ones((L, L), dtype=torch.bool, device=dev))
+    shared_row = (seg == 0).unsqueeze(1).expand(L, L)           # 行 i 是共享段
+    shared_col = (seg == 0).unsqueeze(0).expand(L, L)           # 列 j 是共享段
+    allowed = causal & (same | shared_row | shared_col)
+    finfo = torch.finfo(dtype)
+    mask = torch.zeros((1, 1, L, L), dtype=dtype, device=dev)
+    mask = mask.masked_fill(~allowed.unsqueeze(0).unsqueeze(0), finfo.min)
+    return mask
 
 
 def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
                         z_list: Sequence[torch.Tensor],
-                        dev: Any = None) -> torch.Tensor:
+                        dev: Any = None,
+                        lex_list: Optional[Sequence[torch.Tensor]] = None,
+                        isolate: bool = False,
+                        return_segs: bool = False):
     """若干槽位载荷 -> 一段 soft 序列（每槽过一次 bridge，槽间插原生 "\\n"）。
 
     **训练与推理必须调同一个函数**：旧实现里训练是 `bridge(z_read)` 一段、
     推理是 `bridge(z1) + "\\n" + bridge(z2)`，两跳样本的 train/infer 输入分布不同，
     而且训练侧第 2 跳的载荷根本没进图。
+
+    lex_list（v4）：每槽的 h0 符号直通向量，逐槽交给 bridge 做门控方向混合。
+    isolate（v4）：槽位隔离。返回 (soft, seg_ids)（return_segs=True 时），
+        seg_ids 是逐 token 的段号，供 `build_block_diag_mask` 构造块对角掩码。
     """
     if not z_list:
         raise ValueError("compose_routed_soft 收到空载荷列表")
     dev = _model_device(model) if dev is None else dev
     emb = model.get_input_embeddings()
     pieces = []
+    segs: List[int] = []
+    # 段号约定：0 = 原生标记（对所有槽位可见的公共前缀），j+1 = 第 j 个槽位。
+    # 用**单调递增**的段号，块对角掩码里的"同段可见"才等价于"同槽可见"。
     for j, zj in enumerate(z_list):
         if not torch.is_tensor(zj):
             raise TypeError(f"compose_routed_soft 第 {j} 个载荷不是张量：{type(zj)}")
@@ -698,12 +1057,104 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
         # 槽位边界锚点：每段软 token 前插一段**原生词表**的离散嵌入。
         # 纯软向量裸拼时，相邻槽的自注意力会互相串扰（跨槽内容被混着读），
         # 而原生 token 会把"这是另一条事实"这件事显式写进序列，同时给出槽序号。
-        pieces.append(emb(_tokenize_no_special(tokenizer, f"\n[Fact {j + 1}]: ", dev)))
-        s = bridge(zj)
+        # isolate=True 时用**加倍的围栏**（前后各一段），因为块对角掩码在 SDPA 后端
+        # 拿不到时，这条围栏是唯一还能起作用的隔离手段。
+        fence = (f"\n[Fact {j + 1}]: " if not isolate
+                 else f"\n-- Fact {j + 1} (memory slot, isolated) --\n")
+        anchor = emb(_tokenize_no_special(tokenizer, fence, dev))
+        pieces.append(anchor)
+        segs.extend([0] * int(anchor.shape[1]))
+        zl = None
+        if lex_list is not None and j < len(lex_list) and lex_list[j] is not None:
+            zl = lex_list[j]
+        s = bridge(zj, zl)
         if s.dim() == 2:
             s = s.unsqueeze(0)
-        pieces.append(s.reshape(1, -1, s.shape[-1]))
-    return torch.cat(pieces, dim=1)
+        s = s.reshape(1, -1, s.shape[-1])
+        pieces.append(s)
+        segs.extend([j + 1] * int(s.shape[1]))
+        if isolate:
+            tail = emb(_tokenize_no_special(tokenizer, f"\n-- end Fact {j + 1} --\n", dev))
+            pieces.append(tail)
+            segs.extend([0] * int(tail.shape[1]))
+    soft = torch.cat(pieces, dim=1)
+    if return_segs:
+        return soft, segs
+    return soft
+
+
+def extract_query_feature_ex(model: Any, tokenizer: Any, question: str,
+                             system_prompt: str = "", layer: int = LATENT_LAYER,
+                             device: Any = None) -> Dict[str, Any]:
+    """问题 -> {"pooled": [1,2d], "h0_tok": [1,T,d], "h18_tok": [1,T,d]}。
+
+    为什么不能只给 pooled：HybridLatentRouter 的稀疏分支要在**词级**上算 MaxSim
+    （问题里的实体 token 对记忆里的实体 token），mean-pool 之后 token 轴没了，
+    这种匹配就退化成向量内积，正是 v3 丢掉稀有实体匹配的那个病。
+    """
+    if model is None or tokenizer is None:
+        raise ValueError("extract_query_feature_ex 需要 model 与 tokenizer")
+    dev = torch.device(device) if device is not None else _model_device(model)
+    full, n_sys_chars = build_chat_parts(tokenizer, system_prompt, question)
+    q_text = full[n_sys_chars:] if n_sys_chars else full
+    ids = _tokenize_no_special(tokenizer, q_text or question, dev)
+    with torch.no_grad(), delta_write_disabled(model):
+        out = model(input_ids=ids, attention_mask=torch.ones_like(ids),
+                    output_hidden_states=True, use_cache=False)
+    hs = getattr(out, "hidden_states", None)
+    if hs is None:
+        raise RuntimeError("模型没有返回 hidden_states（需要 output_hidden_states=True）")
+    if int(layer) >= len(hs):
+        raise ValueError(f"layer={layer} 超出 hidden_states 层数 {len(hs)}")
+    h0_tok = hs[0]
+    hl_tok = hs[int(layer)]
+    p = model.get_input_embeddings().weight
+    return {"pooled": torch.cat([h0_tok.mean(dim=1), hl_tok.mean(dim=1)], dim=-1).to(dtype=p.dtype),
+            "h0_tok": h0_tok.detach().to(dtype=p.dtype),
+            "h18_tok": hl_tok.detach().to(dtype=p.dtype)}
+
+
+def slot_token_features(encoder: Any, texts: Sequence[str],
+                        key_tokens: int = LATENT_KEY_TOKENS) -> Dict[str, Any]:
+    """单元文本 -> 逐槽 token 级冻结特征 {"h0":[K,T,d], "h18":[K,T,d], "mask":[K,T]}。
+
+    与 `LatentEncoder.encode` 共用同一次冻结前向（`features()`），不额外付编码成本；
+    多块单元沿 token 轴拼接（截到 key_tokens），因为寻址要的是"这句话里有哪些词"，
+    与压缩器怎么分块无关。
+    """
+    texts = ["" if t is None else str(t) for t in (texts or [])]
+    if not texts:
+        return {"h0": torch.zeros((0, 1, 0)), "h18": torch.zeros((0, 1, 0)),
+                "mask": torch.zeros((0, 1), dtype=torch.long), "n_units": 0}
+    feats = encoder.features(texts, parent_ids=[str(i) for i in range(len(texts))])
+    groups: Dict[str, List[int]] = {}
+    order: List[str] = []
+    for i, pid in enumerate(feats["parents"]):
+        if pid not in groups:
+            groups[pid] = []
+            order.append(pid)
+        groups[pid].append(i)
+    cap = max(1, int(key_tokens))
+    per_slot: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    for pid in order:
+        rows = sorted(groups[pid], key=lambda i: feats["chunk_index"][i])
+        h0 = torch.cat([feats["h0"][i][: int(feats["n_tokens"][i]) or 1] for i in rows], dim=0)
+        h18 = torch.cat([feats["h18"][i][: int(feats["n_tokens"][i]) or 1] for i in rows], dim=0)
+        n = int(h0.shape[0])
+        h0 = h0[:cap]
+        h18 = h18[:cap]
+        m = torch.zeros((cap,), dtype=torch.long)
+        m[: int(h0.shape[0])] = 1
+        if int(h0.shape[0]) < cap:
+            pad = torch.zeros((cap - int(h0.shape[0]), int(h0.shape[-1])), dtype=h0.dtype)
+            h0 = torch.cat([h0, pad], dim=0)
+            h18 = torch.cat([h18, pad], dim=0)
+        per_slot.append((h0, h18, m))
+        del n
+    return {"h0": torch.stack([t[0] for t in per_slot], dim=0),
+            "h18": torch.stack([t[1] for t in per_slot], dim=0),
+            "mask": torch.stack([t[2] for t in per_slot], dim=0),
+            "n_units": len(per_slot), "key_tokens": int(cap)}
 
 
 def extract_query_feature(model: Any, tokenizer: Any, question: str,
@@ -995,6 +1446,33 @@ def pad_version_stack(per_group: Sequence[Sequence[torch.Tensor]],
     return z, mask
 
 
+# 只收"明确指向过去"的短语，**不收** was/were/had 这类普通过去时：
+# HotpotQA/MAB 的问题里 "Where was X born?" 随处可见，把它当回溯意图会让
+# 版本策略在绝大多数样本上白跑一遍 time 分支（结果虽仍回落到 current，但
+# 日志和消融会被这层噪声搅浑）。
+_PAST_MARKERS = ("ago", "previously", "formerly", "used to", "in the past",
+                 "earlier", "at that time", "back then", "old value",
+                 "before the", "before that", "prior to")
+
+
+def _query_has_time_intent(query_text: Any, query_time: Any = None) -> bool:
+    """问题里是否表达了**回溯历史**的意图（决定版本策略走 current 还是 time）。
+
+    依据：MAB-CR 与 FST 合成集里，只有带明确时间条件的题才需要读历史队列；
+    其余题的目标值是"当前状态"，此时确定性取最新版的准确率是 0.885，
+    而 learned 版本分类器只有 0.525。把这条结构信息交还给规则，不是偷懒 ——
+    是把"已知的确定性"从"要学的随机变量"里拿回来。
+    """
+    if _norm_time(query_time):
+        return True
+    q = _norm_time(query_text)
+    if not q:
+        return False
+    if _as_year(q) is not None:                 # 问题里出现年份
+        return True
+    return any(mk in q for mk in _PAST_MARKERS)
+
+
 class FstRouter(nn.Module):
     """FST-Mem 的两级寻址：**先选事实键，再选时间版本**。
 
@@ -1019,7 +1497,7 @@ class FstRouter(nn.Module):
 
     def pick_version(self, g: int, lg_ver_all: torch.Tensor, ver_mask: Any = None,
                      ver_policy: str = "learned", ver_times: Any = None,
-                     query_time: Any = None) -> int:
+                     query_time: Any = None, query_text: Any = None) -> int:
         """组内版本读出：**显式时间规则优先**，learned 只作消融对照。
 
         为什么不再默认交给分类器：状态库已经把"当前版本"这件事结构性地写清楚了
@@ -1033,6 +1511,13 @@ class FstRouter(nn.Module):
         if ver_mask is not None:
             ok = torch.as_tensor(ver_mask).to(row.device)[int(g)].bool()
         policy = str(ver_policy or "current")
+        if policy == "hybrid":
+            # 混合版本策略（v4）：先看**问题本身**有没有回溯意图，再决定走规则还是学习。
+            # 依据是实测：纯 learned 版本选择 0.525，恒选最新 0.885 —— 把"最新值算对"
+            # 这个已知结构重新交给一个 softmax 去学，是白丢 36 个点。所以默认确定性
+            # 走 current，只有问题里出现时间标记（年份/过去时/ago/before/previous…）
+            # 或给了 as_of 时，才启用时间规则/学习打分。
+            policy = "time" if _query_has_time_intent(query_text, query_time) else "current"
         if policy == "learned":
             r = row if ok is None else row.masked_fill(~ok, float("-inf"))
             return int(r.argmax().item())
@@ -1060,7 +1545,10 @@ class FstRouter(nn.Module):
                 tq_feat: Optional[torch.Tensor] = None,
                 ver_mask: Optional[torch.Tensor] = None, hard: bool = False,
                 k_groups: int = 1, ver_policy: str = "learned",
-                ver_times: Any = None, query_time: Any = None
+                ver_times: Any = None, query_time: Any = None,
+                q_vec: Optional[torch.Tensor] = None,
+                used_groups: Optional[Sequence[int]] = None,
+                query_text: Any = None
                 ) -> Dict[str, Any]:
         """返回 dict：z_read [1,m,d]、z_reads List[[1,m,d]]、logits_group [1,G]、
         logits_ver [1,V]、groups / versions（本次读出选了哪些键与版本）。
@@ -1078,9 +1566,22 @@ class FstRouter(nn.Module):
         旧接口硬编码"只送 1 个版本的 m 个软 token"，即使键选对了，证据也不足以
         回答两跳题 —— 这不是训练问题，是读出带宽不够。
         """
-        q_vec = self.key.encode_query(q_feat)
+        # q_vec 非空 = 多跳接力的当前查询（**潜空间**里更新，不碰任何明文值）。
+        # 这是 v4 修掉 P03/P07 的落点：旧代码的接力循环用 `slot_values` 明文字符串
+        # 去猜"下一跳是不是以它为实体"，既回到明文依赖，又因为 k_groups=n 提前取满
+        # 而永远不执行（死分支）。
+        q_vec = (self.key.encode_query(q_feat) if q_vec is None
+                 else torch.nn.functional.normalize(torch.as_tensor(
+                     q_vec, device=next(self.parameters()).device,
+                     dtype=next(self.parameters()).dtype), dim=-1))
         k_grp = self.key.encode_keys(e_feat, r_feat)                # [G,dk]
         lg_grp = self.key.scores(q_vec, k_grp)                      # [1,G]
+        if used_groups:
+            m0 = torch.zeros_like(lg_grp, dtype=torch.bool)
+            for gi in used_groups:
+                if 0 <= int(gi) < int(lg_grp.shape[-1]):
+                    m0[0, int(gi)] = True
+            lg_grp = lg_grp.masked_fill(m0, float("-inf"))
         n_g = max(1, min(int(k_groups), int(lg_grp.shape[-1])))
         groups: List[int] = []
         lg_tmp = lg_grp.clone()
@@ -1100,7 +1601,7 @@ class FstRouter(nn.Module):
                 raise ValueError(f"ver_mask 必须是 [G,V]，得到 {tuple(mask.shape)}")
             lg_ver_all = lg_ver_all.masked_fill(~mask, -1e4)
         versions = [self.pick_version(g, lg_ver_all, ver_mask, ver_policy,
-                                      ver_times, query_time) for g in groups]
+                                      ver_times, query_time, query_text) for g in groups]
         # 读出用**被选中组**的版本打分；监督用 tgt_group 那一行（见 logits_ver_all）
         g0 = int(groups[0])
         lg_all = lg_ver_all[g0:g0 + 1]                              # [1,V]
@@ -1110,6 +1611,9 @@ class FstRouter(nn.Module):
         out = {"z_read": z_reads[0], "z_reads": z_reads,
                "logits_group": lg_grp, "logits_ver": lg_all,
                "logits_ver_all": lg_ver_all,
+               # 版本键 [G,V,dk]：多跳接力的**潜层出键**。返回它，接力侧就不用再
+               # 重算一遍 encode_versions（FST 每问本来就要付 11s 的编码账）。
+               "k_ver": k_ver, "q_vec": q_vec,
                "group": g0, "version": int(versions[0]),
                "groups": groups, "versions": [int(x) for x in versions],
                "ver_policy": str(ver_policy or "current"), "hard": True}
@@ -1170,6 +1674,9 @@ class LatentSlotBank:
     def __init__(self, n_slots: Optional[int] = None, dim: Optional[int] = None,
                  dtype: Optional[torch.dtype] = None):
         self.payloads: Dict[str, torch.Tensor] = {}
+        # v4：h0 符号直通载荷（与 payloads 同键同形状）。None 表示该槽位没有直通载荷
+        # （例如 v3 checkpoint 或 lex_skip=0 的编码器），读出侧 bridge 会自动忽略。
+        self.lex: Dict[str, torch.Tensor] = {}
         self.versions: Dict[str, int] = {}
         self.n_slots: Optional[int] = None if n_slots is None else int(n_slots)
         self.dim: Optional[int] = None if dim is None else int(dim)
@@ -1231,22 +1738,34 @@ class LatentSlotBank:
             z = z.detach()
         return z.to(device="cpu", dtype=self.dtype)
 
-    def append(self, slot_id: Any, z: torch.Tensor, detach: bool = True) -> str:
+    def append(self, slot_id: Any, z: torch.Tensor, detach: bool = True,
+               lex: Optional[torch.Tensor] = None) -> str:
         sid = str(slot_id)
         if sid in self.payloads:
             raise ValueError(f"duplicate slot_id: {sid}")
         z = self._normalize(z)
         self.payloads[sid] = self._store_tensor(z, detach)
+        if lex is not None:
+            lx = self._normalize(lex, name="lex")
+            if tuple(lx.shape) != tuple(z.shape):
+                raise ValueError(f"lex 形状 {tuple(lx.shape)} 必须与载荷 {tuple(z.shape)} 一致")
+            self.lex[sid] = self._store_tensor(lx, detach)
         self.versions[sid] = 1
         self.n_append += 1
         return sid
 
-    def overwrite(self, slot_id: Any, z: torch.Tensor, detach: bool = True) -> str:
+    def overwrite(self, slot_id: Any, z: torch.Tensor, detach: bool = True,
+                  lex: Optional[torch.Tensor] = None) -> str:
         sid = str(slot_id)
         if sid not in self.payloads:
             raise KeyError(f"overwrite 不存在的槽位：{sid}")
         z = self._normalize(z)
         self.payloads[sid] = self._store_tensor(z, detach)
+        if lex is not None:
+            lx = self._normalize(lex, name="lex")
+            if tuple(lx.shape) != tuple(z.shape):
+                raise ValueError(f"lex 形状 {tuple(lx.shape)} 必须与载荷 {tuple(z.shape)} 一致")
+            self.lex[sid] = self._store_tensor(lx, detach)
         self.versions[sid] = int(self.versions.get(sid, 1)) + 1
         self.n_overwrite += 1
         return sid
@@ -1256,6 +1775,7 @@ class LatentSlotBank:
         if sid not in self.payloads:
             raise KeyError(f"drop 不存在的槽位：{sid}")
         self.payloads.pop(sid, None)
+        self.lex.pop(sid, None)
         self.versions.pop(sid, None)
         self.n_drop += 1
 
@@ -1285,12 +1805,15 @@ class LatentSlotBank:
                 continue
             if i == j:
                 self.payloads.pop(old, None)
+                self.lex.pop(old, None)
                 self.versions.pop(old, None)
                 continue
             new = f"{pre}{i - 1}"
             if new in self.payloads:
                 raise RuntimeError(f"shift_index 目标冲突：{new} 已存在（库内下标不连续？）")
             self.payloads[new] = self.payloads.pop(old)
+            if old in self.lex:
+                self.lex[new] = self.lex.pop(old)
             self.versions[new] = self.versions.pop(old, 1)
             moved += 1
         self.n_shifted += moved
@@ -1303,6 +1826,19 @@ class LatentSlotBank:
             raise KeyError(f"潜载荷缺失：{sid}")
         z = self.payloads[sid]
         return z if device is None else z.to(device=device)
+
+    def payload_lex(self, slot_id: Any, device: Any = None) -> Optional[torch.Tensor]:
+        """该槽位的 h0 符号直通载荷（没有则 None —— 不补零冒充）。"""
+        z = self.lex.get(str(slot_id))
+        if z is None:
+            return None
+        return z if device is None else z.to(device=device)
+
+    def gather_lex(self, slot_ids: Sequence[Any], device: Any = "cpu"
+                   ) -> List[Optional[torch.Tensor]]:
+        """按给定顺序返回直通载荷列表（缺失位是 None，与 gather 的严格报错不同：
+        直通分支是可选增强，缺它时 bridge 的行为必须与 v3 逐位一致，而不是报错。"""
+        return [self.payload_lex(s, device=device) for s in (slot_ids or [])]
 
     def gather(self, slot_ids: Sequence[Any], device: Any = "cpu") -> torch.Tensor:
         """按给定顺序取出载荷并摊平：返回 [Σk, m, d]（k=1 时即 [K, m, d]）。"""
@@ -1319,6 +1855,7 @@ class LatentSlotBank:
 
     def stats(self) -> Dict[str, Any]:
         return {"n_slots": len(self.payloads), "n_soft_vectors": self.n_vectors(),
+                "n_slots_with_lex": len(self.lex),
                 "n_slots_per_ns": {ns: len(self.slot_ids(ns))
                                    for ns in sorted({s.partition(':')[0] for s in self.payloads})},
                 "n_append": self.n_append, "n_overwrite": self.n_overwrite,
@@ -1426,7 +1963,7 @@ class LatentStateTrajectoryBank(LatentSlotBank):
     # ---- 写入（状态转移） ----
     def write(self, key: Any, z: torch.Tensor, time: Any = None,
               detach: bool = True, entity: Any = None, relation: Any = None,
-              value: Any = None) -> str:
+              value: Any = None, lex: Optional[torch.Tensor] = None) -> str:
         """写一个新版本：旧当前值下沉进历史，新值成为当前值。返回新槽位 ID。
 
         entity/relation 是**原始文本**（保留大小写）。它必须存在这里而不是由
@@ -1446,7 +1983,7 @@ class LatentStateTrajectoryBank(LatentSlotBank):
         g = self.groups.get(key)
         if g is None:
             sid = self._slot_id(key, 0)
-            self.append(sid, z, detach=detach)
+            self.append(sid, z, detach=detach, lex=lex)
             self.slot_values[sid] = v
             self.groups[key] = {"cur": sid, "cur_time": t, "hist": [],
                                 "n_write": 1,
@@ -1455,7 +1992,7 @@ class LatentStateTrajectoryBank(LatentSlotBank):
             return sid
         sid = self._slot_id(key, int(g["n_write"]))
         old = g["cur"]
-        self.append(sid, z, detach=detach)     # 先 append 再改指针：append 抛错则状态不变
+        self.append(sid, z, detach=detach, lex=lex)   # 先 append 再改指针：append 抛错则状态不变
         self.slot_values[sid] = v
         g["hist"].append((old, g["cur_time"]))
         g["cur"] = sid
@@ -1538,6 +2075,19 @@ class LatentStateTrajectoryBank(LatentSlotBank):
     def payload_at(self, key: Any, time: Any = None, device: Any = None) -> torch.Tensor:
         return self.payload(self.read(key, time), device=device)
 
+    def payload_lex_at(self, key: Any, time: Any = None,
+                       device: Any = None) -> Optional[torch.Tensor]:
+        """该键被选中的版本的 h0 直通载荷（没有则 None）。"""
+        return self.payload_lex(self.read(key, time), device=device)
+
+    def lex_for(self, key: Any, index: int, device: Any = None) -> Optional[torch.Tensor]:
+        """该键第 index 个版本（旧->新）的直通载荷，供 FST 多跳读出按版本取用。"""
+        vers = self.list_versions(key)
+        i = int(index)
+        if not (0 <= i < len(vers)):
+            raise IndexError(f"版本下标越界：{i}/{len(vers)}（key={key!r}）")
+        return self.payload_lex(vers[i]["slot_id"], device=device)
+
     def gather_versions(self, key: Any, device: Any = "cpu"
                         ) -> Tuple[torch.Tensor, List[str], List[bool]]:
         """-> (ver_z [V,m,d], times [V], is_current [V])，顺序为 旧->新（当前在最后）。"""
@@ -1546,6 +2096,12 @@ class LatentStateTrajectoryBank(LatentSlotBank):
         return (torch.stack(zs, dim=0).to(device=device),
                 [str(v["time"]) for v in vers],
                 [bool(v["current"]) for v in vers])
+
+    def gather_all_versions_lex(self, keys: Optional[Sequence[Any]] = None
+                                ) -> List[List[Optional[torch.Tensor]]]:
+        """与 gather_all_versions 同构的直通载荷版本列表（缺失位是 None）。"""
+        ks = self.group_keys() if keys is None else [str(k) for k in keys]
+        return [[self.payload_lex(v["slot_id"]) for v in self.list_versions(k)] for k in ks]
 
     def gather_all_versions(self, keys: Optional[Sequence[Any]] = None
                             ) -> List[List[torch.Tensor]]:
@@ -1713,24 +2269,44 @@ class LatentEncoder:
 
     def encode(self, texts: Sequence[str], parent_ids: Optional[Sequence[str]] = None,
                grad: bool = False) -> Tuple[List[torch.Tensor], Dict[str, Any]]:
-        """返回 (per-parent payload 列表, info)。
+        """返回 (per-parent payload 列表, info)。兼容旧接口，见 encode_full。"""
+        payloads, _lex, _kf, info = self.encode_full(texts, parent_ids=parent_ids,
+                                                     grad=grad, want_lex=False,
+                                                     want_kfeat=False)
+        return payloads, info
+
+    def encode_full(self, texts: Sequence[str],
+                    parent_ids: Optional[Sequence[str]] = None,
+                    grad: bool = False, want_lex: bool = True,
+                    want_kfeat: bool = True
+                    ) -> Tuple[List[torch.Tensor], Optional[List[torch.Tensor]],
+                               Optional[Dict[str, Any]], Dict[str, Any]]:
+        """返回 (per-parent 语义载荷, per-parent 直通载荷, 逐槽 token 特征, info)。
 
         每个 payload 形状 [k, m, d]（k = 该单元被分成的块数，1 表示未分块）。
         grad=False（默认）：存储路径，全程 no_grad，输出可直接进 LatentSlotBank。
         grad=True：训练路径，压缩器前向保留梯度（**不要**把它放进 torch.no_grad）。
+
+        三份输出对应 v4 的两处解耦：
+          - 语义载荷 -> 读出（bridge 的语义分支）
+          - 直通载荷 -> 读出（bridge 的 h0 符号分支，绕过 inner_dim 瓶颈）
+          - token 特征 -> 寻址（HybridLatentRouter 的键，来自冻结模型，与压缩器无关）
         """
         texts = ["" if t is None else str(t) for t in (texts or [])]
         if not texts:
-            return [], {"n_units": 0, "n_chunks": 0, "n_tokens_in": 0,
-                        "n_soft_tokens": 0, "compression_ratio": None}
+            return [], None, None, {"n_units": 0, "n_chunks": 0, "n_tokens_in": 0,
+                                    "n_soft_tokens": 0, "compression_ratio": None}
         feats = self.features(texts, parent_ids=parent_ids)
+        kw = {"want_lex": bool(want_lex and getattr(self.compressor, "lex_skip", False))}
         if grad:
-            z, cinfo = self.compressor.forward_with_info(feats["h0"], feats["h18"],
-                                                        feats["mask"])
+            z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
+                                                           feats["mask"])
         else:
             with torch.no_grad():
-                z, cinfo = self.compressor.forward_with_info(feats["h0"], feats["h18"],
-                                                             feats["mask"])
+                z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
+                                                               feats["mask"])
+        if not kw["want_lex"]:
+            z_lex = None
         # 按父槽位分组（保持输入顺序，块内按 chunk_index）
         order: List[str] = []
         groups: Dict[str, List[int]] = {}
@@ -1740,9 +2316,12 @@ class LatentEncoder:
                 order.append(pid)
             groups[pid].append(i)
         payloads: List[torch.Tensor] = []
+        lex_payloads: Optional[List[torch.Tensor]] = [] if z_lex is not None else None
         for pid in order:
             rows = sorted(groups[pid], key=lambda i: feats["chunk_index"][i])
             payloads.append(z[rows])                 # [k, m, d]
+            if lex_payloads is not None:
+                lex_payloads.append(z_lex[rows])
         n_soft = int(sum(int(p.shape[0]) * int(p.shape[1]) for p in payloads))
         n_in = int(sum(feats["n_tokens"]))
         info = {"n_units": len(texts), "n_parents": len(order),
@@ -1751,8 +2330,39 @@ class LatentEncoder:
                 "n_tokens_in": n_in, "n_soft_tokens": n_soft,
                 "compression_ratio": (round(n_soft / n_in, 6) if n_in else None),
                 "n_slots": int(z.shape[1]), "dim": int(z.shape[-1]),
-                "n_empty_rows": int(cinfo.get("n_empty_rows", 0))}
-        return payloads, info
+                "n_empty_rows": int(cinfo.get("n_empty_rows", 0)),
+                "lex_skip": bool(z_lex is not None)}
+        kfeat = None
+        if want_kfeat:
+            kfeat = self._kfeat_from_feats(feats, order, groups)
+        return payloads, lex_payloads, kfeat, info
+
+    @staticmethod
+    def _kfeat_from_feats(feats: Dict[str, Any], order: Sequence[str],
+                          groups: Dict[str, List[int]]) -> Dict[str, Any]:
+        """把 encode_full 里已经算好的 token 特征整理成逐槽 [K,T,d]（不再跑模型）。"""
+        cap = max(1, int(LATENT_KEY_TOKENS))
+        h0s, h18s, ms = [], [], []
+        for pid in order:
+            rows = sorted(groups[pid], key=lambda i: feats["chunk_index"][i])
+            h0 = torch.cat([feats["h0"][i][: max(1, int(feats["n_tokens"][i]))]
+                            for i in rows], dim=0)
+            h18 = torch.cat([feats["h18"][i][: max(1, int(feats["n_tokens"][i]))]
+                             for i in rows], dim=0)
+            h0, h18 = h0[:cap], h18[:cap]
+            m = torch.zeros((cap,), dtype=torch.long)
+            m[: int(h0.shape[0])] = 1
+            if int(h0.shape[0]) < cap:
+                pad = torch.zeros((cap - int(h0.shape[0]), int(h0.shape[-1])),
+                                  dtype=h0.dtype)
+                h0 = torch.cat([h0, pad], dim=0)
+                h18 = torch.cat([h18, pad], dim=0)
+            h0s.append(h0)
+            h18s.append(h18)
+            ms.append(m)
+        return {"h0": torch.stack(h0s, dim=0), "h18": torch.stack(h18s, dim=0),
+                "mask": torch.stack(ms, dim=0), "n_units": len(order),
+                "key_tokens": int(cap)}
 
 
 # ----------------------------- checkpoint -----------------------------
@@ -1830,11 +2440,14 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
         raise ValueError(f"checkpoint hidden_size={cfg.get('hidden_size')} "
                          f"与当前模型 hidden_size={hs} 不一致")
     dev = torch.device(device) if device is not None else _model_device(model)
+    lex_skip = bool(cfg.get("lex_skip", False))
     comp = LatentCompressor(hs, n_slots=int(cfg["n_slots"]),
                             inner_dim=int(cfg["inner_dim"]),
-                            num_heads=int(cfg.get("num_heads", LATENT_N_HEADS)))
+                            num_heads=int(cfg.get("num_heads", LATENT_N_HEADS)),
+                            lex_skip=lex_skip)
     bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]),
-                          target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)))
+                          target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)),
+                          lex_skip=bool(cfg.get("bridge_lex_skip", lex_skip)))
     comp.load_state_dict(blob["compressor"], strict=strict)
     bridge.load_state_dict(blob["bridge"], strict=strict)
     comp.to(dev).eval()
@@ -1853,8 +2466,10 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
         blob_router = blob.get("router")
         if not blob_router:
             raise ValueError(f"config.has_router=True 但 checkpoint 里没有 router 权重：{checkpoint}")
-        router = LatentRouter(hs, n_slots=int(cfg["n_slots"]),
-                              d_key=int(cfg.get("d_key", LATENT_D_KEY)))
+        rkind = str(cfg.get("router_kind", "latent"))
+        rcls = HybridLatentRouter if rkind == "hybrid" else LatentRouter
+        router = rcls(hs, n_slots=int(cfg["n_slots"]),
+                      d_key=int(cfg.get("d_key", LATENT_D_KEY)))
         router.load_state_dict(blob_router, strict=strict)
         router.to(dev).eval()
         router.requires_grad_(False)
@@ -1895,15 +2510,26 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
     cfg["inner_dim"] = int(compressor.inner_dim)
     cfg["num_heads"] = int(compressor.num_heads)
     cfg["bottleneck"] = int(bridge.bottleneck)
+    cfg["lex_skip"] = bool(getattr(compressor, "lex_skip", False))
+    cfg["bridge_lex_skip"] = bool(getattr(bridge, "lex_skip", False))
+    if bool(cfg["lex_skip"]) != bool(cfg["bridge_lex_skip"]):
+        raise ValueError(f"压缩器 lex_skip={cfg['lex_skip']} 与 bridge lex_skip="
+                         f"{cfg['bridge_lex_skip']} 不一致：直通载荷生成端与消费端必须同时开或同时关")
     if router is not None:
         cfg["has_router"] = True
         cfg["d_key"] = int(router.d_key)
+        # router_kind 决定 load 时用哪个类重建：Hybrid 比基类多了注意力池化头与 γ，
+        # 类选错时 strict=True 会在「unexpected keys」上直接报错（这是想要的行为，
+        # 好过悄悄退回基类、让 MaxSim 底盘消失）。
+        cfg["router_kind"] = ("hybrid" if isinstance(router, HybridLatentRouter)
+                              else "latent")
         if int(router.d_model) != int(compressor.hidden_size):
             raise ValueError("router.d_model != compressor.hidden_size")
         if int(router.n_slots) != int(compressor.n_slots):
             raise ValueError("router.n_slots != compressor.n_slots")
     else:
         cfg["has_router"] = False
+        cfg.setdefault("router_kind", "none")
     if fst_router is not None:
         cfg["has_fst"] = True
         cfg["d_key"] = int(fst_router.d_key)
@@ -1958,10 +2584,46 @@ def _tokenize_no_special(tokenizer: Any, text: str, device: Any) -> torch.Tensor
     return enc["input_ids"].to(device)
 
 
+def _prefill_isolated_then_generate(model: Any, input_embeds: torch.Tensor,
+                                    block_mask: torch.Tensor,
+                                    attention_mask: torch.Tensor,
+                                    max_new_tokens: int, pad_token_id: int,
+                                    dev: Any) -> Optional[torch.Tensor]:
+    """用块对角掩码做 prefill（n_in-1 个 token），再从最后一个 token 接着贪心解码。
+
+    返回**新生成**的 token 张量 [n_out]（与 generate 只返回新 token 的口径一致）；
+    任何环节不兼容就抛异常，由调用方退回普通路径（不在这里吞错，吞了会看不出降级）。
+    """
+    n_in = int(input_embeds.shape[1])
+    if n_in < 2:
+        return None
+    pre_emb = input_embeds[:, :-1]
+    m = block_mask[:, :, : n_in - 1, : n_in - 1]
+    with delta_write_disabled(model), torch.no_grad():
+        out = model(inputs_embeds=pre_emb, attention_mask=m, use_cache=True,
+                    output_hidden_states=False)
+        pkv = getattr(out, "past_key_values", None)
+        if pkv is None:
+            raise RuntimeError("prefill 未返回 past_key_values（use_cache 未生效）")
+        gen = model.generate(inputs_embeds=input_embeds[:, -1:], attention_mask=attention_mask,
+                             past_key_values=pkv, max_new_tokens=int(max_new_tokens),
+                             do_sample=False, use_cache=True, pad_token_id=pad_token_id)
+    if not torch.is_tensor(gen):
+        raise RuntimeError(f"隔离路径 generate() 返回了非张量：{type(gen).__name__}")
+    return gen[0]
+
+
+def _attn_impl(model: Any) -> str:
+    cfg = getattr(model, "config", None)
+    return str(getattr(cfg, "_attn_implementation", "") or "").lower()
+
+
 def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], question: str,
                  system_prompt: str, max_new_tokens: int = 32,
                  pad_token_id: Optional[int] = None,
-                 extra_meta: Optional[Dict[str, Any]] = None
+                 extra_meta: Optional[Dict[str, Any]] = None,
+                 seg_ids: Optional[Sequence[int]] = None,
+                 isolate: bool = False
                  ) -> Tuple[str, Dict[str, Any]]:
     """把**已经算好的** soft tokens（[1,T,d] 或 None）插进 system 段之后并生成。
 
@@ -1998,6 +2660,42 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
     attention_mask = torch.ones(input_embeds.shape[:2], dtype=torch.long, device=dev)
     n_in = int(input_embeds.shape[1])
 
+    # ---- 槽位间块对角隔离（v4）----
+    # 只对"软 token 段"生效：不同槽位的软 token 互不可见，同一槽位内部与
+    # 问题/答案侧照常全见。实现上是一张 4D 加性掩码 —— 而 SDPA/FA2 后端不接受 4D
+    # 掩码（HF 的 _update_causal_mask 在 sdpa 下会直接用自建的因果掩码，把我们的
+    # 掩码**静默丢掉**）。因此这里先探测后端：不支持就**明确降级**为围栏隔离
+    # （compose_routed_soft(isolate=True) 的 [-- Fact j --] 前后围栏），
+    # 并把实际生效的模式写进 meta，绝不假装隔离已经生效。
+    # 为什么不在 generate 里直接塞 4D mask：`GenerationMixin` 每个解码步都会对
+    # attention_mask 做 `cat([mask, ones(1)], dim=-1)` 来延长它，4D 张量在这里必然
+    # 形状不匹配。所以块对角隔离只在 **prefill** 阶段生效（prefill 一次拿 past_key_values，
+    # 再让 generate 从最后一个 prompt token 接着解码），并且全程 try/except：
+    # 一旦上游包装器/past_key_values 形态不兼容，就**退回**等价的普通路径并写明原因，
+    # 绝不让"隔离"变成一次静默的崩溃或静默的失效。
+    slot_isolation = "off"
+    block_mask: Optional[torch.Tensor] = None
+    if isolate and seg_ids is not None and soft is not None:
+        impl = _attn_impl(model)
+        n_pre = int(pre.shape[1])
+        n_soft_tok = int(soft.shape[1])
+        n_post = int(post.shape[1])
+        full_segs = [0] * n_pre + [int(v) for v in seg_ids][:n_soft_tok] + [0] * n_post
+        if len(full_segs) != n_in:
+            raise ValueError(f"seg_ids 长度 {len(full_segs)} != 输入长度 {n_in}")
+        if impl in ("eager", "flex_attention"):
+            try:
+                block_mask = build_block_diag_mask(full_segs, dtype=input_embeds.dtype,
+                                                   device=dev)
+                slot_isolation = f"block_diag:{impl}"
+            except Exception as e:                       # pragma: no cover - 后端差异
+                slot_isolation = f"fence_only:mask_error:{type(e).__name__}"
+        else:
+            slot_isolation = f"fence_only:attn_impl={impl or 'unknown'}"
+    elif isolate and soft is not None:
+        slot_isolation = "fence_only:no_seg_ids"
+
+
     pad = pad_token_id
     if pad is None:
         pad = getattr(tokenizer, "eos_token_id", None) or getattr(tokenizer, "pad_token_id", None) or 0
@@ -2007,13 +2705,23 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
     # adapter 等于在评测时额外开了一套训练时从未使用的记忆系统，指标会以"全方法一起
     # 退化、输出塌成固定 token"的形式坏掉，且看不出是这里的问题。
     # 只读策略下没有预先写入的状态，Delta 读出应为零，生成行为回到纯主干。
-    with delta_write_disabled(model), torch.no_grad():
-        out = model.generate(inputs_embeds=input_embeds, attention_mask=attention_mask,
-                             max_new_tokens=int(max_new_tokens), do_sample=False,
-                             use_cache=True, pad_token_id=pad)
-    if not torch.is_tensor(out):
-        raise RuntimeError(f"generate() 返回了非张量：{type(out).__name__}")
-    seq = out[0]
+    seq = None
+    if block_mask is not None and n_in > 1:
+        try:
+            seq = _prefill_isolated_then_generate(
+                model, input_embeds, block_mask, attention_mask,
+                int(max_new_tokens), pad, dev)
+        except Exception as e:                            # pragma: no cover - 上游差异
+            slot_isolation = f"fallback:{type(e).__name__}:{str(e)[:80]}"
+            seq = None
+    if seq is None:
+        with delta_write_disabled(model), torch.no_grad():
+            out = model.generate(inputs_embeds=input_embeds, attention_mask=attention_mask,
+                                 max_new_tokens=int(max_new_tokens), do_sample=False,
+                                 use_cache=True, pad_token_id=pad)
+        if not torch.is_tensor(out):
+            raise RuntimeError(f"generate() 返回了非张量：{type(out).__name__}")
+        seq = out[0]
     if int(seq.shape[0]) > n_in:
         # 返回序列比输入长：prompt 前缀被一起返回了，必须切掉 n_in 再解码。
         pred = tokenizer.decode(seq[n_in:].tolist(), skip_special_tokens=True)
@@ -2026,6 +2734,7 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
         n_out = int(seq.shape[0])
     meta = {"n_in": n_in, "n_out": n_out, "n_soft": n_soft,
             "n_sys_tokens": int(n_sys), "insert_at": int(n_sys),
+            "slot_isolation": slot_isolation,
             "decode_mode": decode_mode, "max_new_tokens": int(max_new_tokens)}
     meta.update(dict(extra_meta or {}))
     return pred, meta
@@ -2038,7 +2747,12 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                            router: Optional["LatentRouter"] = None,
                            q_feat: Optional[torch.Tensor] = None,
                            layer: int = LATENT_LAYER, hops: int = 1,
-                           reads: Optional[Sequence[torch.Tensor]] = None
+                           reads: Optional[Sequence[torch.Tensor]] = None,
+                           kfeat: Optional[Dict[str, Any]] = None,
+                           q_tok: Optional[torch.Tensor] = None,
+                           lex_reads: Optional[Sequence[torch.Tensor]] = None,
+                           topk_per_hop: int = 1,
+                           isolate: int = LATENT_SLOT_ISOLATION
                            ) -> Tuple[str, Dict[str, Any]]:
     """潜层读出：只有 system / question 是正常 token，历史证据全部走 soft tokens。
 
@@ -2079,6 +2793,7 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
     dev = _model_device(model)
     emb_layer = model.get_input_embeddings()
     soft: Optional[torch.Tensor] = None
+    seg_ids: Optional[List[int]] = None
     routed: Optional[List[int]] = None
     if has_payload and router is not None:
         slot_z = payloads if payloads.dim() == 4 else payloads.unsqueeze(0)   # [1,K,m,d]
@@ -2087,22 +2802,18 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
         if qf is None:
             qf = extract_query_feature(model, tokenizer, question, system_prompt,
                                        layer=layer, device=dev)
-        if int(hops) > 1:
-            # 多跳走 forward_hops：与训练侧**同一个函数**，保证 k_out 的用法一致
-            out = router.forward_hops(qf, slot_z, n_hops=int(hops), hard=True,
-                                      reads=reads)
-        else:
-            _z, logits, _ki, _ko = router(qf, slot_z, hard=True)
-            _pick = int(logits[0].argmax().item())
-            if reads is not None and _pick < len(reads):
-                # 读出用**块级保真**载荷，寻址键仍是单元级池化键（键-载荷解耦）
-                _r = reads[_pick]
-                out = {"picks": [_pick],
-                       "z_list": [_r if _r.dim() == 3 else _r.unsqueeze(0)]}
-            else:
-                out = {"picks": [_pick], "z_list": [slot_z[:, _pick]]}
+        # v4：单跳也走 forward_hops —— 因为它现在同时支持 topk_per_hop（4 槽读出）
+        # 与 h0 MaxSim 底盘。分成两条路径就会重演"训练一个函数、推理另一个函数"
+        # 的老毛病（本文件 header 里记着那次代价）。
+        out = router.forward_hops(qf, slot_z, n_hops=max(1, int(hops)), hard=True,
+                                  reads=reads, kfeat=kfeat, q_tok=q_tok,
+                                  topk_per_hop=int(topk_per_hop),
+                                  lex_reads=lex_reads)
         routed = list(out["picks"])
-        soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev)
+        soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev,
+                                   lex_list=out.get("lex_list"),
+                                   isolate=bool(isolate), return_segs=True)
+        soft, seg_ids = soft
     elif has_payload:
         # bridge 不做内容寻址：整库所有槽位**全给**，K*m 个软 token 一起注入，
         # 这是 bridge 的设计语义（"压缩后整段送去读"），不是遗漏了截断。
@@ -2124,14 +2835,26 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                 pz = pz[0]
             elif pz.dim() == 2:
                 pz = pz.unsqueeze(0)
-        soft = bridge(pz.to(dev))                    # [K, m, d] -> [K, m, hidden]
+        plz = None
+        if lex_reads is not None and len(lex_reads) > 0:
+            rows = [r if r is not None else torch.zeros_like(rr)
+                    for r, rr in zip(lex_reads, reads or lex_reads)]
+            plz = torch.cat([r if r.dim() == 2 else r.reshape(-1, r.shape[-1])
+                             for r in rows], dim=0)
+        soft = bridge(pz.to(dev), None if plz is None else plz.to(dev))
         if soft.dim() == 3:
             soft = soft.reshape(1, -1, soft.shape[-1])
+        # 全槽路径没有槽边界信息，隔离按"每个软向量一段"（最保守）：
+        # 逐段隔离比"假装不隔离"更接近意图，且不需要额外声明。
+        if bool(isolate):
+            seg_ids = list(range(1, int(soft.shape[1]) + 1))
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,
                               max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                              seg_ids=seg_ids, isolate=bool(isolate),
                               extra_meta={
                                   "has_payload": has_payload, "routed": routed,
-                                  "hops": int(hops),
+                                  "hops": int(hops), "topk_per_hop": int(topk_per_hop),
+                                  "lex_skip": bool(lex_reads is not None),
                                   "n_slots_in": (int(payloads.shape[0])
                                                  if has_payload else 0)})
     return pred, meta
@@ -2146,7 +2869,7 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
                                query_time: Any = None,
                                device: Any = None,
                                hops: int = 1,
-                               ver_policy: str = "learned",
+                               ver_policy: str = "hybrid",
                                feat_cache: Optional[Dict[Any, torch.Tensor]] = None
                                ) -> Tuple[str, Dict[str, Any]]:
     """FST-Mem 的两级寻址读出：**先选 (实体,属性)，再按时间条件选版本**。
@@ -2207,43 +2930,78 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
     # 这里若把原串（'2021,' / ' May 2021'）直接送进去，两侧时间向量就不是同一分布。
     tq_feat = _tf(_norm_time(query_time)) if _norm_time(query_time) else None
     n_read = max(1, min(int(hops), len(keys)))
+    # ---- 第 1 跳：只取 **1** 个事实组 ----
+    # 这里是 P03 的修复点。旧实现一上来就 `k_groups=n_read`，一次性把 n 个组都取回来，
+    # 于是后面 `while len(picked) < n_read` 的条件**恒为 False** —— FST 的核心创新
+    # "多跳状态链式接力"是一段从未执行过的死代码，实际退化成单次静态 Top-K。
     out = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq_feat,
-                     ver_mask=ver_mask, hard=True, k_groups=n_read,
-                     ver_policy=ver_policy, ver_times=times, query_time=query_time)
+                     ver_mask=ver_mask, hard=True, k_groups=1,
+                     ver_policy=ver_policy, ver_times=times, query_time=query_time,
+                     query_text=question)
     picked: List[Tuple[int, int]] = list(zip(out["groups"], out["versions"]))
-    # 第 2..n 跳：用上一跳选中版本的**客体值**去找"以它为实体"的事实键。
-    # 这里刻意**不用**可学习的 k_out —— FST 的键是静态身份键，没有"客体值"这一路，
-    # 硬塞一个 chain 网络就回到"推理用未训练网络"的老问题上（Router 侧的旧 bug）。
-    # 值 -> 实体是数据里就有的确定性链接，不该交给学习器重新猜。
+    chain_log: List[Dict[str, Any]] = [{"hop": 1, "group": int(picked[0][0]),
+                                        "version": int(picked[0][1]),
+                                        "via": "query"}]
+    # ---- 第 2..n 跳：**在潜空间里**接力 ----
+    # 用上一跳选中版本的潜层出键 k_{g,v}^out 更新查询向量，再对全部事实键重新打分
+    # （已选组屏蔽）。这与旧实现有本质差别：
+    #   - 旧：拿 `slot_values` 的**明文字符串**去匹配"谁的实体出现在上一跳的值里"，
+    #     一旦解析模板漏了 relation、或值的写法与实体不一致，接力就静默断掉；
+    #     而且明文参与决策，等于把"纯潜层读出"的立论让掉一半。
+    #   - 新：q ← norm(q + k_{g,v}^out)，全程只有向量，没有字符串。
+    q_vec_chain = out.get("q_vec")
+    used_groups = [int(picked[0][0])]
     while len(picked) < n_read:
-        last_v = _norm_key_part(bank.value_at(keys[picked[-1][0]], picked[-1][1]))
-        if not last_v:
+        g_prev, v_prev = picked[-1]
+        k_ver = out.get("k_ver")
+        if k_ver is None or q_vec_chain is None:
             break
-        taken = {g for g, _v in picked}
-        cands = [i for i, k in enumerate(keys)
-                 if i not in taken and _norm_key_part(bank.group_text(k)[0])
-                 and _norm_key_part(bank.group_text(k)[0]) in last_v]
-        if not cands:
+        k_out = k_ver[int(g_prev), int(v_prev)]
+        q_vec_chain = torch.nn.functional.normalize(q_vec_chain + k_out, dim=-1)
+        out2 = fst_router(q_feat, e_feat, r_feat, ver_z, ver_t_feat, tq_feat=tq_feat,
+                          ver_mask=ver_mask, hard=True, k_groups=1,
+                          ver_policy=ver_policy, ver_times=times, query_time=query_time,
+                          q_vec=q_vec_chain, used_groups=used_groups,
+                          query_text=question)
+        g2 = int(out2["groups"][0])
+        if g2 in used_groups:                  # 屏蔽失效（全被 mask 时的 -inf 兜底）
             break
-        sub = out["logits_group"][0][cands]
-        g2 = int(cands[int(sub.argmax().item())])
-        v2 = int(fst_router.pick_version(g2, out["logits_ver_all"], ver_mask,
-                                         ver_policy, times, query_time))
+        v2 = int(out2["versions"][0])
         picked.append((g2, v2))
+        used_groups.append(g2)
+        chain_log.append({"hop": len(picked), "group": g2, "version": v2,
+                          "via": "latent_k_out"})
     z_list = [_payload_md(ver_z[g, v]).unsqueeze(0) for g, v in picked]
-    soft = compose_routed_soft(model, tokenizer, bridge, z_list, dev=dev)
+    # 直通载荷按 (事实键, 版本) 从库里取：库与载荷同生同灭，因此不需要重新编码。
+    lex_list = []
+    for g, v in picked:
+        try:
+            lex_list.append(bank.lex_for(keys[g], v, device=dev))
+        except (KeyError, IndexError):
+            lex_list.append(None)
+    if all(x is None for x in lex_list):
+        lex_list = None
+    soft = compose_routed_soft(model, tokenizer, bridge, z_list, dev=dev,
+                              lex_list=lex_list, isolate=True, return_segs=True)
+    soft, seg_ids = soft
     g, v = picked[0]
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,
                               max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                              seg_ids=seg_ids, isolate=True,
                               extra_meta={
                                   "has_payload": True, "routed": [int(x[0]) for x in picked],
+                                  "lex_skip": bool(lex_list is not None),
                                   "hops": len(picked),
                                   "n_slots_in": len(keys),
                                   "group_keys": keys, "group_picked": int(g),
                                   "groups_picked": [int(x[0]) for x in picked],
                                   "versions_picked": [int(x[1]) for x in picked],
+                                  # chain_values 只作**诊断**保留（人力核对接力对不对），
+                                  # 决策已经不依赖它了；chain_log 才是接力的执行轨迹。
                                   "chain_values": [bank.value_at(keys[x[0]], x[1])
                                                    for x in picked],
+                                  "chain_log": chain_log,
+                                  "chain_via": [c["via"] for c in chain_log],
                                   "n_groups": len(keys),
                                   "ver_times": times[g], "ver_picked": int(v),
                                   "ver_time": times[g][v],

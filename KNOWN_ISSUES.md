@@ -252,3 +252,46 @@ PYTHONPATH=/share/exp4group/shim19:/share/exp4group:/share/delta-Mem \
 症状是 `OutOfMemoryError` 里写着"Process XXX has N GiB in use"（不是自己的进程号）。
 处理：启动前用 `nvidia-smi` 排序取当前最空的卡；每步日志打印 `peakmem` 以便区分
 "自己涨"还是"别人挤"。
+
+---
+
+## v4 重构后仍然**未解决**的风险（2026-11-01）
+
+这些不是"还没实现"，而是实现之后仍需实验确认、或受环境限制的**已知缺口**。
+每条都写明「影响什么 / 怎么确认」，不做无根据的乐观结论。
+
+### A. 槽位块对角隔离在默认后端上不生效
+
+`_emit_latent(isolate=True)` 会用 4D 加性掩码做块对角隔离，但 `transformers` 在
+`attn_implementation="sdpa"` 下由 `_update_causal_mask` 自建因果掩码，**4D 掩码会被静默丢弃**。
+因此默认路径实际生效的是"围栏隔离"（`\n-- Fact j --\n` 前后标记）。
+**记账方式**：每条样本 `meta["slot_isolation"]` 写 `block_diag:eager` 或
+`fence_only:attn_impl=sdpa`；要真开隔离必须把主干改成 `attn_implementation="eager"`
+（慢约 20–30%）并加 `--slot-isolation 1`。**未验证**：eager 下的 prefill+past_key_values
+拼接在 Delta-Mem 包装器上是否逐位稳定（代码已 try/except，失败会退回普通路径并写
+`fallback:<异常名>`）。
+
+### B. `--hard-neg-k` 的负例来自**当前** router 打分
+
+负例是"router 现在认为最像金标的非金标槽"。router 变强后负例会变难、变强后也可能
+变成"全是同类干扰"，难度随训练漂移（课程效应，未量化）。若 EM 曲线出现"后期掉点"，
+先看 `--hard-neg-k` 与 `--gold-readout-ratio` 的交互，而不是先怀疑压缩器。
+
+### C. `HybridLatentRouter` 的 MaxSim 底盘依赖 `LATENT_KEY_TOKENS=64` 的截断
+
+`slot_token_features` 把每槽 token 特征截到 64 个（超出部分丢弃，非池化）。
+对 `max_unit_tokens=32` 的单元够用，但**若改用更长的单元**（>64 token），
+字面匹配的覆盖会变差，且当前只在 `n_units` 汇总里体现、没有逐样本告警。
+确认方式：`meta["key_tokens"]` 与实际单元 token 数对照。
+
+### D. `--pack>1` 与 `kl_weight>0` 并存是新路径
+
+teacher 与学生按同一套 `pack_student_batch` 拼接、只在 `labels != -100` 上算 KL；
+形状不一致时该步**跳过 KL 并打印**（不静默）。尚未在 10k×3ep 的完整规模上跑过，
+首个 step 的 `[pack]`/`[kl]` 日志需要人工确认一次。
+
+### E. 训练期验证与产品评测的等价性靠全局 `_ARGS_REF`
+
+`evaluate()` 从 `_ARGS_REF[0]` 取 `topk_per_hop/slot_isolation`，等价性依赖
+"train() 先设好全局再调 evaluate"。若从其它脚本直接调 `evaluate()`，
+这两个参数会退回默认值（1/0），日志与 `eval_latent_table.py` 的数字将不可比。
