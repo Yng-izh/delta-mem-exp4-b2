@@ -52,6 +52,12 @@ snapshot_download("declare-lab/delta-mem_qwen3_4b_instruct", local_dir="/data/<�
 PY
 ```
 
+**adapter 拉不下来（401 / Repository Not Found）时**：`declare-lab/delta-mem_qwen3_4b_instruct`
+在镜像上是 gated 仓库，需要 `HF_TOKEN`（`HF_ENDPOINT=https://hf-mirror.com HF_TOKEN=hf_xxx python ...`）。
+没有 token 就走拷贝：任何一台已经跑过实验的机器上都有 `models/delta-mem_qwen3_4b_instruct`
+（adapter 只有几百 MB），直接 `rsync -av <老机器>:.../models/delta-mem_qwen3_4b_instruct/ models/`。
+主干 4B 权重是公开的，不受影响。
+
 之后所有训练/评测都加 `HF_HUB_OFFLINE=1`。**主干必须冻结**：本实验只训练 Compressor / Bridge / Router，
 主干参数一个都不更新（`_load_backbone` 已 `requires_grad_(False)`）。
 

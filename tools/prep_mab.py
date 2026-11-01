@@ -401,7 +401,7 @@ def main(argv=None):
                 _meta = {"source": source, "cap": cap,
                          "n_facts_total": len(facts),
                          "selection": "question_only",
-                         "gold_in_context": bool(set(gold_idx) <= keep)}
+                         "gold_in_context": bool(set(gold_idx) <= set(keep))}   # keep 是 list，set<=list 会 TypeError
                 it = build_item(facts, keep, q, ans, gold_idx, gold_val,
                                 _meta, qid, hops=_hops)
                 if cap == caps[0]:
