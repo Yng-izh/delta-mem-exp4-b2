@@ -53,7 +53,8 @@ import torch
 import latent_memory as LM
 import train_latent_memory as T
 
-METHODS = ("none", "text", "oracle", "oracle_latent", "bridge", "router", "fst")
+METHODS = ("none", "text", "oracle", "oracle_latent", "oracle_embed",
+           "bridge", "router", "fst")
 
 # ---------------------------------------------------------------------
 # 指标与字段口径
@@ -227,6 +228,72 @@ def read_one(method, item, ctx):
                 # 于是 text/oracle 的 full_recall 恒为 null —— 表现为"这列没算"。
                 "read_all": bool(_gs2 <= set(idx)) if _gs2 else None,
                 "picked": list(idx), "gold": sorted(_gs2)}
+        return pred, info
+
+    if method == "oracle_embed":
+        # ---- 读出机制归因：**不压缩**，直接注入金标证据原文的真实 token embedding ----
+        # 与 oracle_latent 用同一个注入位置、同一份 token 预算（每个金标槽 m 个向量），
+        # 唯一差别是"这些向量来自冻结 Qwen 的 embedding 表"还是"来自 bridge 的输出"。
+        # 因此这一个数就能把两种损失分开：
+        #   oracle_embed ≈ oracle(明文)，而 oracle_latent 低  -> 瓶颈在压缩器/bridge
+        #   oracle_embed 本身也低                            -> 瓶颈在 soft-token 注入机制
+        # 这条分支不加载 ckpt（不需要 encoder/bridge），只依赖主干与 tokenizer。
+        _gse = gold_slots(item, units)
+        _idxe = [i for i in sorted(_gse) if 0 <= i < len(units)]
+        if not _idxe:
+            return "", {"oracle_no_evidence": True, "mem_tokens": 0,
+                        "mem_plain_tokens": 0, "prompt_tokens": 0, "pre_ms": 0.0,
+                        "enc_ms": 0.0, "gen_ms": 0.0,
+                        "total_ms": (time.time() - t0) * 1e3, "n_read_units": 0,
+                        "read_ok": None, "read_all": None, "picked": [], "gold": []}
+        _m = max(1, int(ctx.get("m_slots") or 4))
+        _mut = max(1, int(ctx.get("max_unit_tokens") or 32))
+        # 预算必须与 oracle_latent **逐样本对齐**：那边每个金标槽产生
+        # ceil(单元token/ max_unit_tokens) 个块 × m 个软向量。旧写法按 len(idx)*m
+        # 给，长单元被砍掉大半（实测 9.7 vs 34.5 token），两个数就不可比了 ——
+        # 那一版结论是无效的，必须按块数算预算。
+        _per_slot = []
+        _fixed = int(ctx.get("embed_budget") or 0)
+        if _fixed > 0:
+            # 显式预算：与 oracle_latent 的实测平均 token 数对齐（34.5），
+            # 各槽均分，保证后面的槽也被表示到（只取前缀会系统性偏向第一槽）。
+            _share = max(1, _fixed // max(1, len(_idxe)))
+            _per_slot = [_share] * len(_idxe)
+        else:
+            for _i in _idxe:
+                _t = LM._tokenize_no_special(tok, str(units[_i]), dev)
+                _n = max(1, int(_t.shape[1]))
+                _k = (int(_n) + _mut - 1) // _mut
+                _per_slot.append(max(1, _k) * _m)
+        budget = int(sum(_per_slot))
+        _chunks = [LM._tokenize_no_special(tok, str(units[_i]), dev)[0, :int(_b)]
+                   for _i, _b in zip(_idxe, _per_slot)]
+        _chunks = [c for c in _chunks if int(c.numel()) > 0]
+        if not _chunks:
+            ids = LM._tokenize_no_special(tok, " ", dev)[0, :1]
+        else:
+            ids = torch.cat(_chunks, dim=0)
+        if int(ids.numel()) == 0:
+            return "", {"oracle_no_evidence": True, "mem_tokens": 0,
+                        "mem_plain_tokens": 0, "prompt_tokens": 0, "pre_ms": 0.0,
+                        "enc_ms": 0.0, "gen_ms": 0.0,
+                        "total_ms": (time.time() - t0) * 1e3, "n_read_units": 0,
+                        "read_ok": None, "read_all": None, "picked": [], "gold": []}
+        emb = model.get_input_embeddings()(ids.view(1, -1))
+        pred, meta = LM._emit_latent(
+            model, tok, emb, question, sysp,
+            max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
+            extra_meta={"has_payload": True, "oracle_embed": True,
+                        "embed_budget": budget})
+        info = {"mem_tokens": int(meta.get("n_soft", 0)), "mem_plain_tokens": 0,
+                "prompt_tokens": int(meta.get("n_in", meta.get("n_soft", 0))),
+                "pre_ms": 0.0, "enc_ms": 0.0,
+                "gen_ms": (time.time() - t0) * 1e3,
+                "total_ms": (time.time() - t0) * 1e3,
+                "n_read_units": len(_idxe),
+                "read_ok": True, "read_all": True,
+                "picked": list(_idxe), "gold": sorted(_gse),
+                "embed_budget": budget}
         return pred, info
 
     # ---- 潜层：先编码（所有潜层方法都要付这笔前向） ----
@@ -438,6 +505,9 @@ def main(argv=None):
     ap.add_argument("--layer", type=int, default=LM.LATENT_LAYER)
     ap.add_argument("--max-unit-tokens", type=int, default=LM.LATENT_MAX_UNIT_TOKENS)
     ap.add_argument("--max-new-tokens", type=int, default=16)
+    ap.add_argument("--embed-budget", type=int, default=0,
+                    help="oracle_embed 每样本注入的真实 token 数（0=按潜层块数自动算）；"
+                         "与 oracle_latent 的 mem_tokens 对齐后才能比较")
     ap.add_argument("--text-topk", type=int, default=5, help="text 方法的检索条数（0=全给）")
     ap.add_argument("--hist-max", type=int, default=LM.LATENT_HIST_MAX)
     ap.add_argument("--ver-policy", default="hybrid",
@@ -475,7 +545,11 @@ def main(argv=None):
            "unit_cache": {}, "read_groups": args.read_groups,
            "ver_policy": args.ver_policy,
            "topk_per_hop": int(args.topk_per_hop),
-           "slot_isolation": int(args.slot_isolation)}
+           "slot_isolation": int(args.slot_isolation),
+           # oracle_embed 用：每个金标槽给 m 个软 token，预算与 oracle_latent 对齐
+           "m_slots": int(getattr(args, "m", 4) or 4),
+           "max_unit_tokens": int(args.max_unit_tokens),
+           "embed_budget": int(args.embed_budget)}
 
     if args.method in ("bridge", "router", "fst", "oracle_latent"):
         if not args.ckpt:
