@@ -27,7 +27,9 @@ export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
 export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export CUDA_VISIBLE_DEVICES=0
+# 用哪张卡由外部指定：GPU=1 bash runs/run_train_v4.sh（默认 0）。
+# 本机 GPU 0 常被其他任务占满，硬编码 0 会在加载 4B 权重时直接 OOM。
+export CUDA_VISIBLE_DEVICES=${GPU:-0}
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 TOKENIZERS_PARALLELISM=false
 cd $R
 

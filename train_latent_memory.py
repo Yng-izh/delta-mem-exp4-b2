@@ -1057,8 +1057,8 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
             # eval_latent_table.py 的那个方法（v3 时期就吃过这个亏）。
             _kw = {"kfeat": kfeat, "q_tok": qf_ex.get("h0_tok"),
                    "lex_reads": lex_payloads,
-                   "topk_per_hop": int(getattr(_args_ref[0], "topk_per_hop", 1) or 1),
-                   "isolate": int(getattr(_args_ref[0], "slot_isolation", 0) or 0)}
+                   "topk_per_hop": int(getattr(_ARGS_REF[0], "topk_per_hop", 1) or 1),
+                   "isolate": int(getattr(_ARGS_REF[0], "slot_isolation", 0) or 0)}
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z_keys,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
@@ -1697,6 +1697,9 @@ def train(args):
             loss_addr = addr_pre
             loss_kl = None
             t_embeds = t_labels = None
+            # KL 蒸馏保持原设计：只在 stage=="b" 生效（用户确认：KL 不开）。
+            # 但 stage="a" 下 kl_weight>0 会被忽略，这件事**不许静默** ——
+            # 启动时打印一行显式警告（见 train() 里 kl_weight 的 cfg 打印处）。
             if args.stage == "b" and args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
                 t_embeds, t_n = build_teacher_inputs(
@@ -1890,21 +1893,32 @@ def train(args):
         LM.save_latent_checkpoint(_snap, comp, bridge, _cfg(args.max_steps),
                                   {"partial": False}, router=router)
         _blob = LM._safe_torch_load(_snap)
+        # 重建必须**完全按 ckpt 里记的结构**来，否则 strict 加载必炸：
+        # lex_skip 决定 compressor/bridge 是否有直通分支，router_kind 决定 router 是
+        # 纯潜层还是 hybrid（hybrid 多出 pool_in/proj_in/gamma_logit 等 14 个张量）。
+        _bcfg = _blob["config"]
+        _lex2 = bool(_bcfg.get("lex_skip", False))
         _comp2 = LM.LatentCompressor(LM._model_hidden_size(model),
-                                     n_slots=_blob["config"]["n_slots"],
-                                     inner_dim=_blob["config"]["inner_dim"],
-                                     num_heads=_blob["config"]["num_heads"]).to(dev)
+                                     n_slots=_bcfg["n_slots"],
+                                     inner_dim=_bcfg["inner_dim"],
+                                     num_heads=_bcfg["num_heads"],
+                                     lex_skip=_lex2).to(dev)
         _bridge2 = LM.LatentBridge(LM._model_hidden_size(model),
-                                   bottleneck=_blob["config"]["bottleneck"],
-                                   target_norm=float(_blob["config"]["target_norm"])).to(dev)
+                                   bottleneck=_bcfg["bottleneck"],
+                                   target_norm=float(_bcfg["target_norm"]),
+                                   lex_skip=bool(_bcfg.get("bridge_lex_skip", _lex2))).to(dev)
         _comp2.load_state_dict(_blob["compressor"]); _bridge2.load_state_dict(_blob["bridge"])
         _comp2.eval(); _bridge2.eval()
         _router2 = None
         if _blob.get("router"):
-            _router2 = LM.LatentRouter(LM._model_hidden_size(model),
-                                       n_slots=_blob["config"]["n_slots"],
-                                       d_key=int(_blob["config"].get("d_key",
-                                                                    LM.LATENT_D_KEY))).to(dev)
+            _rkind2 = str(_bcfg.get("router_kind") or "latent")
+            _rcls2 = LM.HybridLatentRouter if _rkind2 == "hybrid" else LM.LatentRouter
+            _rkw2 = ({"gamma": float(_bcfg.get("addr_gamma", LM.LATENT_ADDR_GAMMA))}
+                     if _rcls2 is LM.HybridLatentRouter else {})
+            _router2 = _rcls2(LM._model_hidden_size(model),
+                              n_slots=_bcfg["n_slots"],
+                              d_key=int(_bcfg.get("d_key", LM.LATENT_D_KEY)),
+                              **_rkw2).to(dev)
             _router2.load_state_dict(_blob["router"])
             _router2.eval()
         _reload_reader = (_comp2, _bridge2) if _router2 is None \
@@ -2740,6 +2754,10 @@ def main(argv=None):
           f"max_unit_tokens={args.max_unit_tokens} lr={args.lr} accum={args.accum} "
           f"kl={args.kl_weight} recon={args.recon_weight} "
           f"smoke={args.smoke_model} dry_run={args.dry_run}", flush=True)
+    if float(getattr(args, "kl_weight", 0.0)) > 0 and args.stage != "b":
+        # 不改变行为，只把"开了但没生效"这件事喊出来（否则只有翻日志才发现 n/a）
+        print("[kl] 注意：kl_weight>0 但 stage!=b —— KL 蒸馏在本阶段不会生效"
+              "（原设计只在 stage b 开），日志里 loss_kl 会一直是 n/a", flush=True)
     if args.fst:
         print(f"[cfg] fst=True hist_max={args.hist_max} "
               f"addr_weight={args.addr_weight} ver_weight={args.ver_weight}", flush=True)

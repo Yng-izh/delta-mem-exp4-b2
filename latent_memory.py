@@ -927,8 +927,12 @@ class HybridLatentRouter(LatentRouter):
         if k.dim() == 2:
             k = k.unsqueeze(0)
         K, T, _d = (int(v) for v in k.shape)
-        qn = torch.nn.functional.normalize(q.to(k.dtype), dim=-1)          # [Tq,d]
-        kn = torch.nn.functional.normalize(k.to(qn.dtype), dim=-1)         # [K,T,d]
+        # kfeat 可能是缓存在 CPU 上的（省显存），q_tok 在 GPU —— 必须显式对齐设备，
+        # 否则 einsum 直接 "Expected all tensors to be on the same device"。
+        # 统一在 float32 上算相似度（bf16 下 normalize 再点积的误差会淹没 MaxSim 的区分度）。
+        dev = q.device
+        qn = torch.nn.functional.normalize(q.to(device=dev, dtype=torch.float32), dim=-1)
+        kn = torch.nn.functional.normalize(k.to(device=dev, dtype=torch.float32), dim=-1)
         # 注意下标：查询侧是 q、槽内 token 侧是 s。旧写法 "td,ktd->tkt" 把 t 同时
         # 用作"查询 token"和"槽内 token"，输出里 t 出现两次 → einsum 直接 RuntimeError
         # （这条分支只在 hybrid router + MaxSim 打开时走到，单测才第一次执行到）。
@@ -1078,6 +1082,14 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
         zl = None
         if lex_list is not None and j < len(lex_list) and lex_list[j] is not None:
             zl = lex_list[j]
+            # 两种打包口径必须对齐：读出载荷有时是 [k*m, d]（块已展平，见 pack_slot_reads），
+            # 直通载荷是 [k, m, d]。元素数与顺序都一致（k 为外层），reshape 是恒等映射；
+            # 不 reshape 就会在 bridge 的形状校验里炸掉（实测 2/4/2560 vs 1/8/2560）。
+            if tuple(zl.shape) != tuple(zj.shape):
+                if int(zl.numel()) != int(zj.numel()):
+                    raise ValueError(f"第 {j} 槽直通载荷元素数 {int(zl.numel())} 与语义载荷 "
+                                     f"{int(zj.numel())} 不一致，无法对齐")
+                zl = zl.reshape(tuple(zj.shape))
         s = bridge(zj, zl)
         if s.dim() == 2:
             s = s.unsqueeze(0)
