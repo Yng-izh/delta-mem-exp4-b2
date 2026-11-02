@@ -287,6 +287,11 @@ def select_facts_stream(facts, question, cap=0):
             # 让样本变成无解），而是明确报出来由调用方决定。
             raise ValueError(f"问题锚定事实已 {len(keep)} 条 > cap={cap}，请调大 cap "
                              f"或改用 --cap 0（不截断）")
+    else:
+        # cap<=0 = **不截断，全给**。这里必须显式补上"没被问题锚定"的那些事实：
+        # 只留锚定实体+版本+链，等于在 cap=0 时也悄悄按相关性裁过一遍 ——
+        # 与文档、与 --cap 0 的语义、与 P04"别按答案/相关性偷偷改上下文"都矛盾。
+        keep = set(by_idx)
     return sorted(keep), {"n_anchor": len(seeds), "n_chain": len(chain),
                           "n_keep": len(keep)}
 

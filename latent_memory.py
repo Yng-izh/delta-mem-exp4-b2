@@ -353,10 +353,10 @@ class LatentCompressor(nn.Module):
             # 聚合质量，而 h0 在 padding 位上是 0 向量 —— 表现为"直通分支整体变暗"。
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
             w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+            wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
             z_lex = torch.einsum("bml,bld->bmd",
-                                 w.to(dtype=h0.dtype if h0.dtype.is_floating_point
-                                      else p.dtype),
-                                 h0.to(device=w.device, dtype=p.dtype))
+                                 w.to(dtype=wd),
+                                 h0.to(device=w.device, dtype=wd))
             z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
             if bool(empty.any()):
                 z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
@@ -426,7 +426,13 @@ class LatentBridge(nn.Module):
         # 因此在单位球面上做门控插值：方向由语义/符号两支按 α 竞争，范数仍由受限标量
         # 给出。α→0 时结果与 v3 逐位相同（unit(out)·scale，归一化是幂等的）。
         self.lex_skip = bool(lex_skip)
-        self.lex_gate = nn.Parameter(torch.tensor(float(lex_gate_init)))
+        # 门控参数**只在开启直通时注册**。v2/v3 的 ckpt 里根本没有 `lex_gate`，
+        # 无条件注册会让 `load_state_dict(strict=True)` 报
+        # `Missing key(s) in state_dict: "lex_gate"`，于是所有历史权重都读不进来
+        # （2026-11-02 实测：v3 ckpt 加载直接 RuntimeError，评测一行都跑不了）。
+        # 旧 ckpt 的 lex_skip=False，本就不该有这份参数；v4 产物照常带。
+        if self.lex_skip:
+            self.lex_gate = nn.Parameter(torch.tensor(float(lex_gate_init)))
 
     def scale(self) -> torch.Tensor:
         """当前生效的范数（已夹在 [NORM_MIN, NORM_MAX] 内）。"""
@@ -434,6 +440,8 @@ class LatentBridge(nn.Module):
 
     def alpha(self) -> torch.Tensor:
         """h0 直通门控 α ∈ (0,1)（sigmoid 保证语义/符号两支都不会被负权重抵消）。"""
+        if not self.lex_skip:
+            return torch.zeros((), device=self.out_norm.device, dtype=self.out_norm.dtype)
         return torch.sigmoid(self.lex_gate)
 
     def forward(self, z: torch.Tensor, z_lex: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -921,7 +929,10 @@ class HybridLatentRouter(LatentRouter):
         K, T, _d = (int(v) for v in k.shape)
         qn = torch.nn.functional.normalize(q.to(k.dtype), dim=-1)          # [Tq,d]
         kn = torch.nn.functional.normalize(k.to(qn.dtype), dim=-1)         # [K,T,d]
-        sim = torch.einsum("td,ktd->tkt", qn, kn)                          # [Tq,K,T]
+        # 注意下标：查询侧是 q、槽内 token 侧是 s。旧写法 "td,ktd->tkt" 把 t 同时
+        # 用作"查询 token"和"槽内 token"，输出里 t 出现两次 → einsum 直接 RuntimeError
+        # （这条分支只在 hybrid router + MaxSim 打开时走到，单测才第一次执行到）。
+        sim = torch.einsum("qd,ksd->qks", qn, kn)                          # [Tq,K,T]
         if k_mask is not None:
             m = torch.as_tensor(k_mask).to(sim.device).bool()
             if m.dim() == 1:

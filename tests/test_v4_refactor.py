@@ -46,7 +46,7 @@ def test_compressor_split_and_lex():
     mask = torch.ones(B, L, dtype=torch.long)
     mask[1, 6:] = 0
     z, z_lex, info = comp.forward_split(h0, h18, mask)
-    assert z.shape == (B, m, 64), z.shape
+    assert z.shape == (B, m, H), z.shape          # 语义载荷回到 hidden 维（inner_dim 只是内部宽度）
     assert z_lex is not None and z_lex.shape == (B, m, H), z_lex.shape
     assert int(info["n_empty_rows"]) == 0
     # 直通必须是**未投影的 h0**：z_lex 落在 h0 的行空间里（秩 <= L）
@@ -57,7 +57,7 @@ def test_compressor_split_and_lex():
     assert z2_lex is None and z2.shape == z.shape
     # 关掉直通时，forward()（旧接口）必须逐位等于 forward_split 的语义载荷
     z3, i3 = comp2.forward_with_info(h0, h18, mask)
-    assert i3["n_slots"] == m
+    assert i3["n_rows"] == B and i3["lex_skip"] is False
     print("  ✓ P06 compressor split: z=[B,m,inner] + z_lex=[B,m,H]，lex_skip=0 时无直通")
 
 
@@ -98,7 +98,9 @@ def test_hybrid_router_uses_frozen_features():
     assert not torch.allclose(s1, s2, atol=1e-5), "改动 h0 必须改变打分（键确实来自冻结特征）"
     # 无 kfeat 时回落到父类键（v3 兼容）
     with torch.no_grad():
-        kb, _ = r.encode_keys(slot_z)
+        # 回落路径吃的是**潜载荷**，最后一维必须等于 d_model（这里 H=24），
+        # 不能复用上面那份 d=16 的 fixture（那是给冻结特征路径用的）。
+        kb, _ = r.encode_keys(_t(1, m, 4, H, seed=4))
     assert kb.shape == k1.shape
     print("  ✓ P02/P05 hybrid router: 键随冻结特征变化，缺 kfeat 时回落父类")
 
@@ -107,7 +109,7 @@ def test_beam_four_slots_and_latent_chain():
     H, K, d = 24, 6, 16
     r = LM.LatentRouter(H, n_slots=4, d_key=d)
     r.eval()
-    slot_z = _t(1, K, 3, d, seed=9)
+    slot_z = _t(1, K, 4, H, seed=9)        # 尾部必须是 [m=n_slots, d_model]，m 不能自己编
     reads = [slot_z[0, i] for i in range(K)]        # [k,m,d]
     kfeat = {"h0": _t(K, 5, H, seed=10), "h18": _t(K, 5, H, seed=11),
              "mask": torch.ones(K, 5, dtype=torch.long)}
@@ -126,20 +128,22 @@ def test_beam_four_slots_and_latent_chain():
 
 
 def test_block_diag_mask():
-    segs = [0, 0, 1, 1, 2]
+    # 布局必须让"问题/围栏"出现在槽位**之后**（真实输入就是这样：system -> 软槽 -> 问题），
+    # 否则因果掩码会让共享段根本看不到后面的槽位，测不出"记忆是否对问题可见"。
+    segs = [0, 1, 1, 2, 0]        # 0=共享(system/围栏) 1=槽1 2=槽2，末位 0=问题
     m = LM.build_block_diag_mask(segs, dtype=torch.float32, device="cpu")
     assert tuple(m.shape) == (1, 1, 5, 5), m.shape
     vis = (m == 0)
-    # 同段 + 因果 可见；跨段 不可见；未来位 不可见
-    assert bool(vis[0, 0, 2, 2]) and bool(vis[0, 0, 3, 2])
-    assert not bool(vis[0, 0, 3, 4]), "跨槽必须屏蔽"
-    assert not bool(vis[0, 0, 2, 3]), "未来位必须屏蔽（因果）"
-    assert bool(vis[0, 0, 0, 0])
-    # 共享段 0（system/围栏/问题）必须双向可见 —— 这条一旦破，读出直接失效
-    assert bool(vis[0, 0, 4, 2]), "问题必须能看到槽位（否则记忆被整段屏蔽）"
-    assert bool(vis[0, 0, 2, 3]) is False and bool(vis[0, 0, 4, 3])
+    # 同段 + 因果
+    assert bool(vis[0, 0, 1, 0]) and bool(vis[0, 0, 2, 1])
+    # 跨槽必须屏蔽（双向）
+    assert not bool(vis[0, 0, 3, 1]) and not bool(vis[0, 0, 1, 3])
+    # 因果：槽内看不到未来位
+    assert not bool(vis[0, 0, 1, 2])
+    # 共享段 0 双向可见：问题（行 4）必须看得到两个槽位；槽位也必须看得到 system
+    assert bool(vis[0, 0, 4, 1]) and bool(vis[0, 0, 4, 3]), "问题必须能看到槽位，否则记忆被整段屏蔽"
+    assert bool(vis[0, 0, 1, 0]), "槽位必须能看到 system 段"
     print("  ✓ P10 build_block_diag_mask: 共享段双向可见、跨槽屏蔽、因果")
-
 
 
 def test_bank_lex_storage():
@@ -161,13 +165,16 @@ def test_bank_lex_storage():
 
 def test_prep_does_not_read_answers():
     import prep_mab as P
-    ctx = ("Fact 1: Alice | employer | Acme Inc\n"
-           "Fact 2: Alice | employer | Globex\n"
-           "Fact 3: Bob | city | Paris\n")
+    ctx = ("1. The employer of Alice is Acme Inc\n"
+           "2. The employer of Alice is Globex\n"
+           "3. The city of Bob is Paris\n")
     facts = P.parse_context(ctx)
     assert len(facts) == 3, facts
+    # 冲突版本必须被识别成同一个键（Alice/employer 两条）
+    assert len({P.key_of(f) for f in facts}) == 2, [P.key_of(f) for f in facts]
     keep, info = P.select_facts_stream(facts, "Who is Alice's employer?", 0)
-    assert set(range(len(facts))) <= set(keep), (keep, info)
+    # cap<=0 = 不截断：连问题没锚定到的 Bob 那条也必须在上下文里
+    assert set(keep) == {f["idx"] for f in facts}, (keep, info)
     # 关键：选择器签名里没有 answers/gold —— 不传答案也能得到完整候选集
     import inspect
     sig = inspect.signature(P.select_facts_stream)
