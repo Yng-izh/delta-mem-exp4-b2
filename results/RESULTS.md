@@ -1,5 +1,8 @@
 # 第一版完整实验结果表（公开基准，2026-10-27）
 
+> 2026-11-02 的潜层读出诊断运行记录（运行条件、命令、原始指标）见
+> [oracle_diag_2026-11-02/README.md](oracle_diag_2026-11-02/README.md)。
+
 四组方法 × 两个公开基准 × 五个核心指标。所有方法走同一条
 `eval_latent_table.py` 生成路径（明文与潜层共用 `_emit_latent`）、
 同一冻结主模型（Qwen3-4B-Instruct-2507 + Delta-Mem adapter）、
