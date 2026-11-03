@@ -86,7 +86,12 @@ LATENT_HIST_MAX        = _env_int("LATENT_HIST_MAX", 4)
 # 就在冻结模型输入嵌入所在的流形上，所以把交叉注意力的权重直接拿去聚合**未降维的**
 # h0，再从 bridge 输出端加回来，可以做到"注意力头挑中的那几个 token 零失真直达生成端"。
 LATENT_LEX_SKIP        = _env_int("LATENT_LEX_SKIP", 1)         # 1=启用直通，0=退回纯语义分支
-LATENT_LEX_GATE_INIT   = _env_float("LATENT_LEX_GATE_INIT", 0.1)  # 门控 α 的初值（sigmoid 前）
+# 直通分支的**选通温度**。0.05 ≈ 近似 argmax：让每个槽抓到一个**具体实体 token**
+# 的原生 h0，而不是把 30 个 token 平均成一团"模糊面团"（2026-11-03 归因：
+# 同样 33 token 预算下，原生 h0 = 32.8% EM，压缩软向量只有 17.2%）。
+LATENT_LEX_TAU         = _env_float("LATENT_LEX_TAU", 0.05)
+# 门控 α 初值 = 0：第 0 步输出严格等于 z_lex（原生词嵌入），残差从 0 开始学。
+LATENT_LEX_GATE_INIT   = _env_float("LATENT_LEX_GATE_INIT", 0.0)
 # ---- v4 手术二：HybridLatentRouter 的 h0 Token-MaxSim 底盘 ----
 LATENT_ADDR_GAMMA      = _env_float("LATENT_ADDR_GAMMA", 0.5)   # γ 初值：MaxSim 占比（可学习）
 LATENT_MS_TAU          = _env_float("LATENT_MS_TAU", 0.2)       # MaxSim 的固定逆温度
@@ -94,7 +99,10 @@ LATENT_KEY_TOKENS      = _env_int("LATENT_KEY_TOKENS", 64)      # 每个槽位�
 # ---- v4 手术三：槽位间块对角隔离 ----
 # 1=尝试在读出侧对不同槽位的软 token 加块对角掩码（需要 4D attention mask，
 # 只有 eager 注意力实现支持；不支持时自动降级为原生隔离栅栏并在 meta 里写明）。
-LATENT_SLOT_ISOLATION  = _env_int("LATENT_SLOT_ISOLATION", 0)
+# 默认**开启**槽位块对角隔离：v4 训练全程 slot_isolation=0，4 个槽位在同一个
+# 自注意力里互相串扰，注入 token 从 22 涨到 58 而召回率没跟上（2026-11-03 实测）。
+# 只在 eager 后端真正生效；SDPA 下会自动降级为围栏并在 meta 里写明。
+LATENT_SLOT_ISOLATION  = _env_int("LATENT_SLOT_ISOLATION", 1)
 # >0 时只编码前 N 个槽位（smoke / 大池调试用）；0 = 不限制。
 LATENT_BANK_MAX = int(os.environ.get("LATENT_BANK_MAX", "0"))
 LATENT_DTYPE           = _env_str("LATENT_DTYPE", "bf16").lower()
@@ -239,7 +247,8 @@ class LatentCompressor(nn.Module):
 
     def __init__(self, hidden_size: int, n_slots: int = LATENT_M,
                  inner_dim: int = LATENT_INNER_DIM, num_heads: int = LATENT_N_HEADS,
-                 lex_skip: bool = bool(LATENT_LEX_SKIP)):
+                 lex_skip: bool = bool(LATENT_LEX_SKIP),
+                 lex_tau: float = LATENT_LEX_TAU):
         super().__init__()
         if int(hidden_size) <= 0:
             raise ValueError(f"hidden_size 必须为正，得到 {hidden_size}")
@@ -256,6 +265,7 @@ class LatentCompressor(nn.Module):
         # h0 符号直通（v4）：见文件头 LATENT_LEX_SKIP 的说明。关闭时 z_lex=None，
         # 下游 bridge 行为与 v3 逐位一致（旧 checkpoint 因此可以原样加载）。
         self.lex_skip = bool(lex_skip)
+        self.lex_tau = float(lex_tau)   # 直通分支选通温度（见 LATENT_LEX_TAU）
         self.input_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.hidden_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.queries = nn.Parameter(torch.randn(self.n_slots, self.inner_dim) * 0.02)
@@ -351,7 +361,25 @@ class LatentCompressor(nn.Module):
                                      f"期望 [B,{self.n_slots},{L}]")
             # 被 mask 掉的位置权重必须清零再归一化：否则 padding token 会分走一部分
             # 聚合质量，而 h0 在 padding 位上是 0 向量 —— 表现为"直通分支整体变暗"。
+            # ---- 尖锐选通（v4 手术二）----
+            # 旧写法直接复用语义分支的 softmax 权重：那是**平滑平均**，把 30 个 token
+            # 混成一个不对应词表任何实体的"面团"向量。实测同样 33 token 预算，
+            # 原生 h0 能到 32.8% EM，而平滑平均出来的潜向量只有 17.2%。
+            # 现在对同一份 logits 施极低温度 τ_lex≈0.05，并**逐行互斥**：
+            # 第 r 行挑走一个 token 后，后面的行不能再选它 —— m 个槽分别锚到
+            # m 个不同的高显著 token（实体/数字），这正是冻结模型能直接读懂的东西。
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
+            logits = torch.log(w.clamp_min(1e-9))
+            logits = logits.masked_fill(~safe_mask.unsqueeze(1), -1e4)
+            taken = torch.zeros((B, L), dtype=torch.bool, device=logits.device)
+            rows = []
+            for _r in range(self.n_slots):
+                row = logits[:, _r, :].masked_fill(taken, -1e4)
+                p_r = torch.softmax(row / max(1e-3, float(self.lex_tau)), dim=-1)
+                rows.append(p_r)
+                pick = p_r.argmax(dim=-1, keepdim=True)          # [B,1]
+                taken = taken.scatter(1, pick, True)
+            w = torch.stack(rows, dim=1)                          # [B,m,L]
             w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
             wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
             z_lex = torch.einsum("bml,bld->bmd",
@@ -417,6 +445,10 @@ class LatentBridge(nn.Module):
             nn.SiLU(),
             nn.Linear(self.bottleneck, self.hidden_size),
         )
+        # 最后一层零初始化：配合 α 初值 0，保证第 0 步 E_soft 严格等于 z_lex
+        # （残差从"什么都没有"开始长，而不是一开始就往原生词向量上叠噪声）。
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
         self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
         # ---- v4：h0 直通的**方向**门控 ----
@@ -439,10 +471,15 @@ class LatentBridge(nn.Module):
         return self.out_norm.clamp(self.NORM_MIN, self.NORM_MAX)
 
     def alpha(self) -> torch.Tensor:
-        """h0 直通门控 α ∈ (0,1)（sigmoid 保证语义/符号两支都不会被负权重抵消）。"""
+        """h0 直通的**残差**系数 α（tanh，初值 0）。
+
+        初值为 0 是有物理含义的：第 0 步输出严格等于 z_lex（原生关键 token 的 h0），
+        于是训练起点就是"零训练也能拿 32.8% EM 的 oracle_embed 状态"，而不是从一团
+        随机投影开始。α 只在 KL/QA 梯度真正需要补上下文时才离开 0。
+        """
         if not self.lex_skip:
             return torch.zeros((), device=self.out_norm.device, dtype=self.out_norm.dtype)
-        return torch.sigmoid(self.lex_gate)
+        return torch.tanh(self.lex_gate)
 
     def forward(self, z: torch.Tensor, z_lex: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Z [B,m,d]（+ 可选 z_lex [B,m,d]）-> soft tokens [B,m,d]，范数对齐真实 embedding。"""
@@ -455,19 +492,31 @@ class LatentBridge(nn.Module):
         # 方向保留、范数对齐到真实 embedding 尺度（见类文档里的实测数据）
         n = out.norm(dim=-1, keepdim=True)
         unit = out / n.clamp_min(1e-6)
+        res = unit * self.scale().to(device=unit.device, dtype=unit.dtype)
         if z_lex is not None and self.lex_skip:
+            # ---- 残差锚定（v4 手术二）----
+            # 旧写法把 Bridge(z_sem) 与 z_lex 在单位球面上按 α 混合方向再缩放范数。
+            # 那是错的：z_lex 已经是**词表里的真实 embedding**，混合会把它拉离词表方向；
+            # 而冻结 Qwen 恰恰只认这种离散、尖锐的词向量（同预算下 32.8% vs 17.2%）。
+            # 新写法：z_lex 作主干，Bridge(z_sem) 只作**零初始化残差**补充被截断的谓词
+            # 与上下文关系。α=0 时输出逐元素等于 z_lex，天然继承 oracle_embed 的起点。
             lex = _as_3d(z_lex, "z_lex")
             if tuple(lex.shape) != tuple(z.shape):
-                raise ValueError(f"z_lex 形状 {tuple(lex.shape)} 必须与 z {tuple(z.shape)} 一致")
-            lex = lex.to(device=unit.device, dtype=unit.dtype)
+                if int(lex.numel()) == int(z.numel()):
+                    lex = lex.reshape(tuple(z.shape))
+                else:
+                    raise ValueError(f"z_lex 形状 {tuple(lex.shape)} 必须与 z {tuple(z.shape)} 一致")
+            lex = lex.to(device=res.device, dtype=res.dtype)
             ln = lex.norm(dim=-1, keepdim=True)
-            lex_unit = lex / ln.clamp_min(1e-6)
-            # 空槽（全零直通向量）不参与混合：否则 normalize 出来的方向是噪声
-            valid = (ln > 1e-6).to(unit.dtype)
-            a = self.alpha().to(device=unit.device, dtype=unit.dtype) * valid
-            mixed = unit + a * lex_unit
-            unit = mixed / mixed.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-        return unit * self.scale().to(device=unit.device, dtype=unit.dtype)
+            valid = ln > 1e-6                      # 空槽（全零直通向量）不参与
+            a = self.alpha().to(device=res.device, dtype=res.dtype)
+            e = lex + a * res
+            e = torch.where(valid, e, res)          # 空槽退回纯语义残差
+            tgt = self.scale().to(device=res.device, dtype=res.dtype)
+            en = e.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+            fac = (tgt / en).clamp(self.NORM_MIN, self.NORM_MAX)
+            return e * fac
+        return res
 
 
 # ----------------------------- 2.5) 潜空间内容寻址（Router） -----------------------------
@@ -931,8 +980,28 @@ class HybridLatentRouter(LatentRouter):
         # 否则 einsum 直接 "Expected all tensors to be on the same device"。
         # 统一在 float32 上算相似度（bf16 下 normalize 再点积的误差会淹没 MaxSim 的区分度）。
         dev = q.device
-        qn = torch.nn.functional.normalize(q.to(device=dev, dtype=torch.float32), dim=-1)
-        kn = torch.nn.functional.normalize(k.to(device=dev, dtype=torch.float32), dim=-1)
+        qf = q.to(device=dev, dtype=torch.float32)
+        kf = k.to(device=dev, dtype=torch.float32)
+        m_b = None
+        if k_mask is not None:
+            m_b = torch.as_tensor(k_mask).to(device=dev).bool()
+            if m_b.dim() == 1:
+                m_b = m_b.unsqueeze(0)
+            if tuple(m_b.shape) != (K, T):
+                m_b = m_b.expand(K, T)
+        # ---- 去均值（v4 手术三）----
+        # Qwen 的词嵌入空间是**各向异性**的：不减去候选 token 的均值方向，
+        # what/the/of 这类功能词与任何 token 的余弦都偏高，把稀有实体（人名/年份）
+        # 的匹配分淹没。减去当前样本候选 token 的均值，等于把"公共方向"去掉，
+        # 只留下区分度。这只用样本内的统计量，不引入外部资源。
+        if m_b is not None and bool(m_b.any()):
+            mu = kf[m_b].mean(dim=0, keepdim=True)                  # [1,d]
+        else:
+            mu = kf.reshape(-1, kf.shape[-1]).mean(dim=0, keepdim=True)
+        qf = qf - mu
+        kf = kf - mu
+        qn = torch.nn.functional.normalize(qf, dim=-1)
+        kn = torch.nn.functional.normalize(kf, dim=-1)
         # 注意下标：查询侧是 q、槽内 token 侧是 s。旧写法 "td,ktd->tkt" 把 t 同时
         # 用作"查询 token"和"槽内 token"，输出里 t 出现两次 → einsum 直接 RuntimeError
         # （这条分支只在 hybrid router + MaxSim 打开时走到，单测才第一次执行到）。
@@ -944,7 +1013,14 @@ class HybridLatentRouter(LatentRouter):
             sim = sim.masked_fill(~m.unsqueeze(0), float("-inf"))
         best = sim.max(dim=-1).values                                      # [Tq,K]
         best = torch.nan_to_num(best, neginf=-1.0)
-        return best.mean(dim=0).unsqueeze(0)                               # [1,K]
+        # ---- IDF 加权（v4 手术三）----
+        # 每个问题 token 按"在多少个候选单元里能找到它"降权：df 大 = 到处都有的
+        # 功能词，权重趋近下限；df=1 = 只在一个单元出现的专有名词，权重最高。
+        # 这是免训练的（不需要语料，直接在当前候选集内算），和 BM25 的 idf 同源。
+        df = (best > 0.5).to(torch.float32).sum(dim=1)                     # [Tq]
+        w_idf = torch.log((float(K) + 1.0) / (df + 1.0)) + 1.0
+        w_idf = w_idf / w_idf.mean().clamp_min(1e-6)
+        return (best * w_idf.unsqueeze(1)).mean(dim=0).unsqueeze(0)        # [1,K]
 
     def encode_keys(self, slot_z: torch.Tensor,
                     kfeat: Optional[Dict[str, Any]] = None

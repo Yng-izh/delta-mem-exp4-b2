@@ -594,13 +594,15 @@ def main(argv=None):
         if isinstance(gold, (list, tuple)):
             gold = " ".join(str(g) for g in gold)
         ok = T._norm_ans(pred) == T._norm_ans(gold)
-        rows.append(dict(info, question=item["question"], gold=gold,
+        # 逐样本记录里 gold 是**答案文本**，而 info["gold"] 是金标槽位下标；
+        # 两者同名会让审计时把"槽位号"当答案读（反之亦然），因此答案改名为 gold_ans。
+        rows.append(dict(info, question=item["question"], gold_ans=gold,
                          pred=str(pred), ok=bool(ok), idx=i,
                          em=em_score(pred, gold), f1=f1_score(pred, gold),
                          n_ev=n_ev_of(item), hops=item_hops(item)))
         if args.verbose:
             print(f"  [{label}] {'✓' if ok else '✗'} q={item['question'][:50]!r} "
-                  f"gold={gold!r} pred={str(pred)[:40]!r}", flush=True)
+                  f"gold_ans={gold!r} pred={str(pred)[:40]!r}", flush=True)
 
     s = summarize(rows, label)
     print("| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% "

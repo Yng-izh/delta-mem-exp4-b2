@@ -62,20 +62,36 @@ def test_compressor_split_and_lex():
 
 
 def test_bridge_alpha_zero_recovers_v3():
+    """残差锚定语义：α=0 时输出**严格等于 z_lex**（原生词嵌入），α≠0 才叠加语义残差。
+
+    这是 2026-11-03 的归因结论落点：同样 33 token 预算，原生 h0 词嵌入 32.8% EM，
+    压缩软向量 17.2%。所以训练起点必须站在 z_lex 上，而不是"混合后重新缩放"。
+    """
     H, m, d = 32, 4, 24
     br = LM.LatentBridge(H, bottleneck=d, target_norm=1.05, lex_skip=True)
-    z, z_lex = _t(1, m, 32), _t(1, m, H, seed=3)
+    z = _t(1, m, 32)
+    # 真实 h0 每向量范数 ≈1.05（见 LatentBridge 文档里的实测）；用随机正态会得到
+    # 范数 ~sqrt(32)，触发范数夹紧，测的就不是"是否等于 z_lex"了。
+    z_lex = torch.nn.functional.normalize(_t(1, m, H, seed=3), dim=-1) * 1.05
     with torch.no_grad():
-        out_with = br(z, z_lex)
-        br.lex_gate.fill_(float("-60"))          # α = sigmoid(-60) ≈ 9e-27
-        out_zero = br(z, z_lex)
+        out_init = br(z, z_lex)                  # α 初值 = 0
+        # 最后一层是零初始化的（设计如此：第 0 步残差必须严格为 0），
+        # 所以要测"α 起作用"必须先把残差分支喂出非零输出，模拟训练若干步之后。
+        br.net[-1].weight.normal_(0.0, 0.05)
+        br.lex_gate.fill_(1.0)                   # α = tanh(1) ≈ 0.76
+        out_mixed = br(z, z_lex)
         out_none = br(z, None)
-    assert out_with.shape == out_zero.shape == out_none.shape
-    assert torch.allclose(out_zero, out_none, atol=1e-6), "α->0 必须与不给直通逐位一致"
-    assert not torch.allclose(out_with, out_none, atol=1e-4), "α 初值必须真的改变输出"
-    n = out_with.norm(dim=-1).mean()
+    assert out_init.shape == out_mixed.shape == out_none.shape
+    # α=0：输出 = z_lex（范数夹紧在 [0.25,4] 倍内，这里 z_lex 范数接近目标值 -> 系数≈1）
+    assert torch.allclose(out_init, z_lex, atol=2e-2), "α=0 必须输出原生 z_lex"
+    assert not torch.allclose(out_mixed, out_init, atol=1e-3), "α 非零必须真的改变输出"
+    n = out_mixed.norm(dim=-1).mean()
     assert 1.05 * LM.LatentBridge.NORM_MIN - 1e-3 <= float(n) <= 1.05 * LM.LatentBridge.NORM_MAX + 1e-3
-    print(f"  ✓ P06 bridge: α→0 逐位回到 v3，范数 {float(n):.3f} 仍在夹紧区间内")
+    # 关掉直通时仍走纯语义分支（v3 行为）
+    br2 = LM.LatentBridge(H, bottleneck=d, target_norm=1.05, lex_skip=False)
+    with torch.no_grad():
+        assert torch.allclose(br2(z, None), br2(z, z_lex), atol=1e-6), "lex_skip=False 必须忽略 z_lex"
+    print(f"  ✓ P06 bridge: α=0 输出原生 z_lex，α≠0 叠加残差，范数 {float(n):.3f} 在区间内")
 
 
 def test_hybrid_router_uses_frozen_features():

@@ -1568,6 +1568,14 @@ def train(args):
             #    一条样本有几条事实就编几个槽位（与推理期 bank 布局一致）
             #    --bridge-only：跳过压缩器，原文 token embedding 直接进 bridge（消融用）
             payloads = None
+            # 预初始化必须放在**编码分支之前**：这两个变量只有 router 分支会产生，
+            # 其余分支要保证它们有定义。旧代码把这两行写在 encode_item_slots_full
+            # 之后，等于把刚编码出来的特征无条件清空 —— 训练期 kfeat/lex 永远是 None，
+            # 于是 hybrid router 的 pool/proj/gamma 和 bridge 的 lex_gate 全程没有梯度，
+            # 而评测脚本却把两者都传进去（训练/推理两条路不一样，这是 v4 全面倒退的
+            # 第一病根，2026-11-03 定位）。
+            kfeat = None
+            lex_payloads = None
             if args.bridge_only:
                 z, enc_info = encode_item_raw_embed(model, tokenizer, item)
             elif router is not None:
@@ -1585,8 +1593,6 @@ def train(args):
             tgt_slot = 0
             addr_pre = None
             qa_gate = 1.0
-            kfeat = None
-            lex_payloads = None
             if router is not None and payloads is not None:
                 units_now = item_units(item)
                 # 变槽数 + 随机顺序：逼模型学"按问题选槽"，而不是"第 0 位是答案"
@@ -1697,10 +1703,11 @@ def train(args):
             loss_addr = addr_pre
             loss_kl = None
             t_embeds = t_labels = None
-            # KL 蒸馏保持原设计：只在 stage=="b" 生效（用户确认：KL 不开）。
-            # 但 stage="a" 下 kl_weight>0 会被忽略，这件事**不许静默** ——
-            # 启动时打印一行显式警告（见 train() 里 kl_weight 的 cfg 打印处）。
-            if args.stage == "b" and args.kl_weight > 0:
+            # KL 蒸馏不再绑定 stage=="b"（2026-11-03 决定）：v4 是单阶段训练，
+            # 旧条件让 --kl-weight 1.0 在 stage=a 下被静默跳过（7497 步 loss_kl=n/a），
+            # 只靠每题两三个答案 token 的稀疏 CE 教不会冻结模型读潜向量。
+            # teacher 用金标明文证据，位置严格对齐 [answer..., EOS]。
+            if args.kl_weight > 0:
                 # ④ teacher：明文证据，只提供目标分布
                 t_embeds, t_n = build_teacher_inputs(
                     model, tokenizer, item["memory"], system_prompt,
@@ -2754,10 +2761,6 @@ def main(argv=None):
           f"max_unit_tokens={args.max_unit_tokens} lr={args.lr} accum={args.accum} "
           f"kl={args.kl_weight} recon={args.recon_weight} "
           f"smoke={args.smoke_model} dry_run={args.dry_run}", flush=True)
-    if float(getattr(args, "kl_weight", 0.0)) > 0 and args.stage != "b":
-        # 不改变行为，只把"开了但没生效"这件事喊出来（否则只有翻日志才发现 n/a）
-        print("[kl] 注意：kl_weight>0 但 stage!=b —— KL 蒸馏在本阶段不会生效"
-              "（原设计只在 stage b 开），日志里 loss_kl 会一直是 n/a", flush=True)
     if args.fst:
         print(f"[cfg] fst=True hist_max={args.hist_max} "
               f"addr_weight={args.addr_weight} ver_weight={args.ver_weight}", flush=True)
