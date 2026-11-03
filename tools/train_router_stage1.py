@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""阶段一：**只训 Router**（不跑 4B 生成、不跑重建、不算 KL）。
+
+为什么单独拎出来（2026-11-03 的结论）
+------------------------------------
+`HybridLatentRouter` 的输入特征 kfeat（冻结主干的 h0/h18）**完全静态**：它不随
+Compressor/Bridge 更新而改变。把它绑在"生成 + 重建"的主循环里训练，等于用 14 小时
+去等一个 20 分钟就能收敛的东西；更糟的是 router 还没收敛时采出的难负例会把 Bridge
+一起带偏（v4 就是这样把读出从 17.2% 带到 10.0% 的）。
+
+这个脚本只做一件事：在冻结特征上优化 `addr_loss_set`，训完立刻在验证集上算
+**完整证据召回率**（不生成答案，几分钟跑完）。召回率上不去就不该进入阶段二。
+
+用法：
+    python tools/train_router_stage1.py --base ... --adapter ... \
+        --data $B/synth/hotpot_train_10k.jsonl --val-data $B/synth/hotpot_val500.jsonl \
+        --epochs 3 --out $B/ckpt/router_stage1.pt
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import random
+import sys
+import time
+
+import torch
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+os.environ.setdefault("DELTA_MEM_SCAN_IMPL", "torch")
+
+import latent_memory as LM          # noqa: E402
+import train_latent_memory as T     # noqa: E402
+
+
+def build_router(args, hidden, dev):
+    cls = LM.HybridLatentRouter if args.router_kind == "hybrid" else LM.LatentRouter
+    kw = {"gamma": float(args.addr_gamma)} if cls is LM.HybridLatentRouter else {}
+    return cls(hidden, n_slots=args.m, d_key=args.d_key, **kw).to(dev)
+
+
+def recall_eval(router, encoder, items, args, dev, limit=0):
+    """不生成答案，只算寻址指标：首跳命中 / 完整证据召回（整条链都进 picks）。"""
+    router.eval()
+    n = 0
+    hit1 = full = 0
+    t0 = time.time()
+    for item in (items[:limit] if limit else items):
+        units = T.item_units(item)
+        gold = T.evidence_chain_indices(units, item.get("evidence"))
+        if not gold:
+            continue
+        payloads, _z, _info, kfeat, _lex = T.encode_item_slots_full(
+            encoder, item, tag="val", grad=False)
+        slot_z = LM.pool_slot_keys(list(payloads)).unsqueeze(0)
+        reads = LM.pack_slot_reads(list(payloads))
+        qf_ex = T.query_feature_ex_cached(encoder.model, encoder.tokenizer,
+                                          item["question"], args.system_prompt,
+                                          args.layer, dev)
+        with torch.no_grad():
+            out = router.forward_hops(qf_ex["pooled"], slot_z, n_hops=2, hard=True,
+                                      reads=reads, kfeat=kfeat,
+                                      q_tok=qf_ex.get("h0_tok"),
+                                      topk_per_hop=int(args.topk_per_hop))
+        picks = set(int(p) for p in (out.get("picks") or []))
+        n += 1
+        hit1 += int(bool(picks & set(int(g) for g in gold)))
+        full += int(set(int(g) for g in gold) <= picks)
+    router.train()
+    dt = time.time() - t0
+    if not n:
+        return {"n": 0, "hit1": None, "full": None, "sec": dt}
+    return {"n": n, "hit1": hit1 / n, "full": full / n, "sec": dt}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", required=True)
+    ap.add_argument("--adapter", default="")
+    ap.add_argument("--data", required=True)
+    ap.add_argument("--val-data", default="")
+    ap.add_argument("--n-train", type=int, default=10000)
+    ap.add_argument("--val-limit", type=int, default=200)
+    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--accum", type=int, default=8)
+    ap.add_argument("--lr", type=float, default=2e-3)
+    ap.add_argument("--m", type=int, default=4)
+    ap.add_argument("--layer", type=int, default=18)
+    ap.add_argument("--inner-dim", type=int, default=1024)
+    ap.add_argument("--heads", type=int, default=8)
+    ap.add_argument("--bottleneck", type=int, default=512)
+    ap.add_argument("--max-unit-tokens", type=int, default=32)
+    ap.add_argument("--max-slots", type=int, default=0)
+    ap.add_argument("--d-key", type=int, default=LM.LATENT_D_KEY)
+    ap.add_argument("--router-kind", default="hybrid", choices=("latent", "hybrid"))
+    ap.add_argument("--addr-gamma", type=float, default=LM.LATENT_ADDR_GAMMA)
+    ap.add_argument("--topk-per-hop", type=int, default=2)
+    ap.add_argument("--system-prompt",
+                    default="You are a helpful assistant. Answer with the shortest exact value.")
+    ap.add_argument("--eval-every", type=int, default=1000)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--smoke-model", action="store_true")
+    args = ap.parse_args(argv)
+
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    args.smoke_model = bool(args.smoke_model)
+    model, tok, dev, hidden = T._load_backbone(args, dev)
+    comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
+                               num_heads=args.heads, lex_skip=False).to(dev).eval()
+    comp.requires_grad_(False)
+    encoder = LM.LatentEncoder(model, tok, comp, layer=args.layer,
+                               max_unit_tokens=args.max_unit_tokens, device=dev)
+    router = build_router(args, hidden, dev)
+    opt = torch.optim.AdamW(router.parameters(), lr=args.lr, weight_decay=0.0)
+    items = T.load_synth_jsonl(args.data, args.n_train, seed=args.seed)
+    val = T.load_synth_jsonl(args.val_data, 0, seed=args.seed) if args.val_data else []
+    print(f"[stage1] train={len(items)} val={len(val)} m={args.m} d_key={args.d_key} "
+          f"kind={args.router_kind} lr={args.lr} accum={args.accum}", flush=True)
+
+    rng = random.Random(args.seed)
+    step = 0
+    t_start = time.time()
+    for ep in range(args.epochs):
+        for item in items:
+            units = T.item_units(item)
+            chain = T.evidence_chain_indices(units, item.get("evidence"))
+            if not chain:
+                continue
+            payloads, _z, _info, kfeat, _lex = T.encode_item_slots_full(
+                encoder, item, tag="fact", grad=False)
+            tgt = T.target_slot_index(units, item["answer"], evidence=item.get("evidence"))
+            slot_z, _reads, tgt_slot, keep = T.sample_slot_subset(
+                payloads, (chain[0] if chain else tgt), rng, args.max_slots or None,
+                must_keep=T.evidence_slot_indices(units, item.get("evidence")))
+            keep_pos = {int(o): j for j, o in enumerate(keep)}
+            chain_new = [keep_pos[i] for i in chain if i in keep_pos]
+            n_hops = 2 if (T.item_hops(item) > 1 and len(chain_new) >= 2) else 1
+            if kfeat is not None:
+                kfeat = {k: (v[keep] if torch.is_tensor(v) else v) for k, v in kfeat.items()}
+            qf_ex = T.query_feature_ex_cached(model, tok, item["question"],
+                                              args.system_prompt, args.layer, dev)
+            loss, _info2 = router.addr_loss_set(
+                qf_ex["pooled"], slot_z,
+                (chain_new[:2] if n_hops > 1 else [int(tgt_slot)]),
+                n_hops=n_hops, kfeat=kfeat, q_tok=qf_ex.get("h0_tok"))
+            if loss is None:
+                continue
+            (loss / args.accum).backward()
+            step += 1
+            if step % args.accum == 0:
+                torch.nn.utils.clip_grad_norm_(router.parameters(), 1.0)
+                opt.step()
+                opt.zero_grad(set_to_none=True)
+            if step % 50 == 0:
+                el = time.time() - t_start
+                print(f"[step {step}] loss_addr={float(loss.detach()):.4f} "
+                      f"ep={ep} {step / max(el, 1e-6):.2f} it/s", flush=True)
+            if val and args.eval_every > 0 and step % args.eval_every == 0:
+                r = recall_eval(router, encoder, val, args, dev, limit=args.val_limit)
+                print(f"[eval step={step}] hit1={r['hit1']} full={r['full']} "
+                      f"n={r['n']} ({r['sec']:.0f}s)", flush=True)
+                torch.save({"router": router.state_dict(),
+                            "config": {"router_kind": args.router_kind,
+                                       "n_slots": args.m, "d_key": args.d_key,
+                                       "hidden_size": hidden,
+                                       "addr_gamma": args.addr_gamma},
+                            "step": step}, args.out)
+    torch.save({"router": router.state_dict(),
+                "config": {"router_kind": args.router_kind, "n_slots": args.m,
+                           "d_key": args.d_key, "hidden_size": hidden,
+                           "addr_gamma": args.addr_gamma},
+                "step": step}, args.out)
+    if val:
+        r = recall_eval(router, encoder, val, args, dev, limit=args.val_limit)
+        print(f"[final] hit1={r['hit1']} full={r['full']} n={r['n']}", flush=True)
+    print(f"[stage1] done step={step} -> {args.out}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1397,6 +1397,19 @@ def train(args):
                  else LM.LatentRouter)
         _rkw = ({"gamma": float(args.addr_gamma)} if _rcls is LM.HybridLatentRouter else {})
         router = _rcls(hidden, n_slots=args.m, d_key=args.d_key, **_rkw).to(dev)
+        # 阶段二：加载阶段一单独训好的 Router（tools/train_router_stage1.py 的产物）。
+        # strict=False：阶段一只存 router 参数，缺的键（如果有）保持初始化。
+        if str(getattr(args, "init_router", "") or ""):
+            _rb = LM._safe_torch_load(args.init_router)
+            _rsd = _rb.get("router", _rb) if isinstance(_rb, dict) else _rb
+            _miss = router.load_state_dict(_rsd, strict=False)
+            print(f"[router] 已载入阶段一权重 {args.init_router} "
+                  f"(missing={len(getattr(_miss, 'missing_keys', []))}, "
+                  f"unexpected={len(getattr(_miss, 'unexpected_keys', []))})", flush=True)
+        if bool(getattr(args, "freeze_router", False)):
+            for _p in router.parameters():
+                _p.requires_grad_(False)
+            print("[router] 已冻结：阶段二只训 Compressor + Bridge", flush=True)
         print(f"[router] LatentRouter 启用：d_key={args.d_key} τ0="
               f"{float(router.log_temp.exp()):.4f} addr_weight={args.addr_weight}"
               f"{'（Compressor 主干冻结）' if args.freeze_compressor else ''}", flush=True)
@@ -2673,6 +2686,10 @@ def parse_args(argv=None):
     ap.add_argument("--kl-weight", type=float, default=0.0)
     ap.add_argument("--kl-tau", type=float, default=1.0)
     ap.add_argument("--recon-weight", type=float, default=0.0)
+    ap.add_argument("--init-router", default="",
+                    help="加载阶段一单独训好的 router 权重（tools/train_router_stage1.py 产物）")
+    ap.add_argument("--freeze-router", action="store_true",
+                    help="冻结 router（阶段二：固定高召回 Router，只训 Compressor+Bridge）")
     ap.add_argument("--router-kind", choices=["latent", "hybrid"], default="hybrid",
                     help="latent=纯稠密内积（v3）；hybrid=冻结特征双键 + h0 MaxSim 底盘（v4）")
     ap.add_argument("--addr-maxsim", type=int, default=1,
