@@ -143,12 +143,48 @@ def recall_eval(router, encoder, items, args, dev, limit=0, bs=16):
     return out
 
 
-def save(router, args, hidden, step, path):
-    torch.save({"router": router.state_dict(),
-                "config": {"router_kind": args.router_kind, "n_slots": args.m,
-                           "d_key": args.d_key, "hidden_size": hidden,
-                           "addr_gamma": args.addr_gamma},
-                "step": step}, path)
+def save(router, opt, args, hidden, step, epoch, epoch_pos, rng, path):
+    """保存**可续训**的完整状态。
+
+    只存 router 权重是不够的：AdamW 的一阶/二阶动量、全局步数、epoch 内位置、
+    以及 python/torch 两套 RNG 状态缺一不可，否则"接着训"等于重新开始一条不同的轨迹。
+    写入走 tmp + os.replace：训练中途被杀也不会留下半截 ckpt。
+    """
+    blob = {
+        "format": 2,
+        "router": router.state_dict(),
+        "optimizer": (opt.state_dict() if opt is not None else None),
+        "step": int(step),
+        "epoch": int(epoch),
+        "epoch_pos": int(epoch_pos),
+        "rng": {"torch": torch.get_rng_state(),
+                "py": (rng.getstate() if rng is not None else None)},
+        "config": {"router_kind": args.router_kind, "n_slots": args.m,
+                   "d_key": args.d_key, "hidden_size": hidden,
+                   "addr_gamma": args.addr_gamma, "lr": args.lr,
+                   "accum": args.accum, "enc_batch": args.enc_batch,
+                   "topk_per_hop": args.topk_per_hop, "seed": args.seed},
+    }
+    tmp = path + ".tmp"
+    torch.save(blob, tmp)
+    os.replace(tmp, path)
+    return path
+
+
+def load_state(path, router, opt, rng):
+    """从 ckpt 恢复 router/优化器/步数/位置/RNG。返回 (step, epoch, epoch_pos)。"""
+    blob = torch.load(path, map_location="cpu")
+    if not isinstance(blob, dict) or "router" not in blob:
+        raise ValueError(f"{path} 不是本脚本产出的 ckpt（缺 router 字段）")
+    router.load_state_dict(blob["router"])
+    if opt is not None and blob.get("optimizer") is not None:
+        opt.load_state_dict(blob["optimizer"])
+    st = blob.get("rng") or {}
+    if st.get("torch") is not None:
+        torch.set_rng_state(st["torch"])
+    if rng is not None and st.get("py") is not None:
+        rng.setstate(st["py"])
+    return int(blob.get("step", 0)), int(blob.get("epoch", 0)), int(blob.get("epoch_pos", 0))
 
 
 def main(argv=None):
@@ -177,6 +213,10 @@ def main(argv=None):
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     ap.add_argument("--eval-every", type=int, default=2000)
+    ap.add_argument("--save-every", type=int, default=500,
+                    help="每多少步存一次可续训 ckpt（0=只在评测点/结束时存）")
+    ap.add_argument("--resume", default="",
+                    help="从 ckpt 接着训（恢复权重/优化器动量/步数/epoch 位置/RNG）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
     ap.add_argument("--smoke-model", action="store_true")
@@ -204,17 +244,25 @@ def main(argv=None):
           f"enc_batch={args.enc_batch}", flush=True)
 
     rng = random.Random(args.seed)
-    step = 0
+    step, start_ep, start_pos = 0, 0, 0
+    if str(args.resume or ""):
+        step, start_ep, start_pos = load_state(args.resume, router, opt, rng)
+        print(f"[resume] {args.resume} -> step={step} epoch={start_ep} "
+              f"epoch_pos={start_pos}", flush=True)
     t_start = time.time()
     # 问题特征缓存：q_feat/q_tok 只取决于问题文本，跨 epoch 完全不变。
     # 实测逐条编码时瓶颈根本不在 encode，而在**每条样本一次的问题前向**
     # （1.83 it/s 里约 87% 是它）；缓存后第 2、3 轮几乎只剩 encode 的开销。
     qf_cache: dict = {}
-    for ep in range(args.epochs):
+    for ep in range(start_ep, args.epochs):
         for _start in range(0, len(items), args.enc_batch):
             batch = items[_start:_start + args.enc_batch]
+            if ep == start_ep and (_start + len(batch)) <= start_pos:
+                continue                     # 整批已完成：连编码都不做
             enc = encode_batch(encoder, batch, tag="fact")
             for _j, (item, e) in enumerate(zip(batch, enc)):
+                if ep == start_ep and (_start + _j) < start_pos:
+                    continue
                 units = T.item_units(item)
                 chain = T.evidence_chain_indices(units, item.get("evidence"))
                 if not chain or not e["payloads"]:
@@ -233,7 +281,13 @@ def main(argv=None):
                 _cap = max(1, int(n_hops) * int(args.topk_per_hop))
                 kfeat = e["kfeat"]
                 if kfeat is not None:
-                    kfeat = {k: (v[keep] if torch.is_tensor(v) else v)
+                    # 关键性能点：encode_full 把特征留在 CPU（省显存），而
+                    # addr_loss_set 对**每个金标分支**都会调一次 scores()，每次都要把
+                    # [K,cap,d]（约 7.5 MB）从 CPU 搬到 GPU。4 个金标 -> 12 个分支 ->
+                    # 每条样本近 90 MB 的 H2D 拷贝，这才是 1.9 it/s 的真正瓶颈。
+                    # 这里只搬一次，后面全部复用。
+                    kfeat = {k: (v[keep].to(dev, non_blocking=True)
+                                 if torch.is_tensor(v) else v)
                              for k, v in kfeat.items()}
                 _qid = _start + _j
                 qf_ex = qf_cache.get(_qid)
@@ -253,6 +307,9 @@ def main(argv=None):
                     torch.nn.utils.clip_grad_norm_(router.parameters(), 1.0)
                     opt.step()
                     opt.zero_grad(set_to_none=True)
+                if args.save_every > 0 and step % args.save_every == 0:
+                    save(router, opt, args, hidden, step, ep, _start + _j, rng, args.out)
+                    print(f"[save] step={step} -> {args.out}", flush=True)
                 if step % 100 == 0:
                     el = max(time.time() - t_start, 1e-6)
                     print(f"[step {step}] loss_addr={float(loss.detach()):.4f} ep={ep} "
@@ -266,8 +323,8 @@ def main(argv=None):
                           f"full={r['g2']['full']} | ev>=3: n={r['g3']['n']} "
                           f"hop1={r['g3']['hop1']} full={r['g3']['full']} "
                           f"({r['sec']:.0f}s)", flush=True)
-                    save(router, args, hidden, step, args.out)
-    save(router, args, hidden, step, args.out)
+                    save(router, opt, args, hidden, step, ep, _start + _j, rng, args.out)
+    save(router, opt, args, hidden, step, max(0, args.epochs - 1), len(items), rng, args.out)
     if val:
         r = recall_eval(router, encoder, val, args, dev, limit=args.val_limit,
                         bs=args.enc_batch)
@@ -275,6 +332,11 @@ def main(argv=None):
               f"full={r['full']:.3f} n={r['n']} | ev=2: n={r['g2']['n']} "
               f"hop1={r['g2']['hop1']} full={r['g2']['full']} | ev>=3: n={r['g3']['n']} "
               f"hop1={r['g3']['hop1']} full={r['g3']['full']}", flush=True)
+    if torch.cuda.is_available():
+        # 显存峰值必须打出来：调大 enc_batch 之前得知道余量有多少，而不是靠猜
+        print(f"[mem] peak_alloc={torch.cuda.max_memory_allocated() / 2**30:.2f} GiB "
+              f"peak_reserved={torch.cuda.max_memory_reserved() / 2**30:.2f} GiB "
+              f"enc_batch={args.enc_batch}", flush=True)
     print(f"[stage1] done step={step} -> {args.out}", flush=True)
     return 0
 

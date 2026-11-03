@@ -20,5 +20,7 @@ $PY tools/train_router_stage1.py \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 \
   --router-kind hybrid --addr-gamma 0.5 --topk-per-hop 2 \
-  --eval-every 1000 \
+  --eval-every 1000 --save-every 500 \
   --out $B/ckpt/router_stage1.pt
+# 断点续训：同一条命令加 --resume $B/ckpt/router_stage1.pt
+# （ckpt 里存了权重/AdamW 动量/全局步数/epoch 内位置/RNG，接着训不会换一条轨迹）
