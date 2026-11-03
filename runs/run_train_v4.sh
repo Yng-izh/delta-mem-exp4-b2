@@ -46,7 +46,7 @@ echo "[$(date +%H:%M:%S)] ROUTER-10K-V4 START (金标+难负例 / hybrid 键 / h
   --eval-every 250 --eval-limit 40 --log-every 10 \
   --enc-batch 24 \
   --recon-weight 0.5 --recon-units 2 --addr-weight 1.0 --kl-weight 1.0 \
-  --gold-readout-ratio 0.1 --hard-neg-k 2 --topk-per-hop 2 \
+  --gold-readout-ratio 0.1 --hard-neg-k 2 --topk-per-hop 4 \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \

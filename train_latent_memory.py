@@ -1357,6 +1357,14 @@ def _load_backbone(args, dev=None):
     return model, tokenizer, dev, LM._model_hidden_size(model)
 
 
+def _train_state(opt, step, epoch, pos):
+    """打包"能接着训"所需的最小状态（权重由 save_latent_checkpoint 负责）。"""
+    return {"optimizer": opt.state_dict() if opt is not None else None,
+            "step": int(step), "epoch": int(epoch), "pos": int(pos),
+            "rng_py": random.getstate(),
+            "rng_torch": torch.get_rng_state()}
+
+
 def train(args):
     t0 = time.time()
     _ARGS_REF[0] = args
@@ -1491,6 +1499,28 @@ def train(args):
     opt_params = list(comp.parameters()) + list(bridge.parameters()) + \
         (list(router.parameters()) if router is not None else [])
     opt = torch.optim.AdamW([p for p in opt_params if p.requires_grad], lr=args.lr)
+    # ---- 断点续训 ----
+    # 只存权重不够：AdamW 的一阶/二阶动量、全局 step、epoch 内位置、数据打乱用的
+    # python RNG 必须一起恢复，否则"接着训"实际跑的是另一条轨迹。
+    _start_epoch, _start_pos, _resumed_step = 0, -1, 0
+    if str(getattr(args, "resume", "") or ""):
+        _rb = LM._safe_torch_load(args.resume)
+        comp.load_state_dict(_rb["compressor"])
+        bridge.load_state_dict(_rb["bridge"])
+        if router is not None and _rb.get("router"):
+            router.load_state_dict(_rb["router"])
+        _ts = ((_rb.get("meta") or {}).get("train_state") or {})
+        if _ts.get("optimizer") is not None:
+            opt.load_state_dict(_ts["optimizer"])
+        _resumed_step = int(_ts.get("step", 0))
+        _start_epoch = int(_ts.get("epoch", 0))
+        _start_pos = int(_ts.get("pos", -1))
+        if _ts.get("rng_py") is not None:
+            random.setstate(_ts["rng_py"])
+        if _ts.get("rng_torch") is not None:
+            torch.set_rng_state(_ts["rng_torch"])
+        print(f"[resume] {args.resume} -> step={_resumed_step} epoch={_start_epoch} "
+              f"pos={_start_pos}", flush=True)
     # C：单元编码本来就是批量的（encode_latent_units 一次前向跑一批），但默认
     # batch_size=8，23 条单元要切 3 批；提到 --enc-batch 后通常一批跑完。
     encoder = LM.LatentEncoder(model, tokenizer, comp, layer=args.layer,
@@ -1568,10 +1598,14 @@ def train(args):
         bridge.train()
         if router is not None:
             router.train()
-    for epoch in range(args.epochs):
+    step = _resumed_step
+    _last_epoch, _last_pos = _start_epoch, _start_pos
+    for epoch in range(_start_epoch, args.epochs):
         order = list(range(len(train_data)))
         random.Random(args.seed + 100 + epoch).shuffle(order)
         for _pos, i in enumerate(order):
+            if epoch == _start_epoch and _pos <= _start_pos:
+                continue                      # 已训过的样本：直接跳过
             item = train_data[i]
             _nxt_item = (train_data[order[_pos + 1]] if _pos + 1 < len(order) else None)
             # 每条样本前清 Delta 在线状态：状态是跨 forward 累积的模块属性，
@@ -1839,7 +1873,9 @@ def train(args):
                         args.out, comp, bridge, _cfg(step),
                         {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                          "git": _git_commit(), "partial": True, "step": step,
-                         "n_train": len(train_data)}, router=router)
+                         "n_train": len(train_data),
+                         "train_state": _train_state(opt, step, epoch, _pos)},
+                        router=router)
                     print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
                 if args.grad_clip > 0:
                     clip_params = list(comp.parameters()) + list(bridge.parameters()) + \
@@ -1867,6 +1903,7 @@ def train(args):
                         router.train()
                 opt.zero_grad(set_to_none=True)
                 step += 1
+                _last_epoch, _last_pos = epoch, _pos
                 qa_avg = sum(x[0] for x in acc_items) / len(acc_items)
                 kls = [x[1] for x in acc_items if x[1] is not None]
                 kl_avg = sum(kls) / len(kls) if kls else None
@@ -1997,6 +2034,7 @@ def train(args):
               f"z 里还留了多少原文符号信息", flush=True)
         meta["recon_token_acc"] = rec_acc
 
+    meta["train_state"] = _train_state(opt, step, _last_epoch, _last_pos)
     out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta, router=router)
     print(f"[save] {out} config={json.dumps(cfg, ensure_ascii=False)}", flush=True)
     return 0
@@ -2694,6 +2732,9 @@ def parse_args(argv=None):
                     help="条件消融 A：跳过压缩器，记忆原文 token embedding 直接进 bridge"
                          "（压缩率 1:1，保留全部 token 信息；区分 bridge vs compressor 瓶颈）")
     ap.add_argument("--grad-clip", type=float, default=1.0)
+    ap.add_argument("--resume", default="",
+                    help="从 ckpt 接着训（恢复 comp/bridge/router 权重 + 优化器动量 + "
+                         "step/epoch 位置 + RNG）")
     ap.add_argument("--save-every", type=int, default=500,
                     help="每 N 个优化步落盘一次（0=只在结束时保存）")
     ap.add_argument("--kl-weight", type=float, default=0.0)

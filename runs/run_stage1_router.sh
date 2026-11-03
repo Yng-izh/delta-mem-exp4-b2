@@ -19,7 +19,7 @@ $PY tools/train_router_stage1.py \
   --n-train 10000 --epochs 3 --accum 8 --lr 2e-3 \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 \
-  --router-kind hybrid --addr-gamma 0.5 --topk-per-hop 2 \
+  --router-kind hybrid --addr-gamma 0.5 --topk-per-hop 4 \
   --eval-every 1000 --save-every 500 \
   --out $B/ckpt/router_stage1.pt
 # 断点续训：同一条命令加 --resume $B/ckpt/router_stage1.pt

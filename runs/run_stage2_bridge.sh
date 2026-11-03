@@ -19,10 +19,12 @@ $PY train_latent_memory.py --router \
   --n-train 10000 --n-val 120 --epochs 2 --accum 4 --pack 4 \
   --eval-every 250 --eval-limit 40 --log-every 10 --enc-batch 24 \
   --recon-weight 0.5 --recon-units 2 --addr-weight 1.0 --kl-weight 1.0 \
-  --gold-readout-ratio 0.5 --hard-neg-k 2 --topk-per-hop 2 \
+  --gold-readout-ratio 0.5 --hard-neg-k 2 --topk-per-hop 4 \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
   --init-router $B/ckpt/router_stage1.pt --freeze-router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \
   --out $B/ckpt/hotpot_router_10k_v5.pt --save-every 250
+# 断点续训：同一条命令加 --resume $B/ckpt/hotpot_router_10k_v5.pt
+# ckpt 里存了权重 + AdamW 动量 + step/epoch 位置 + RNG，接着训不会换轨迹

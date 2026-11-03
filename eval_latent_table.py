@@ -515,7 +515,8 @@ def main(argv=None):
                     help="FST 版本级读出规则（必须与训练时一致，否则是两套方法）")
     ap.add_argument("--read-groups", type=int, default=1,
                     help="FST 一次读出几个事实键（多跳/多事实题 >1）")
-    ap.add_argument("--topk-per-hop", type=int, default=2,
+    # 与训练保持一致：2 跳 × 4 = 8 个读出名额（金标 >=3 条的题在 4 名额下召回到顶）
+    ap.add_argument("--topk-per-hop", type=int, default=4,
                     help="路由方法每跳读出几个槽（1=v3 上限 2 槽；2=两跳共 4 槽）")
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
                     help="1=尝试槽位块对角隔离（仅 eager 后端生效，否则降级并记账）")

@@ -209,7 +209,9 @@ def main(argv=None):
     ap.add_argument("--d-key", type=int, default=LM.LATENT_D_KEY)
     ap.add_argument("--router-kind", default="hybrid", choices=("latent", "hybrid"))
     ap.add_argument("--addr-gamma", type=float, default=LM.LATENT_ADDR_GAMMA)
-    ap.add_argument("--topk-per-hop", type=int, default=2)
+    # 每跳取 4 个槽：2 跳 × 4 = **8 个读出名额**（v4 是 2×2=4）。
+    # 依据：金标 >=3 条的那 161 道题在 4 名额下召回只有 7.5%，是结构上限。
+    ap.add_argument("--topk-per-hop", type=int, default=4)
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     ap.add_argument("--eval-every", type=int, default=2000)
