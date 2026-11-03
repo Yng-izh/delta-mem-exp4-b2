@@ -21,7 +21,7 @@ $PY train_latent_memory.py --router \
   --recon-weight 0.5 --recon-units 2 --addr-weight 1.0 --kl-weight 1.0 \
   --gold-readout-ratio 0.5 --hard-neg-k 2 --topk-per-hop 4 \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
-  --init-router $B/ckpt/router_stage1.pt --freeze-router \
+  --init-router $B/ckpt/router_stage1_8slot.pt --freeze-router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \

@@ -727,15 +727,35 @@ def _packed_student_step(args, model, pend, recon_stage):
     loss_kl = None
     if getattr(args, "kl_weight", 0.0) > 0 and all("temb" in p for p in pend):
         t_embs, t_labs, t_mask = pack_student_batch([(p["temb"], p["tlab"]) for p in pend])
-        if tuple(t_embs.shape) == tuple(embs.shape):
-            with LM.delta_write_disabled(model), torch.no_grad():
-                t_logits = model(inputs_embeds=t_embs, attention_mask=t_mask,
-                                 use_cache=False).logits
-            loss_kl = kl_loss_masked(s_logits, t_logits, labs, tau=args.kl_tau)
-        else:
-            # 形状对不上（teacher 段更长/更短）时不硬算，明确记 n/a，由日志暴露
-            print(f"[kl] 打包形状不一致 student={tuple(embs.shape)} "
-                  f"teacher={tuple(t_embs.shape)}，本步跳过 KL", flush=True)
+        # **两侧序列长度天然不同**：student 的上下文是 T 个软 token，teacher 的是整段
+        # 明文记忆（实测 144 vs 933）。旧实现要求两者形状完全一致，于是 KL 在打包路径
+        # 里每一步都被跳过、日志恒为 n/a —— 和 v3 的"静默不生效"是同一类错误。
+        # 正确做法：按 batch 维对齐，逐样本取各自的**答案位置**（labels != -100 的末 n 个），
+        # 在 logits 上做 shift-1 对齐后算 KL。
+        with LM.delta_write_disabled(model), torch.no_grad():
+            t_logits = model(inputs_embeds=t_embs, attention_mask=t_mask,
+                             use_cache=False).logits
+        _kls = []
+        for _b in range(int(labs.shape[0])):
+            _s_sel = torch.nonzero(labs[_b] != -100, as_tuple=False).flatten()
+            _t_sel = torch.nonzero(t_labs[_b] != -100, as_tuple=False).flatten()
+            _n = int(min(_s_sel.numel(), _t_sel.numel()))
+            if _n <= 0:
+                continue
+            _s_idx = _s_sel[-_n:]
+            _t_idx = _t_sel[-_n:]
+            _s_idx = _s_idx[_s_idx >= 1] - 1          # shift：位置 p 预测 p+1
+            _t_idx = _t_idx[_t_idx >= 1] - 1
+            _n2 = int(min(_s_idx.numel(), _t_idx.numel()))
+            if _n2 <= 0:
+                continue
+            _s = s_logits[_b, _s_idx[-_n2:]].float() / float(args.kl_tau)
+            _t = t_logits[_b, _t_idx[-_n2:]].float()
+            _lp_t = torch.log_softmax(_t, dim=-1)
+            _lp_s = torch.log_softmax(_s, dim=-1)
+            _kls.append((_lp_t.exp() * (_lp_t - _lp_s)).sum(dim=-1).mean())
+        if _kls:
+            loss_kl = torch.stack(_kls).mean()
     loss = assemble_loss(loss_qa, loss_addr, loss_kl, loss_r,
                          addr_weight=args.addr_weight, kl_weight=args.kl_weight,
                          recon_weight=args.recon_weight, recon_stage=recon_stage)
