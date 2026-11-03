@@ -531,7 +531,8 @@ class LatentBridge(nn.Module):
 
 def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
                         q_tok: Optional[torch.Tensor] = None,
-                        k: int = 4) -> torch.Tensor:
+                        k: int = 4,
+                        h18_slot: Optional[torch.Tensor] = None) -> torch.Tensor:
     """从某个槽位的 token 里挑出**新信息**（与原问题最不相似）的 k 个，用于第二跳接力。
 
     为什么是"最不相似"：HotpotQA 的两跳结构是"第一条证据句尾出现一个新实体 ->
@@ -541,8 +542,10 @@ def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
 
     两个必须处理的坑（只把 topk 换成 largest=False 是不够的）：
       1. padding 位的相似度是 -1e4，反向选择会优先选中 padding —— 先用 mask 排除；
-      2. 标点/功能词与问题的相似度也偏低，会混进接力集合 —— 因此只在**有效 token**
-         里按相似度升序取，并且要求其与问题的最大相似度低于 0.9（近乎相同才排除）。
+      2. **标点与功能词的相似度同样偏低**，单纯取"最不相似"会把它们选进来。本层拿不到
+         token 文本，因此用 h18 偏离度当"信息量"代理：score = (1 - sim) × salience，
+         只有在有效 token 里同时"不像问题"且"有内容"的才入选。这是**近似**处理，
+         不是文本级标点过滤（要精确过滤需要把 token 文本传进来）。
 
     返回 [n, d]（n <= k），设备/精度跟随 h0_slot。
     """
@@ -570,9 +573,24 @@ def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
     sim = sim.masked_fill(~valid, 1e4)                          # pad 排到最后
     n_valid = int(valid.sum().item())
     kk = max(1, min(int(k), n_valid))
-    order = sim.argsort()                                       # 升序：最不相似在前
+    # 显著性（信息量）代理：h18 偏离该槽位均值方向的程度。
+    sal = None
+    if h18_slot is not None:
+        h18 = torch.as_tensor(h18_slot).to(device=h.device, dtype=torch.float32)
+        if h18.dim() == 2 and int(h18.shape[0]) == T:
+            mu18 = h18[valid].mean(dim=0, keepdim=True)
+            sal = (h18 - mu18).norm(dim=-1)
+            s_max = float(sal[valid].max().clamp_min(1e-6))
+            sal = (sal / s_max).clamp(0.0, 1.0)
+    # score 越大越该被选：不像问题（1-sim）× 有内容（salience）
+    score = (1.0 - sim.clamp(-1.0, 1.0))
+    if sal is not None:
+        score = score * (0.25 + sal)          # 0.25 下限：显著性低也不至于直接归零
+    score = score.masked_fill(~valid, -1e4)
+    score = score.masked_fill(sim >= 0.9, -1e4)   # 与问题近乎相同的不要
+    order = score.argsort(descending=True)
     pick = order[:kk]
-    pick = pick[sim[pick] < 0.9]                                # 与原问题近乎相同的不要
+    pick = pick[score[pick] > -1e3]
     if int(pick.numel()) == 0:
         pick = order[:kk]
     return h[pick]
@@ -838,7 +856,8 @@ class LatentRouter(nn.Module):
                         _relay = relay_bridge_tokens(
                             kfeat["h0"][int(a)],
                             (torch.as_tensor(_mk)[int(a)] if _mk is not None else None),
-                            q_tok, k=int(LATENT_RELAY_TOKENS))
+                            q_tok, k=int(LATENT_RELAY_TOKENS),
+                            h18_slot=(kfeat["h18"][int(a)] if "h18" in kfeat else None))
                         if int(_relay.numel()) > 0:
                             _relay = _relay.to(device=logits1.device).unsqueeze(0)
                             _base = torch.as_tensor(q_tok).to(
@@ -983,10 +1002,12 @@ class LatentRouter(nn.Module):
                     try:
                         _h0 = torch.as_tensor(kfeat["h0"])
                         _mk = kfeat.get("mask")
+                        _h18 = torch.as_tensor(kfeat["h18"]) if "h18" in kfeat else None
                         _relay = relay_bridge_tokens(
                             _h0[int(i)],
                             (torch.as_tensor(_mk)[int(i)] if _mk is not None else None),
-                            qtok_b, k=int(LATENT_RELAY_TOKENS))
+                            qtok_b, k=int(LATENT_RELAY_TOKENS),
+                            h18_slot=(_h18[int(i)] if _h18 is not None else None))
                         if int(_relay.numel()) > 0:
                             _relay = _relay.to(device=q_vec0.device).unsqueeze(0)
                             _base = torch.as_tensor(qtok_b).to(
@@ -2715,8 +2736,21 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
             raise ValueError(f"config.has_router=True 但 checkpoint 里没有 router 权重：{checkpoint}")
         rkind = str(cfg.get("router_kind", "latent"))
         rcls = HybridLatentRouter if rkind == "hybrid" else LatentRouter
+        # ms_tau / anchor_boost / anchor_tokens / novelty_lambda 都是**普通属性**，
+        # 不进 state_dict；不按 ckpt 恢复就会静默退回环境变量默认值，
+        # 表现为"同一个权重换个进程跑出来的召回不一样"。
+        _hkw: Dict[str, Any] = {}
+        if rcls is HybridLatentRouter:
+            _hkw = {"gamma": float(cfg.get("addr_gamma", LATENT_ADDR_GAMMA)),
+                    "ms_tau": float(cfg.get("router_ms_tau", LATENT_MS_TAU)),
+                    "anchor_boost": float(cfg.get("router_anchor_boost",
+                                                  LATENT_ANCHOR_BOOST)),
+                    "anchor_tokens": int(cfg.get("router_anchor_tokens",
+                                                 LATENT_ANCHOR_TOKENS)),
+                    "novelty_lambda": float(cfg.get("router_novelty_lambda",
+                                                    LATENT_NOVELTY_LAMBDA))}
         router = rcls(hs, n_slots=int(cfg["n_slots"]),
-                      d_key=int(cfg.get("d_key", LATENT_D_KEY)))
+                      d_key=int(cfg.get("d_key", LATENT_D_KEY)), **_hkw)
         router.load_state_dict(blob_router, strict=strict)
         router.to(dev).eval()
         router.requires_grad_(False)
@@ -2770,6 +2804,14 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
         # 好过悄悄退回基类、让 MaxSim 底盘消失）。
         cfg["router_kind"] = ("hybrid" if isinstance(router, HybridLatentRouter)
                               else "latent")
+        # 非参数超参必须显式存：它们不进 state_dict，只能靠 config 还原
+        cfg["router_ms_tau"] = float(getattr(router, "ms_tau", LATENT_MS_TAU))
+        cfg["router_anchor_boost"] = float(getattr(router, "anchor_boost",
+                                                   LATENT_ANCHOR_BOOST))
+        cfg["router_anchor_tokens"] = int(getattr(router, "anchor_tokens",
+                                                  LATENT_ANCHOR_TOKENS))
+        cfg["router_novelty_lambda"] = float(getattr(router, "novelty_lambda",
+                                                     LATENT_NOVELTY_LAMBDA))
         if int(router.d_model) != int(compressor.hidden_size):
             raise ValueError("router.d_model != compressor.hidden_size")
         if int(router.n_slots) != int(compressor.n_slots):

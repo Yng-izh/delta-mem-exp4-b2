@@ -1647,10 +1647,14 @@ def train(args):
                 if n_hops > 1 and len(chain_new) < 2:
                     # 证据链不足 2 跳时**不假装多跳**：退回单跳（并在日志里看得出）
                     n_hops = 1
+                # 监督上限 = 读出容量（跳数 × 每跳 top-b）。旧写法写死 [:2]，
+                # 于是"金标 >=3 句"的题（HotpotQA 500 题里 161 条）在训练目标上
+                # 从未被要求过，评测却按整条链判满召回 —— 目标与评测口径不一致。
+                _cap = max(1, int(n_hops) * max(1, int(args.topk_per_hop)))
                 # 路径 1：寻址（只产出 L_addr，不进 QA 计算图；载荷已在函数内 detach）
                 addr_pre, _ainfo = router.addr_loss_set(
                     q_feat, slot_z,
-                    (chain_new[:2] if n_hops > 1 else [int(tgt_slot)]),
+                    (chain_new[:_cap] if n_hops > 1 else [int(tgt_slot)]),
                     n_hops=n_hops, kfeat=kfeat, q_tok=q_tok)
                 # 路径 2：读出 —— **金标永远在输入里 + 难负例混入 + 槽序随机**。
                 # 旧写法（P01 暴露偏差）：前 70% 步数强制金标；后 30% 只有"router
@@ -1666,7 +1670,9 @@ def train(args):
                 _total_opt = max(1, (int(args.n_train) // max(1, int(args.accum)))
                                  * max(1, int(args.epochs)))
                 n_warm = int(round(_total_opt * float(args.gold_readout_ratio)))
-                gold_idx = list(chain_new[:n_hops] if len(chain_new) >= n_hops
+                # 读出侧的金标同样按读出容量给全（不再只给前 n_hops 条）：
+                # 训练时看到的金标集合必须与推理时"应该读全"的集合一致。
+                gold_idx = list(chain_new[:_cap] if len(chain_new) >= n_hops
                                 else [int(tgt_slot)])
                 use_idx = list(dict.fromkeys(int(x) for x in gold_idx))
                 n_neg = 0 if step < n_warm else max(0, int(args.hard_neg_k))
@@ -1933,7 +1939,14 @@ def train(args):
         if _blob.get("router"):
             _rkind2 = str(_bcfg.get("router_kind") or "latent")
             _rcls2 = LM.HybridLatentRouter if _rkind2 == "hybrid" else LM.LatentRouter
-            _rkw2 = ({"gamma": float(_bcfg.get("addr_gamma", LM.LATENT_ADDR_GAMMA))}
+            _rkw2 = ({"gamma": float(_bcfg.get("addr_gamma", LM.LATENT_ADDR_GAMMA)),
+                      "ms_tau": float(_bcfg.get("router_ms_tau", LM.LATENT_MS_TAU)),
+                      "anchor_boost": float(_bcfg.get("router_anchor_boost",
+                                                      LM.LATENT_ANCHOR_BOOST)),
+                      "anchor_tokens": int(_bcfg.get("router_anchor_tokens",
+                                                     LM.LATENT_ANCHOR_TOKENS)),
+                      "novelty_lambda": float(_bcfg.get("router_novelty_lambda",
+                                                        LM.LATENT_NOVELTY_LAMBDA))}
                      if _rcls2 is LM.HybridLatentRouter else {})
             _router2 = _rcls2(LM._model_hidden_size(model),
                               n_slots=_bcfg["n_slots"],
