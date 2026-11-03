@@ -162,6 +162,30 @@ def test_block_diag_mask():
     print("  ✓ P10 build_block_diag_mask: 共享段双向可见、跨槽屏蔽、因果")
 
 
+def test_relay_picks_novel_tokens():
+    """第二跳接力必须挑**最不相似**的有效 token（旧实现取 topk 最大值，方向反了）。
+
+    这是"首跳 93%、完整召回 24%"的核心接线错误：接力把问题里已有的词又塞回查询，
+    第二跳于是继续围着第一跳打转，永远找不到新实体。
+    """
+    H = 8
+    q = torch.zeros(1, 1, H)
+    q[0, 0, 0] = 1.0                                   # 问题只含一个方向
+    h = torch.zeros(4, H)
+    h[0, 0] = 1.0                                      # 与问题相同
+    h[1, 0] = 0.9; h[1, 1] = 0.1                       # 与问题高度相似
+    h[2, 2] = 1.0                                      # 新实体（与问题正交）
+    h[3, :] = 0.0                                      # padding 位
+    mask = torch.tensor([1, 1, 1, 0])
+    out = LM.relay_bridge_tokens(h, mask, q, k=1)
+    assert tuple(out.shape) == (1, H), out.shape
+    assert torch.allclose(out[0], h[2], atol=1e-5), "必须选中与原问题最不相似的**有效** token"
+    out3 = LM.relay_bridge_tokens(h, mask, q, k=3)
+    for r in out3:
+        assert not torch.allclose(r, h[3], atol=1e-6), "padding 绝不能进入接力集合"
+    print("  ✓ 第2跳接力：取最不相似的有效 token，padding 被排除")
+
+
 def test_bank_lex_storage():
     bank = LM.LatentSlotBank(dim=8)
     z, lx = _t(2, 4, 8), _t(2, 4, 8, seed=1)
@@ -202,7 +226,8 @@ def main():
     torch.manual_seed(0)
     fns = [test_compressor_split_and_lex, test_bridge_alpha_zero_recovers_v3,
            test_hybrid_router_uses_frozen_features, test_beam_four_slots_and_latent_chain,
-           test_block_diag_mask, test_bank_lex_storage, test_prep_does_not_read_answers]
+           test_block_diag_mask, test_relay_picks_novel_tokens,
+           test_bank_lex_storage, test_prep_does_not_read_answers]
     for f in fns:
         f()
     print(f"[ok] {len(fns)} 组 v4 自检通过")

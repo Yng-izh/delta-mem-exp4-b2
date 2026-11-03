@@ -99,6 +99,10 @@ LATENT_KEY_TOKENS      = _env_int("LATENT_KEY_TOKENS", 64)      # 每个槽位�
 # 标题锚点增益：单元文本以 "[anchor] ..." 开头，第 1 个有效 token 就是段落标题，
 # 而它往往正是下一跳要找的桥接实体（HotpotQA 的两跳就是靠标题串起来的）。
 LATENT_ANCHOR_BOOST    = _env_float("LATENT_ANCHOR_BOOST", 1.3)
+# 标题区覆盖多少个 token：标题会被切成多个 subword，只给第 0 位加成等于没加成
+LATENT_ANCHOR_TOKENS   = _env_int("LATENT_ANCHOR_TOKENS", 3)
+# 第二跳词级接力取几个桥接 token
+LATENT_RELAY_TOKENS    = _env_int("LATENT_RELAY_TOKENS", 4)
 # 第 2 跳出键的新信息抑制强度 λ：k_out 要聚焦"问题里没出现过的新实体"，
 # 因此对与问题高度相似的 token 按 λ·sim 扣分。0 = 关闭（回到旧行为）。
 LATENT_NOVELTY_LAMBDA  = _env_float("LATENT_NOVELTY_LAMBDA", 1.0)
@@ -525,6 +529,55 @@ class LatentBridge(nn.Module):
         return res
 
 
+def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
+                        q_tok: Optional[torch.Tensor] = None,
+                        k: int = 4) -> torch.Tensor:
+    """从某个槽位的 token 里挑出**新信息**（与原问题最不相似）的 k 个，用于第二跳接力。
+
+    为什么是"最不相似"：HotpotQA 的两跳结构是"第一条证据句尾出现一个新实体 ->
+    第二条证据正好在讲这个实体"。所以第二跳要沿着**原问题里没有出现过**的词去找。
+    旧实现直接 `sim.topk()` 取了**最相似**的 k 个 —— 方向完全反了：它把问题里已有的
+    词又塞回查询，第二跳于是继续围着第一跳打转，这正是"首跳 93%、完整召回 24%"的机制。
+
+    两个必须处理的坑（只把 topk 换成 largest=False 是不够的）：
+      1. padding 位的相似度是 -1e4，反向选择会优先选中 padding —— 先用 mask 排除；
+      2. 标点/功能词与问题的相似度也偏低，会混进接力集合 —— 因此只在**有效 token**
+         里按相似度升序取，并且要求其与问题的最大相似度低于 0.9（近乎相同才排除）。
+
+    返回 [n, d]（n <= k），设备/精度跟随 h0_slot。
+    """
+    h = torch.as_tensor(h0_slot)
+    if h.dim() != 2:
+        raise ValueError(f"relay_bridge_tokens 需要 [T,d]，得到 {tuple(h.shape)}")
+    T = int(h.shape[0])
+    if T == 0:
+        return h[:0]
+    valid = torch.ones((T,), dtype=torch.bool, device=h.device)
+    if mask_slot is not None:
+        m = torch.as_tensor(mask_slot).to(h.device)
+        if m.numel() == T:
+            valid = m.bool()
+    if q_tok is None or not bool(valid.any()):
+        return h[valid][: max(1, int(k))]
+    qt = torch.as_tensor(q_tok).to(device=h.device, dtype=torch.float32)
+    if qt.dim() == 3:
+        qt = qt[0]
+    hf = h.to(torch.float32)
+    mu = hf[valid].mean(dim=0, keepdim=True)
+    hn = torch.nn.functional.normalize(hf - mu, dim=-1)
+    qn = torch.nn.functional.normalize(qt - mu, dim=-1)
+    sim = (hn @ qn.t()).max(dim=-1).values                     # [T] 与问题的最大相似度
+    sim = sim.masked_fill(~valid, 1e4)                          # pad 排到最后
+    n_valid = int(valid.sum().item())
+    kk = max(1, min(int(k), n_valid))
+    order = sim.argsort()                                       # 升序：最不相似在前
+    pick = order[:kk]
+    pick = pick[sim[pick] < 0.9]                                # 与原问题近乎相同的不要
+    if int(pick.numel()) == 0:
+        pick = order[:kk]
+    return h[pick]
+
+
 # ----------------------------- 2.5) 潜空间内容寻址（Router） -----------------------------
 LATENT_D_KEY = _env_int("LATENT_D_KEY", 256)
 
@@ -744,8 +797,11 @@ class LatentRouter(nn.Module):
         金标引导分支，掩码只屏蔽"本分支用掉的那一跳"，目标槽永远不可能落在掩码里。
         槽位内容对寻址损失 `detach()`：寻址梯度只更新打分头，不把压缩器内容拖走。
         """
+        # q_tok 必须传进去：HybridLatentRouter.encode_keys 只有拿到它才会算"与问题的
+        # 相似度"并给 k_out 做新信息抑制。旧写法不传，于是这套抑制在训练期从未被优化，
+        # 推理期却全程生效 —— 训练与推理跑的是两套不同的键（2026-11-03 定位）。
         k_in, k_out = self.encode_keys(slot_z.detach() if torch.is_tensor(slot_z) else slot_z,
-                                       kfeat=kfeat)
+                                       kfeat=kfeat, q_tok=q_tok)
         q_vec = self.encode_query(q_feat)
         K = int(slot_z.shape[0]) if slot_z.dim() == 3 else int(slot_z.shape[1])
         golds = [int(g) for g in gold_idx if 0 <= int(g) < K]
@@ -772,7 +828,25 @@ class LatentRouter(nn.Module):
                 mask = torch.zeros_like(logits1, dtype=torch.bool)
                 mask[0, a] = True                                # 只屏蔽本分支用掉的那一跳
                 q2 = torch.nn.functional.normalize(q_vec + k_out[:, a], dim=-1)
-                logits2 = self.scores(q2, k_in, q_tok=q_tok, kfeat=kfeat).masked_fill(
+                # 第二跳的查询 token 与推理**完全一致**：原问题 token + 本分支选中槽里
+                # "与原问题最不相似"的桥接 token。旧实现直接用原问题的 q_tok，等于训练
+                # 一个不含接力的第二跳、却去评测带接力的第二跳 —— 这是召回平台化的第二病根。
+                qtok2 = q_tok
+                if q_tok is not None and kfeat is not None:
+                    try:
+                        _mk = kfeat.get("mask")
+                        _relay = relay_bridge_tokens(
+                            kfeat["h0"][int(a)],
+                            (torch.as_tensor(_mk)[int(a)] if _mk is not None else None),
+                            q_tok, k=int(LATENT_RELAY_TOKENS))
+                        if int(_relay.numel()) > 0:
+                            _relay = _relay.to(device=logits1.device).unsqueeze(0)
+                            _base = torch.as_tensor(q_tok).to(
+                                device=_relay.device, dtype=_relay.dtype)
+                            qtok2 = torch.cat([_base, _relay], dim=1)
+                    except Exception as _e:
+                        print(f"[relay] 训练期接力跳过：{_e}", flush=True)
+                logits2 = self.scores(q2, k_in, q_tok=qtok2, kfeat=kfeat).masked_fill(
                     mask, float("-inf"))
                 terms.append(F.cross_entropy(logits2, torch.tensor([b], device=dev)))
         l_hop2 = torch.stack(terms).mean()
@@ -823,11 +897,11 @@ class LatentRouter(nn.Module):
         logits_list: List[Any] = []
         picks: List[int] = []
         # 分支状态：(查询向量 [1,dk], 该分支已选路径)。b=1 时分支数恒为 1，退化为原实现。
-        # 第 2 跳的**词级接力**：第 1 跳选中槽里"最不像问题"的若干 token 的 h0 会被
-        # 拼进查询 token 集合，直接参与后续跳的 MaxSim。桥接实体通常就是下一跳段落的
-        # 标题，而标题在 h0 上就是那个"问题里没出现过的新词"。
-        q_tok_cur = q_tok
-        branches: List[Tuple[torch.Tensor, Tuple[int, ...]]] = [(q_vec0, ())]
+        # 每条 beam 必须**各自**维护查询 token：topk_per_hop=2 时第 1 跳会选 A、B 两个
+        # 起点，A 的新实体和 B 的新实体完全不同。旧实现只从 take[0] 取一次桥接词给所有
+        # 分支共用 —— B 分支于是拿着 A 的新实体去找 B 的下一跳，这一路必然错。
+        branches: List[Tuple[torch.Tensor, Tuple[int, ...], Optional[torch.Tensor]]] = [
+            (q_vec0, (), q_tok)]
         for hop in range(n):
             if len(picks) >= max_picks:
                 break
@@ -835,11 +909,11 @@ class LatentRouter(nn.Module):
             cands: List[Tuple[float, int, int]] = []
             gold_first = (hop == 0 and force_first is not None
                           and 0 <= int(force_first) < K)
-            for bi, (qv, _path) in enumerate(branches):
+            for bi, (qv, _path, qtok_b) in enumerate(branches):
                 if gold_first:
                     cands.append((float("inf"), int(force_first), bi))
                     break
-                logits = self.scores(qv, k_in, q_tok=q_tok_cur, kfeat=kfeat)  # [1,K]
+                logits = self.scores(qv, k_in, q_tok=qtok_b, kfeat=kfeat)     # [1,K]
                 if used_idx:
                     mask = torch.zeros_like(logits, dtype=torch.bool)
                     mask[0, sorted(used_idx)] = True
@@ -863,38 +937,11 @@ class LatentRouter(nn.Module):
                     break
             if not take:
                 break
-            if hop == 0 and kfeat is not None and q_tok is not None and take:
-                # 词级接力：取第 1 跳选中槽中"与问题最不相似"的 4 个 token 的 h0
-                # （去均值后算余弦），拼到查询 token 集合末尾给后续跳用。
-                try:
-                    _h0 = torch.as_tensor(kfeat["h0"]).to(device=q_vec0.device,
-                                                         dtype=torch.float32)
-                    _qi = int(take[0][0])
-                    _hs = _h0[_qi]                                   # [T,d]
-                    _qt = torch.as_tensor(q_tok).to(device=q_vec0.device, dtype=torch.float32)
-                    if _qt.dim() == 3:
-                        _qt = _qt[0]
-                    _mu = _hs.mean(dim=0, keepdim=True)
-                    _hn = torch.nn.functional.normalize(_hs - _mu, dim=-1)
-                    _qn = torch.nn.functional.normalize(_qt - _mu, dim=-1)
-                    _sim = (_hn @ _qn.t()).max(dim=-1).values         # [T]
-                    _mk = kfeat.get("mask")
-                    if _mk is not None:
-                        _ms = torch.as_tensor(_mk)[_qi].to(device=_sim.device).bool()
-                        if int(_ms.shape[0]) == int(_sim.shape[0]):
-                            _sim = _sim.masked_fill(~_ms, -1e4)
-                    _kk = max(1, min(4, int(_sim.numel())))
-                    _top = _sim.topk(_kk).indices
-                    _relay = _hs[_top].unsqueeze(0)                  # [1,kk,d]
-                    q_tok_cur = torch.cat(
-                        [torch.as_tensor(q_tok).to(device=q_vec0.device,
-                                                   dtype=_relay.dtype), _relay], dim=1)
-                except Exception as _e:                              # 接力失败不致命
-                    print(f"[relay] 词级接力跳过：{_e}", flush=True)
             # 3) 逐槽建图：STE 的软期望必须用"该槽被选中那一刻"的 logits
-            new_branches: List[Tuple[torch.Tensor, Tuple[int, ...]]] = []
+            new_branches: List[Tuple[torch.Tensor, Tuple[int, ...],
+                                     Optional[torch.Tensor]]] = []
             for i, bi in take:
-                qv, path = branches[bi]
+                qv, path, qtok_b = branches[bi]
                 idx = torch.tensor([int(i)], device=q_vec0.device)
                 z_hard = z[0, idx]                                       # [1,m,d]
                 logits_here = None
@@ -902,7 +949,7 @@ class LatentRouter(nn.Module):
                     # 重算这一分支的 logits 只为取软权重（K 很小，代价可忽略）。
                     # 千万不要复用一个已被 masked_fill 就地改过的张量：那会让
                     # 计算图里的旧引用失效（见上面 used_idx 的注释）。
-                    lg = self.scores(qv, k_in, q_tok=q_tok_cur, kfeat=kfeat)
+                    lg = self.scores(qv, k_in, q_tok=qtok_b, kfeat=kfeat)
                     if path:
                         m2 = torch.zeros_like(lg, dtype=torch.bool)
                         m2[0, sorted(set(path))] = True
@@ -929,9 +976,27 @@ class LatentRouter(nn.Module):
                     lr = lex_reads[int(i)]
                     lex_list.append(lr if lr.dim() == 3 else lr.unsqueeze(0))
                 picks.append(int(i))
+                # 该分支自己的词级接力：从**它自己**选中的槽里取"与问题最不相似"的
+                # 若干 token 的 h0，拼进它自己的查询 token 集合（下一跳用）。
+                qtok_new = qtok_b
+                if hop == 0 and kfeat is not None and qtok_b is not None:
+                    try:
+                        _h0 = torch.as_tensor(kfeat["h0"])
+                        _mk = kfeat.get("mask")
+                        _relay = relay_bridge_tokens(
+                            _h0[int(i)],
+                            (torch.as_tensor(_mk)[int(i)] if _mk is not None else None),
+                            qtok_b, k=int(LATENT_RELAY_TOKENS))
+                        if int(_relay.numel()) > 0:
+                            _relay = _relay.to(device=q_vec0.device).unsqueeze(0)
+                            _base = torch.as_tensor(qtok_b).to(
+                                device=_relay.device, dtype=_relay.dtype)
+                            qtok_new = torch.cat([_base, _relay], dim=1)
+                    except Exception as _e:                       # 接力失败不致命，但要留痕
+                        print(f"[relay] 分支 {bi} 词级接力跳过：{_e}", flush=True)
                 # 查询更新**留在计算图里**：这是 k_out_net 唯一能拿到梯度的通路
                 new_branches.append((torch.nn.functional.normalize(
-                    qv + k_out[:, int(i)], dim=-1), tuple(path) + (int(i),)))
+                    qv + k_out[:, int(i)], dim=-1), tuple(path) + (int(i),), qtok_new))
             # 分支数上限 = b：b=2、3 跳时若不截断会指数膨胀（每跳 ×b）
             branches = new_branches[:b]
         return {"z_list": z_list, "lex_list": (lex_list or None),
@@ -982,6 +1047,7 @@ class HybridLatentRouter(LatentRouter):
                  init_temp: float = 0.07, gamma: float = LATENT_ADDR_GAMMA,
                  ms_tau: float = LATENT_MS_TAU,
                  anchor_boost: float = LATENT_ANCHOR_BOOST,
+                 anchor_tokens: int = LATENT_ANCHOR_TOKENS,
                  novelty_lambda: float = LATENT_NOVELTY_LAMBDA):
         super().__init__(d_model, n_slots, d_key, init_temp)
         if not (0.0 < float(gamma) < 1.0):
@@ -1003,6 +1069,7 @@ class HybridLatentRouter(LatentRouter):
         # —— 稀疏精确分支：γ（MaxSim 占比）——
         self.gamma_logit = nn.Parameter(torch.tensor(float(math.log(gamma / (1 - gamma)))))
         self.anchor_boost = float(anchor_boost)
+        self.anchor_tokens = int(anchor_tokens)
         self.novelty_lambda = float(novelty_lambda)
 
     # ---- 打分 ----
@@ -1121,11 +1188,17 @@ class HybridLatentRouter(LatentRouter):
             qn_ = torch.nn.functional.normalize(qt - mu, dim=-1)
             tok_qsim = torch.einsum("ksd,qd->ksq", hn, qn_).max(dim=-1).values  # [K,T]
 
+        # 标题区：单元文本以 "[anchor] ..." 开头，标题会被切成多个 subword，
+        # 只给第 0 位加成 ≈ 没加成（这正是"anchor_boost 名义 1.3、实际没生效"的原因）。
+        # 这里给**前 anchor_tokens 个有效 token** 一起加成。
+        _rank = torch.cumsum(mask.to(torch.long), dim=1) - 1
+        head = mask & (_rank < max(1, int(self.anchor_tokens)))
+
         def _pool(net: nn.Sequential, proj: nn.Linear, bias: nn.Parameter,
                   novelty: bool = False):
             a = net(x).squeeze(-1)                                          # [K,T]
             a = a + bias[0] * first.to(a.dtype) + bias[1] * last.to(a.dtype)
-            a = a + _anchor_bonus * first.to(a.dtype)                       # 标题锚点
+            a = a + _anchor_bonus * head.to(a.dtype)                        # 标题区
             if novelty and tok_qsim is not None and float(self.novelty_lambda) > 0:
                 # 与问题越像的 token 越该被压：第 2 跳要的是**新**实体
                 a = a - float(self.novelty_lambda) * tok_qsim.to(a.dtype)

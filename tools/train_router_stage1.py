@@ -79,16 +79,25 @@ def build_router(args, hidden, dev):
 
 
 def recall_eval(router, encoder, items, args, dev, limit=0, bs=16):
-    """不生成答案，只算寻址指标：首跳命中 / 完整证据召回（整条链都进 picks）。"""
+    """寻址诊断（不生成答案）。三个指标必须分开报，否则无法定位问题在哪一跳：
+
+      hop1      : **第 1 跳** top-b 是否命中任一金标（旧口径把两跳混在一起算，93% 是假的）
+      hop2_given: 第 1 跳命中时，整条证据链是否被补全（衡量第二跳的补全能力）
+      full      : 全部金标是否都进了 picks（受读出容量限制：picks 上限 = 跳数 × b）
+
+    并按"金标证据数 = 2 / >= 3"分组：>=3 条的题需要更多 picks，混在一起会把
+    "读出容量不足"误判成"第二跳选错"。
+    """
     router.eval()
     use = items[:limit] if limit else items
-    n = hit1 = full = 0
+    st = {"n": 0, "hop1": 0, "hop2_given": 0, "hop2_n": 0, "full": 0,
+          "g2": {"n": 0, "hop1": 0, "full": 0}, "g3": {"n": 0, "hop1": 0, "full": 0}}
     t0 = time.time()
     for batch in iter_batches(use, bs):
         enc = encode_batch(encoder, batch, tag="val")
         for item, e in zip(batch, enc):
             units = T.item_units(item)
-            gold = T.evidence_chain_indices(units, item.get("evidence"))
+            gold = set(int(g) for g in T.evidence_chain_indices(units, item.get("evidence")))
             if not gold or not e["payloads"]:
                 continue
             slot_z = LM.pool_slot_keys(list(e["payloads"])).unsqueeze(0)
@@ -97,19 +106,41 @@ def recall_eval(router, encoder, items, args, dev, limit=0, bs=16):
                                               item["question"], args.system_prompt,
                                               args.layer, dev)
             with torch.no_grad():
-                out = router.forward_hops(qf_ex["pooled"], slot_z, n_hops=2, hard=True,
-                                          reads=reads, kfeat=e["kfeat"],
-                                          q_tok=qf_ex.get("h0_tok"),
-                                          topk_per_hop=int(args.topk_per_hop))
-            picks = set(int(p) for p in (out.get("picks") or []))
-            n += 1
-            hit1 += int(bool(picks & set(int(g) for g in gold)))
-            full += int(set(int(g) for g in gold) <= picks)
+                o1 = router.forward_hops(qf_ex["pooled"], slot_z, n_hops=1, hard=True,
+                                         reads=reads, kfeat=e["kfeat"],
+                                         q_tok=qf_ex.get("h0_tok"),
+                                         topk_per_hop=int(args.topk_per_hop))
+                of = router.forward_hops(qf_ex["pooled"], slot_z, n_hops=2, hard=True,
+                                         reads=reads, kfeat=e["kfeat"],
+                                         q_tok=qf_ex.get("h0_tok"),
+                                         topk_per_hop=int(args.topk_per_hop))
+            p1 = set(int(p) for p in (o1.get("picks") or []))
+            pf = set(int(p) for p in (of.get("picks") or []))
+            hit1 = bool(p1 & gold)
+            full = gold <= pf
+            st["n"] += 1
+            st["hop1"] += int(hit1)
+            st["full"] += int(full)
+            if hit1:
+                st["hop2_n"] += 1
+                st["hop2_given"] += int(full)
+            g = st["g2"] if len(gold) == 2 else st["g3"]
+            g["n"] += 1
+            g["hop1"] += int(hit1)
+            g["full"] += int(full)
     router.train()
     dt = time.time() - t0
-    if not n:
-        return {"n": 0, "hit1": None, "full": None, "sec": dt}
-    return {"n": n, "hit1": hit1 / n, "full": full / n, "sec": dt}
+    n = max(1, st["n"])
+    out = {"n": st["n"], "sec": dt,
+           "hop1": st["hop1"] / n,
+           "full": st["full"] / n,
+           "hop2_given": (st["hop2_given"] / st["hop2_n"]) if st["hop2_n"] else None}
+    for key in ("g2", "g3"):
+        d = st[key]
+        out[key] = {"n": d["n"],
+                    "hop1": (d["hop1"] / d["n"]) if d["n"] else None,
+                    "full": (d["full"] / d["n"]) if d["n"] else None}
+    return out
 
 
 def save(router, args, hidden, step, path):
@@ -196,6 +227,10 @@ def main(argv=None):
                 keep_pos = {int(o): j for j, o in enumerate(keep)}
                 chain_new = [keep_pos[i] for i in chain if i in keep_pos]
                 n_hops = 2 if (T.item_hops(item) > 1 and len(chain_new) >= 2) else 1
+                # 监督目标必须覆盖**整条证据链**，上限是读出容量（跳数 × 每跳 top-b）。
+                # 旧写法只取前 2 条，而评测要求整条链都进 picks —— 161/500 条
+                # （金标 >=3 句）的题从训练目标上就没被要求过，指标自然上不去。
+                _cap = max(1, int(n_hops) * int(args.topk_per_hop))
                 kfeat = e["kfeat"]
                 if kfeat is not None:
                     kfeat = {k: (v[keep] if torch.is_tensor(v) else v)
@@ -208,7 +243,7 @@ def main(argv=None):
                     qf_cache[_qid] = qf_ex
                 loss, _i2 = router.addr_loss_set(
                     qf_ex["pooled"], slot_z,
-                    (chain_new[:2] if n_hops > 1 else [int(tgt_slot)]),
+                    (chain_new[:_cap] if n_hops > 1 else [int(tgt_slot)]),
                     n_hops=n_hops, kfeat=kfeat, q_tok=qf_ex.get("h0_tok"))
                 if loss is None:
                     continue
@@ -225,15 +260,21 @@ def main(argv=None):
                 if val and args.eval_every > 0 and step % args.eval_every == 0:
                     r = recall_eval(router, encoder, val, args, dev,
                                     limit=args.val_limit, bs=args.enc_batch)
-                    print(f"[eval step={step}] hit1={r['hit1']} full={r['full']} "
-                          f"n={r['n']} ({r['sec']:.0f}s)", flush=True)
+                    print(f"[eval step={step}] hop1={r['hop1']:.3f} "
+                          f"hop2|hop1={r['hop2_given']} full={r['full']:.3f} "
+                          f"n={r['n']} | ev=2: n={r['g2']['n']} hop1={r['g2']['hop1']} "
+                          f"full={r['g2']['full']} | ev>=3: n={r['g3']['n']} "
+                          f"hop1={r['g3']['hop1']} full={r['g3']['full']} "
+                          f"({r['sec']:.0f}s)", flush=True)
                     save(router, args, hidden, step, args.out)
     save(router, args, hidden, step, args.out)
     if val:
         r = recall_eval(router, encoder, val, args, dev, limit=args.val_limit,
                         bs=args.enc_batch)
-        print(f"[final] hit1={r['hit1']} full={r['full']} n={r['n']} "
-              f"({r['sec']:.0f}s)", flush=True)
+        print(f"[final] hop1={r['hop1']:.3f} hop2|hop1={r['hop2_given']} "
+              f"full={r['full']:.3f} n={r['n']} | ev=2: n={r['g2']['n']} "
+              f"hop1={r['g2']['hop1']} full={r['g2']['full']} | ev>=3: n={r['g3']['n']} "
+              f"hop1={r['g3']['hop1']} full={r['g3']['full']}", flush=True)
     print(f"[stage1] done step={step} -> {args.out}", flush=True)
     return 0
 
