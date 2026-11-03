@@ -55,8 +55,8 @@ def test_compressor_split_and_lex():
     comp2 = LM.LatentCompressor(H, n_slots=m, inner_dim=64, num_heads=4, lex_skip=False)
     z2, z2_lex, _ = comp2.forward_split(h0, h18, mask)
     assert z2_lex is None and z2.shape == z.shape
-    # 关掉直通时，forward()（旧接口）必须逐位等于 forward_split 的语义载荷
-    z3, i3 = comp2.forward_with_info(h0, h18, mask)
+    # 关掉直通时，forward_split 的语义载荷必须与开启直通时**逐位相同**
+    z3, _zl3, i3 = comp2.forward_split(h0, h18, mask)
     assert i3["n_rows"] == B and i3["lex_skip"] is False
     print("  ✓ P06 compressor split: z=[B,m,inner] + z_lex=[B,m,H]，lex_skip=0 时无直通")
 

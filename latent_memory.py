@@ -289,13 +289,6 @@ class LatentCompressor(nn.Module):
         z_sem, _lex, _info = self.forward_split(h0, h18, attention_mask)
         return z_sem
 
-    def forward_with_info(self, h0: torch.Tensor, h18: torch.Tensor,
-                          attention_mask: Optional[torch.Tensor] = None
-                          ) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """兼容旧接口：只返回语义分支 (z_sem, info)。直通分支走 forward_split。"""
-        z_sem, _lex, info = self.forward_split(h0, h18, attention_mask)
-        return z_sem, info
-
     def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
                       attention_mask: Optional[torch.Tensor] = None
                       ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:

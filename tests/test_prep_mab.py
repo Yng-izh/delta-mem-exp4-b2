@@ -70,27 +70,31 @@ def test_gold():
 
 
 def test_select():
+    """候选选择必须**不看答案**（P04）：接口里没有 gold/answers，只有问题与 cap。"""
     facts = M.parse_context(CTX)
-    gold, _ = M.derive_gold(facts, [["Norwich"]])
-    keep = M.select_facts(facts, "Where was Thomas Kyd born?", gold, cap=7)
-    ok("M2 同键所有版本都在上下文里", {0, 2, 4} <= set(keep), extra=str(sorted(keep)))
-    ok("M2b 金标在上下文里", set(gold) <= set(keep))
-    keep2 = M.select_facts(facts, "Where was Thomas Kyd born?", gold, cap=4)
-    ok("M2c cap 生效且仍含全部同键版本",
-       len(keep2) == 4 and {0, 2, 4} <= set(keep2), extra=str(sorted(keep2)))
-    ok("M2d 选择结果保持原始编号顺序", keep2 == sorted(keep2))
+    keep0, info0 = M.select_facts_stream(facts, "Where was Thomas Kyd born?", 0)
+    ok("M2 cap<=0 = 不截断，全给", set(keep0) == {f["idx"] for f in facts},
+       extra=str(sorted(keep0)))
+    keep, _info = M.select_facts_stream(facts, "Where was Thomas Kyd born?", 7)
+    ok("M2b 问题锚定实体的所有版本都在上下文里", {0, 2, 4} <= set(keep),
+       extra=str(sorted(keep)))
+    ok("M2c 结果保持原始编号顺序", list(keep) == sorted(keep))
+    import inspect
+    sig = inspect.signature(M.select_facts_stream)
+    ok("M2d 选择器签名里没有 answers/gold（不按答案挑上下文）",
+       "answers" not in sig.parameters and "gold" not in str(sig))
     try:
-        M.select_facts(facts, "q", gold, cap=2)
+        M.select_facts_stream(facts, "Where was Thomas Kyd born?", 2)
         raised = False
     except ValueError:
         raised = True
-    ok("M2e cap 小于同键版本数时报错（不许静默丢版本）", raised)
+    ok("M2e cap 小于锚定版本数时报错（不许静默丢版本）", raised)
 
 
 def test_item():
     facts = M.parse_context(CTX)
     gold, val = M.derive_gold(facts, [["Norwich"]])
-    keep = M.select_facts(facts, "Where was Thomas Kyd born?", gold, cap=5)
+    keep, _ = M.select_facts_stream(facts, "Where was Thomas Kyd born?", 5)
     it = M.build_item(facts, keep, "Where was Thomas Kyd born?", [["Norwich"]],
                       gold, val, {"source": "t", "cap": 5,
                                   "n_facts_total": len(facts)}, "q0")
@@ -117,7 +121,7 @@ def test_layout_compat():
     import train_latent_memory as T
     facts = M.parse_context(CTX)
     gold, val = M.derive_gold(facts, [["Norwich"]])
-    keep = M.select_facts(facts, "Where was Thomas Kyd born?", gold, cap=5)
+    keep, _ = M.select_facts_stream(facts, "Where was Thomas Kyd born?", 5)
     it = M.build_item(facts, keep, "Where was Thomas Kyd born?", [["Norwich"]],
                       gold, val, {"source": "t", "cap": 5,
                                   "n_facts_total": len(facts)}, "q0")

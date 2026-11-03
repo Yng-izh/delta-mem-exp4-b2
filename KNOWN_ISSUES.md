@@ -96,7 +96,7 @@ finally:
 **影响**：任何"FST 解决了组合不稳定 / 更新局部性 / 时间一致性"的表述**目前都不成立**。
 单测保证的是"实现符合设计"，不是"设计有效"。
 
-**怎么修**：按 `ARCHITECTURE.md §6.5` 的消融矩阵在 v100-2 上依次跑
+**怎么修**：按下述消融矩阵依次跑
 （`--router` → `--fst --hist-max 0` → `--fst --hist-max 2` → `--fst --ignore-query-time`），
 每档至少 3 个 seed，报 `acc + group_acc + ver_multi_acc + 三探针 + pair_acc + order_stable`，
 并且**必须同时报两个常数基线**（`group_const_acc` = 永远选第一组、`ver_newest_acc` = 永远选最新版），
@@ -120,7 +120,7 @@ finally:
 只能与"读对槽位 65%"、"group 0.650"一起解读。
 
 **怎么修**：`generate_latent_answer_fst` 支持 hops=2（第一跳读出的客体值回填为
-第二跳的实体特征），见 `ARCHITECTURE.md §10` P3。
+第二跳的实体特征）。
 
 ### 3.7 历史容量与保真度的权衡未量化
 
@@ -153,7 +153,7 @@ Router 训练侧对多跳只监督第 1 跳（`target_slot_index` 取 evidence[0
 两跳链式读出的真实效果仍未知——这正是 HotpotQA 潜层 acc 停在 chance 的候选原因之一。
 
 **修法**：HotpotQA 训练时对第 2 跳加监督（或推理期按 `item["hops"]` 走链并验证），
-见 `ARCHITECTURE.md §10` P3。
+
 
 ---
 
@@ -173,7 +173,7 @@ Router 训练侧对多跳只监督第 1 跳（`target_slot_index` 取 evidence[0
 ### 6. （历史）旧评测管线的 3 处已知问题，随方案废除关闭
 
 `v8_slotpool` 的 top-K 重排顺序 bug、`cur_ts` 单句时间戳冻结、软 token 预算统计口径 ——
-三者都属于已废除的 AR 管线（见 `ARCHITECTURE.md` §11），代码已移除，不再跟踪。
+三者都属于已废除的 AR 管线，代码已移除，不再跟踪。
 软 token 预算按真实 `num_chunks * 4` 统计这一条，在当前 `eval_latent_table.py`
 里以实测 `mem_tokens` 列呈现，不受旧口径影响。
 

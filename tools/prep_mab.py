@@ -200,51 +200,6 @@ def chain_indices(facts, seeds, max_hops=2):
     return sorted(seen)
 
 
-def select_facts(facts, question, gold_idx, cap):
-    """金标 + 同键全部版本 + 推理链 + 问题锚定的第一跳 + BM25 相关事实，凑到 cap 条。
-
-    同键版本必须整组进入：只留最新那条，"抗干扰/覆盖旧值"就没有被考到；
-    只留旧的那条则样本无解。两种都会被这里挡住。
-
-    优先级（高 -> 低）：金标与同键版本 > 问题锚定的第一跳事实 > 金标的推理链中间事实
-    > BM25 高相关事实。**BM25 必须降序** —— 旧代码 `sorted(...)` 没写 reverse，
-    等于优先把"最不相关"的事实塞进 cap，把整个选法的用意做反了。
-    """
-    by_idx = {f["idx"]: f for f in facts}
-    keep = set()
-    for i in gold_idx:
-        if i not in by_idx:
-            continue
-        keep.add(i)
-        k = key_of(by_idx[i])
-        for f in facts:
-            if key_of(f) == k:
-                keep.add(f["idx"])
-    if len(keep) > cap:
-        raise ValueError(f"金标+同键版本已 {len(keep)} 条 > cap={cap}，请调大 cap")
-    # 推理链 + 问题锚定（都是确定性规则，不占 BM25 名额的顺序）
-    q_toks = set(_toks(question))
-    anchor = {f["idx"] for f in facts
-              if _norm(f["entity"]) and set(_toks(f["entity"])) <= q_toks} if q_toks else set()
-    chain = set(chain_indices(facts, gold_idx, max_hops=2))
-    for extra in (sorted(anchor), sorted(chain - anchor)):
-        for i in extra:
-            if len(keep) >= cap:
-                break
-            keep.add(i)
-    scores = bm25_scores(facts, question)
-    rest = sorted(((scores[i], -by_idx[i]["idx"]) for i in by_idx if i not in keep),
-                  reverse=True)
-    for _s, negi in rest:
-        if len(keep) >= cap:
-            break
-        keep.add(-negi)
-    # 金标必须还在（理论上一定在，但选择逻辑改了就靠这条兜住）
-    if not set(gold_idx) <= keep:
-        raise ValueError("选择后金标丢失")
-    return sorted(keep)
-
-
 def select_facts_stream(facts, question, cap=0):
     """**不看答案**地挑可见事实集（P04 的修复点）。
 

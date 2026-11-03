@@ -84,8 +84,6 @@ CR 的一条 6k context 有几百条事实，而槽位记忆**一条事实一个
 
 | 文件 | 用途 |
 |---|---|
-| `tools/gen_fst_update.py` → `synth/fst_update_{train,val}.jsonl` | FST 训练/评估通路的 CPU smoke（`--smoke-model`） |
-| `tools/gen_synth_qa.py` | `load_synth_jsonl` 的外部语料通路自检 |
 
 已知且保留的两个数据事实（写进报告口径）：
 - 寻址标签优先 evidence 匹配：干扰事实常与答案同值（旧合成数据 22.5%），纯答案串匹配会把 13.5% 标错槽；

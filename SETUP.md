@@ -80,12 +80,14 @@ python tools/prep_mab.py --src <Conflict_Resolution-*.parquet> --out $B/synth/ma
 ## 4. 训练
 
 ```bash
-# v4 配方（金标恒在 + 2 个难负例 + h0 直通 + hybrid router + beam2）
-bash runs/run_train_v4.sh
+# 阶段一：只训 Router（冻结特征上优化寻址，训完直接报召回率）
+GPU=0 bash runs/run_stage1_router.sh
 
-# v3 复现（对照用；inner_dim 512、无直通、无难负例）
-bash runs/run_train_v3.sh
+# 阶段二：固定阶段一 Router，只训 Compressor + Bridge（KL 蒸馏 + 重建 + 抗噪）
+GPU=0 bash runs/run_stage2_bridge.sh
 ```
+
+断点续训：两条命令加 `--resume <ckpt>`（权重 + 优化器动量 + step/epoch 位置 + RNG 全部恢复）。
 
 关键参数含义（`train_latent_memory.py --help` 有全量）：
 
@@ -109,7 +111,7 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
   --ckpt $B/ckpt/hotpot_router_10k_v4.pt \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
-  --label v4-router --save-json $B/results/v4_router_500.json
+  --label v5-router --save-json $B/results/v5_router_500.json
 ```
 
 `--mode`（别名 `--method`）七选一：
@@ -145,4 +147,4 @@ python -m py_compile latent_memory.py train_latent_memory.py eval_latent_table.p
 | tokenizer 反序列化崩 | protobuf 7.x → 钉 `protobuf==4.25.9` |
 | 数字对不上历史 | transformers/torch 版本不同；跨版本不可比，同栈内部才可比 |
 
-更多未解风险见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，架构与组件契约见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+更多未解风险见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，决策记录见 [CHANGELOG.md](CHANGELOG.md)。
