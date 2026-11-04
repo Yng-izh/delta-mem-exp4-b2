@@ -527,23 +527,42 @@ def _group_word_ids(items):
     wid = -1
     prev_punct = False
     prev_chain = False
-    for starts_ws, txt, is_special in items:
+    for idx, (starts_ws, txt, is_special) in enumerate(items):
         if is_special:
             out.append(-1)
             prev_punct = False
             prev_chain = False
             continue
         t = str(txt).strip()
-        punct = bool(t) and (not t[:1].isalnum()) and t[:1] not in "'\u2019-"
+        if not t:
+            # 修 B：空文本 token（未知字符、或被吞掉的破折号）不属于任何词，
+            # 并且必须打断数字链 —— 否则 "1830" 和 "22" 会跨过它粘成 "183022"。
+            # 注意**保留** prev_punct：`1830 – 22` 里的空 token 不能让后面的数字
+            # 粘到破折号那个词上（`–22`），前一个 token 是标点时下一个必须起新词。
+            out.append(-1)
+            prev_punct = True          # 强制下一个 token 起新词
+            prev_chain = False
+            continue
+        # 修 A：标点 = **整串没有字母数字**（与 `_word_penalty_for` 的降权口径一致）。
+        # 只看首字符会把 `[S`（锚点开头的标题）判成标点，于是 `[Smyrna` 被拆成
+        # `[S` + `my` + `rna`，而且 prev_punct 还会把后面的 `my` 也切断。
+        punct = bool(t) and not any(ch.isalnum() for ch in t)
         digits = bool(t) and any(ch.isdigit() for ch in t) and \
             all(ch.isdigit() or ch in ",." for ch in t)
         sep = t in (",", ".")
-        in_number = (not starts_ws) and prev_chain and (digits or sep)
+        # 逗号/句点只有在"紧跟一个没有空白的数字 token"时才算千分位/小数点；
+        # 否则它是句读标点（`1868,` 这种句末逗号不该粘进数字里）。
+        nxt = items[idx + 1] if idx + 1 < len(items) else None
+        nxt_t = str(nxt[1]).strip() if (nxt is not None and not nxt[2]) else ""
+        next_is_digits = bool(nxt_t) and any(ch.isdigit() for ch in nxt_t) and \
+            all(ch.isdigit() or ch in ",." for ch in nxt_t) and not nxt[0]
+        in_number = ((not starts_ws) and prev_chain
+                     and (digits or (sep and next_is_digits)))
         if (not in_number) and (wid < 0 or starts_ws or punct or prev_punct):
             wid += 1
         out.append(wid)
         prev_punct = punct and not in_number
-        prev_chain = digits or (sep and prev_chain)
+        prev_chain = digits or (sep and in_number)
     return out
 
 
@@ -3433,13 +3452,16 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
     # 注入 token 的构成必须分开记账：围栏泡沫与真正的内容向量混在一个 n_soft 里，
     # 就会出现"64.5 个注入 token"看起来很多、其实 46.6 个是重复英文围栏的情况。
     n_content = n_soft
-    n_fence = 0
+    n_fence = None if (n_soft and seg_ids is None) else 0
     if n_soft and seg_ids is not None:
         _segs = [int(v) for v in seg_ids][:n_soft]
         n_content = sum(1 for v in _segs if v > 0)
         n_fence = n_soft - n_content
     meta = {"n_in": n_in, "n_out": n_out, "n_soft": n_soft,
-            "n_soft_content": int(n_content), "n_fence": int(n_fence),
+            # n_fence=None 表示"没拿到 seg_ids，无法区分内容与围栏"，
+            # 不能报 0（那会被读成"没有围栏泡沫"）。
+            "n_soft_content": int(n_content),
+            "n_fence": (None if n_fence is None else int(n_fence)),
             "n_sys_tokens": int(n_pre), "insert_at": int(n_pre),
             "inject_mode": mode, "fence_style": style,
             "slot_isolation": slot_isolation,

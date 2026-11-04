@@ -455,6 +455,25 @@ def test_numeric_and_stopwords():
     offs3 = [(0, 4), (4, 5)]
     ok("I22 句末句点不并入前一个词",
        LM._word_ids_from_offsets(offs3, texts3) == [0, 1])
+    # 句末逗号不能被当成千分位（真实数据里 "1868, was" 曾被粘成 "1868,"）
+    ok("I24 句末逗号与数字分开",
+       LM._word_ids_from_offsets([(0, 4), (4, 5), (5, 9)], ["1868", ",", " was"])
+       == [0, 1, 2],
+       extra=str(LM._word_ids_from_offsets([(0, 4), (4, 5), (5, 9)],
+                                           ["1868", ",", " was"])))
+    # 空格/未知字符 token（解码为空但占字符宽）必须断开前后两个词
+    ok("I25 空 token 断开前后词",
+       LM._word_ids_from_offsets([(0, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11)],
+                                 ["before", "", "1", "8", "6", "5"])
+       == [0, -1, 1, 1, 1, 1],
+       extra=str(LM._word_ids_from_offsets(
+           [(0, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11)],
+           ["before", "", "1", "8", "6", "5"])))
+    ok("I26 破折号后的数字不与破折号同词",
+       LM._word_ids_from_offsets([(0, 4), (4, 5), (5, 6), (6, 8)],
+                                 ["1830", "\u2013", "", "22"]) == [0, 1, -1, 2],
+       extra=str(LM._word_ids_from_offsets([(0, 4), (4, 5), (5, 6), (6, 8)],
+                                           ["1830", "\u2013", "", "22"])))
     # 否定/时间/比较词不能被当停用词降权
     bad = [w for w in ("not", "no", "before", "after", "than")
            if w in LM._LATENT_STOPWORDS]
