@@ -2,6 +2,49 @@
 
 只保留对**当前代码**有约束力的条目。历史实验的逐轮流水已随旧版本一起移除。
 
+## L_cov：给选词器加"重要词覆盖"监督（2026-11-04 第九轮，只改代码未训练）
+
+**问题**：同一 checkpoint 实测 —— 4 个 z_lex 槽位 28.2% 落在停用词上，完整答案覆盖率
+24.5%，数字覆盖率 8.3%。继续调停用词权重的收益有限（标点硬屏蔽那一轮已经吃掉大头），
+因为**选择器本身拿不到梯度**：梯度只经由 argmax 选中的那个词回流，而 argmax 不可微。
+
+**做法**（三处，全部只动压缩器内部与训练接线）：
+
+| 位置 | 改动 |
+|---|---|
+| `encode_latent_units` | 每个词多一个**重要性标签**：数字/年份 3.0、专有名词 2.0、内容词 0.5、停用词与纯标点 0。**只由记忆原文生成**，不看问题、不看金标答案（干扰事实走同一套规则） |
+| `word_coverage_loss`（新） | `P_rj` = 每槽在可选词上归一化的注意力质量；`P_covered(j)=1-∏_r(1-P_rj)`；`L_cov = -Σ w_j log(P_covered+ε) / Σ w_j` |
+| `assemble_loss` / `--pack` | `L_total = L_existing + λ_cov·L_cov`，打包路径逐条取均值，不静默跳过 |
+
+三个必须守住的细节（都有单测钉住，`tests/test_diag_contracts.py` K1–K26）：
+
+1. **损失建在 `mass` 上，不建在 `pick` 上**。`pick` 是 argmax 出的整数，对 `queries`
+   没有梯度；建在它上面等于什么都没训练。K17–K21 验证 `cov_loss.requires_grad` 且
+   梯度回到 `queries` / `input_proj`。
+2. **只监督容量内的词**（`--cov-targets`，默认 = 槽数）。一块里有 10 个数字而只有 4 个槽，
+   强迫全覆盖会留一个下不去的常数底，梯度方向还会变成"把注意力摊平"（反效果）。
+3. **同表面键去重**。`[Smyrna` 与正文 `Smyrna` 选词时只占一个槽，同时要求覆盖两个是
+   结构性不可满足的目标。
+
+推理侧**完全不变**：仍是硬 argmax 选 4 个词、输出 4 个向量；`want_cov` 只在训练路径打开，
+`--cov-weight 0`（默认）时训练行为与加这个开关之前**逐位一致**（smoke 里 loss_qa 完全相同）。
+
+**默认关闭**。对照实验用法（同一份脚本、同一套超参，只差 L_cov）：
+
+```bash
+# 基线
+COV=0.0 OUT=$B/ckpt/hotpot_router_10k_v6.pt     bash runs/run_stage2_bridge.sh
+# 实验
+COV=0.1 OUT=$B/ckpt/hotpot_router_10k_v6_cov.pt bash runs/run_stage2_bridge.sh
+```
+
+训练日志新增 `loss_cov / cov_pcov / cov_tgt(num=,ent=)`；跑完打印 `[cov-check]`，
+若 L_cov 一次都没进入优化步会**直接报错**（不允许静默失效）。
+
+**验证状态**：代码 + 110 项单测通过；CPU smoke（单条与 `--pack 2` 两条路径）跑通；
+合成实验 300 步 `cov_pcov` 0.616→0.885、选中词从 `founded/city` 变成 `1830/Smyrna`。
+**真实数据上的效果未测**，因为 checkpoint 是旧方法训的，必须重训才能看。
+
 ## 纯标点硬屏蔽的 A/B（2026-11-04 第八轮）
 
 同一 checkpoint、同一注入口径（`user` + `bracket`），只改"选词资格"：

@@ -331,7 +331,8 @@ def encode_item(encoder, item, tag="fact", grad=False):
 # =====================================================================
 # 2) 序列构造：soft tokens + 答案 token 的标签
 # =====================================================================
-def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None):
+def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None,
+                           cov_weight=0.0, cov_targets=0):
     """同 encode_item_slots，但额外返回逐槽冻结特征与直通载荷。
 
     返回 (payloads, z, info, kfeat, lex_payloads)：
@@ -341,6 +342,10 @@ def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None):
     cache 命中时特征从缓存槽位拿不到，因此**缓存路径不返回 kfeat**（None）：
     路由在训练里必须用当步真特征，缓存只服务"同一段上下文被多个问题共享"的
     纯读出场景（MAB-CR / FST），那种场景不需要逐槽键。
+
+    cov_weight>0 且 grad=True 时，info 里会多出 `cov_loss`（**保留计算图的张量**）
+    与 `cov_stats`（纯 float，可直接打印）。缓存路径必然 grad=False，所以缓存
+    分支不会产生 cov_loss —— 这是对的：缓存里的载荷已经 detach，建图没有意义。
     """
     units = item_units(item)
     texts = [unit_encode_text(item, i) for i in range(len(units))]
@@ -388,7 +393,8 @@ def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None):
                     kfeat_out[kk] = vals[0]
         return payloads, z, {"cache_hits": hits, "cache_n": len(texts)}, kfeat_out, lex_out
     payloads, lex_payloads, kfeat, info = encoder.encode_full(
-        texts, parent_ids=[f"{tag}:{k}" for k in range(len(texts))], grad=grad)
+        texts, parent_ids=[f"{tag}:{k}" for k in range(len(texts))], grad=grad,
+        cov_weight=float(cov_weight or 0.0), cov_targets=int(cov_targets or 0))
     if not payloads:
         raise RuntimeError("encode 未返回任何 payload")
     z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
@@ -776,16 +782,17 @@ class StubTok:
 # 4) 训练
 # =====================================================================
 def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
-                  recon_weight, recon_stage=False):
-    """把四项损失组合起来（**纯函数**，可直接单测）。
+                  recon_weight, recon_stage=False, loss_cov=None, cov_weight=0.0):
+    """把各项损失组合起来（**纯函数**，可直接单测）。
 
-    唯一允许的行为：寻址/KL/重建都**累加**到 QA 损失上。
-    唯一的例外是 `recon_stage`（两阶段训练的前 N 步）：那时切换到"纯重建 + 寻址"，
+    唯一允许的行为：寻址/KL/重建/覆盖都**累加**到 QA 损失上。
+    唯一的例外是 `recon_stage`（两阶段训练的前 N 步）：那时切换到"纯重建 + 寻址 + 覆盖"，
     故意丢掉 QA —— 因为两个目标在同一组软 token 上争预算。
 
     这里曾有一个静默 bug：KL 用 `loss = loss_qa + kl_weight*loss_kl` 直接赋值，
     把已经加进去的 `addr_weight*loss_addr` **整条覆盖掉**，于是"开了 KL 之后寻址
     再没被监督过"；而日志里 loss_addr 照常打印，看起来一切正常。
+    新增项一律走 `loss = loss + w * term`，不允许出现重新赋值。
     """
     loss = loss_qa
     if loss_addr is not None:
@@ -795,12 +802,16 @@ def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
     if recon_stage:
         if loss_r is None:
             raise ValueError("recon_stage=True 但 loss_r is None")
-        # 纯重建阶段：只保留重建 + 寻址
+        # 纯重建阶段：只保留重建 + 寻址（+ 覆盖，如果开了）
         loss = loss_r
         if loss_addr is not None:
             loss = loss + addr_weight * loss_addr
     elif loss_r is not None:
         loss = loss + recon_weight * loss_r
+    # L_cov：压缩器内部的词覆盖监督。放在最后统一加，recon_stage 下也生效
+    # （它监督的是"压缩器保存了什么"，与 QA/重建是正交目标，不该被阶段切换关掉）。
+    if loss_cov is not None and float(cov_weight or 0.0) > 0.0:
+        loss = loss + float(cov_weight) * loss_cov
     return loss
 
 
@@ -851,6 +862,11 @@ def _packed_student_step(args, model, pend, recon_stage):
     loss_addr = torch.stack(addr).mean() if addr else None
     rec = [p["rec"] for p in pend if p["rec"] is not None]
     loss_r = torch.stack(rec).mean() if rec else None
+    # L_cov 也必须走打包路径：每条样本的 cov 是在自己的压缩前向里算好的标量，
+    # 打包只是把 student 的 4B 前反向合批，与压缩器无关 —— 漏掉这一项，
+    # "--pack>1 时 L_cov 静默失效"就是下一个 v3 式悬案。
+    cov = [p["cov"] for p in pend if p.get("cov") is not None]
+    loss_cov = torch.stack(cov).mean() if cov else None
     # KL 蒸馏与打包并存：旧实现直接 `SystemExit("--pack>1 与 --kl-weight>0 不兼容")`，
     # 于是"开蒸馏"和"打包提速"二选一 —— 而蒸馏恰恰是 v3 把 kl_weight 设成 0 之后
     # 丢掉的信号，两个都不能省。这里把 teacher 也按**同一套打包规则**拼起来，
@@ -889,9 +905,11 @@ def _packed_student_step(args, model, pend, recon_stage):
             loss_kl = torch.stack(_kls).mean()
     loss = assemble_loss(loss_qa, loss_addr, loss_kl, loss_r,
                          addr_weight=args.addr_weight, kl_weight=args.kl_weight,
-                         recon_weight=args.recon_weight, recon_stage=recon_stage)
+                         recon_weight=args.recon_weight, recon_stage=recon_stage,
+                         loss_cov=loss_cov,
+                         cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0))
     (loss / args.accum).backward()
-    return loss_qa, loss_addr, loss_r, loss_kl
+    return loss_qa, loss_addr, loss_r, loss_kl, loss_cov
 
 
 def kl_loss_masked(s_logits, t_logits, labels, tau=1.0):
@@ -1824,6 +1842,20 @@ def train(args):
           f"teacher_scope={getattr(args, 'teacher_scope', 'gold')} "
           f"recon_lex={getattr(args, 'recon_lex', 1)}", flush=True)
     max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
+    _cw0 = float(getattr(args, "cov_weight", 0.0) or 0.0)
+    if _cw0 > 0.0:
+        if args.freeze_compressor or args.bridge_only:
+            # 说清楚"为什么开了没用"：L_cov 的梯度只回压缩器的选择器，
+            # 压缩器冻结 / 跳过压缩器时它一次都不会进入 loss。
+            print(f"[cov][warn] --cov-weight={_cw0} 在当前配置下**不生效**"
+                  f"（{'--bridge-only' if args.bridge_only else '--freeze-compressor'}："
+                  f"压缩器没有梯度）", flush=True)
+        else:
+            print(f"[cov] L_cov 开启：weight={_cw0} targets="
+                  f"{int(getattr(args, 'cov_targets', 0) or 0) or args.m}"
+                  f"（0=自动取槽数）；实体 {LM.LATENT_COV_ENTITY_W} / 数字 "
+                  f"{LM.LATENT_COV_NUMBER_W} / 内容 {LM.LATENT_COV_CONTENT_W} / "
+                  f"停用词与标点 0（不进目标）", flush=True)
     if args.freeze_compressor:
         comp.eval()          # 冻结主干：训练循环里的 comp.train() 会覆盖，这里兜住
     else:
@@ -1856,6 +1888,11 @@ def train(args):
                 "router_readout_p": float(getattr(args, "router_readout_p", 0.5)),
                 "teacher_scope": str(getattr(args, "teacher_scope", "gold")),
                 "recon_lex": int(getattr(args, "recon_lex", 1)),
+                "cov_weight": float(getattr(args, "cov_weight", 0.0) or 0.0),
+                "cov_targets": int(getattr(args, "cov_targets", 0) or 0),
+                "cov_entity_w": float(LM.LATENT_COV_ENTITY_W),
+                "cov_number_w": float(LM.LATENT_COV_NUMBER_W),
+                "cov_content_w": float(LM.LATENT_COV_CONTENT_W),
                 "inject_mode": str(getattr(args, "inject_mode", LM.LATENT_INJECT_MODE)),
                 "fence_style": str(getattr(args, "fence_style", LM.LATENT_FENCE_STYLE)),
                 "bridge_alpha_max": float(getattr(bridge, "alpha_max",
@@ -1883,6 +1920,8 @@ def train(args):
                   flush=True)
         print(f"[pack] 每 {args.pack} 条样本合成一次 4B 前反向（修 GPU 空转）", flush=True)
     grad_seen = None        # 必须在 opt.zero_grad() 之前取样，否则永远是 None -> 误报失败
+    _cov_seen = [0]         # L_cov 真正进入优化步的次数（0 = 白开了这个开关）
+    _cov_acc: List[Dict[str, Any]] = []   # 上次打印以来的覆盖统计（取平均后清空）
     t_start = time.time()
     if args.eval_every > 0 and not args.dry_run:
         # step=0 基线：随机初始化的压缩器/桥接器在这批样本上的表现（对照起点）
@@ -1939,7 +1978,9 @@ def train(args):
                 # 路由需要每个槽独立成形 [m,d]，所以保留 per-slot payload。
                 # Phase 2 冻结压缩器时用 grad=False：反正要 detach，建图纯浪费显存。
                 payloads, z, enc_info, kfeat, lex_payloads = encode_item_slots_full(
-                    encoder, item, tag="fact", grad=not args.freeze_compressor)
+                    encoder, item, tag="fact", grad=not args.freeze_compressor,
+                    cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0),
+                    cov_targets=int(getattr(args, "cov_targets", 0) or 0))
                 # 下面 sample_slot_subset 会按 _keep 重排 lex_payloads（路由必须与槽位
                 # 对齐），而重建任务用的是**原始单元下标**（payloads 未被裁剪）——
                 # 两套下标混用会把 A 单元的直通载荷配到 B 单元的重建目标上，
@@ -1947,6 +1988,22 @@ def train(args):
                 _lex_all = lex_payloads
             else:
                 z, enc_info = encode_item(encoder, item, tag="fact", grad=True)
+            # ①.5 L_cov：压缩器内部的**词覆盖**损失（见 latent_memory.word_coverage_loss）。
+            #    它由 encode_full 在 grad=True 且 --cov-weight>0 时建图并放进 info；
+            #    其余路径（--bridge-only / 无 router / 冻结压缩器 / 缓存）没有这个键，
+            #    于是这里拿到 None，训练行为与开 L_cov 之前逐位一致。
+            _cov_term = None
+            _cov_stats: Dict[str, Any] = {}
+            if isinstance(enc_info, dict) and enc_info.get("cov_loss") is not None:
+                _cov_term = enc_info["cov_loss"]
+                _cov_stats = dict(enc_info.get("cov_stats") or {})
+            if _cov_term is not None and not _cov_term.requires_grad:
+                # 明确拒绝"有损失但没梯度"的静默失效：那等于白跑一趟实验。
+                _cov_term = None
+            if _cov_stats:
+                # 打印时取"上次打印以来所有 micro-step"的平均，而不是最后一条样本的值：
+                # 逐条样本的 cov_pcov 抖动很大，只看最后一条会误判趋势。
+                _cov_acc.append(_cov_stats)
             # ② Z -> soft tokens（**必须过 bridge**）
             #    推理期 generate_latent_answer 内部就是 soft = bridge(payloads)；
             #    训练时若直接把 z 当 soft token 喂进去，bridge 不在计算图里、
@@ -2185,7 +2242,7 @@ def train(args):
             _recon_term = None if not (args.recon_weight > 0 or recon_stage) else loss_r
             if args.pack > 1:
                 _p = {"emb": embeds, "lab": labels,
-                      "addr": loss_addr, "rec": _recon_term}
+                      "addr": loss_addr, "rec": _recon_term, "cov": _cov_term}
                 if t_embeds is not None and t_labels is not None:
                     _p["temb"] = t_embeds
                     _p["tlab"] = t_labels
@@ -2193,23 +2250,29 @@ def train(args):
                 micro += 1
                 if len(pend) < args.pack:
                     continue
-                loss_qa, loss_addr_b, _loss_r_b, loss_kl_b = _packed_student_step(
-                    args, model, pend, recon_stage)
+                (loss_qa, loss_addr_b, _loss_r_b, loss_kl_b,
+                 _loss_cov_b) = _packed_student_step(args, model, pend, recon_stage)
                 pend.clear()
                 acc_items.append((float(loss_qa.detach()),
                                   None if loss_kl_b is None else float(loss_kl_b.detach()),
                                   None if loss_addr_b is None
-                                  else float(loss_addr_b.detach())))
+                                  else float(loss_addr_b.detach()),
+                                  None if _loss_cov_b is None
+                                  else float(_loss_cov_b.detach())))
             else:
                 loss = assemble_loss(loss_qa, loss_addr, loss_kl, _recon_term,
                                      addr_weight=args.addr_weight,
                                      kl_weight=args.kl_weight,
                                      recon_weight=args.recon_weight,
-                                     recon_stage=recon_stage)
+                                     recon_stage=recon_stage,
+                                     loss_cov=_cov_term,
+                                     cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0))
                 (loss / args.accum).backward()
                 acc_items.append((float(loss_qa.detach()),
                                    None if loss_kl is None else float(loss_kl.detach()),
-                                   None if loss_addr is None else float(loss_addr.detach())))
+                                   None if loss_addr is None else float(loss_addr.detach()),
+                                   None if _cov_term is None
+                                   else float(_cov_term.detach())))
                 micro += 1
             if micro % args.accum == 0:
                 # 梯度范数（step 前）：.grad is not null 只说明"有梯度"，不说明"梯度可用"；
@@ -2300,6 +2363,10 @@ def train(args):
                 kl_avg = sum(kls) / len(kls) if kls else None
                 addrs = [x[2] for x in acc_items if x[2] is not None]
                 addr_avg = sum(addrs) / len(addrs) if addrs else None
+                covs = [x[3] for x in acc_items if len(x) > 3 and x[3] is not None]
+                cov_avg = sum(covs) / len(covs) if covs else None
+                if cov_avg is not None:
+                    _cov_seen[0] += 1
                 if args.log_every <= 1 or step % args.log_every == 0:
                     # 读出分布一行：训练到底有没有见过 router 自选的输入（见 --readout-mode）。
                     # 只报"跑了多少步"而不报这个比例，等于默认"训练分布=推理分布"。
@@ -2319,6 +2386,20 @@ def train(args):
                         _diag_hist.append(dict(_st))
                     _cs = ("" if _clip_coef != _clip_coef
                            else f" clip_coef={_clip_coef:.2e}")
+                    # 覆盖损失一行：loss_cov 只是"梯度够不够"，cov_pcov 才是
+                    # "重要词到底被覆盖了多少"（0..1，越高越好）。只报 loss 不报 pcov
+                    # 无法区分"覆盖变好"和"权重变小"。
+                    _vs = ""
+                    if _cov_acc:
+                        _keys = sorted(_cov_acc[0].keys())
+                        _avg = {k: sum(float(d.get(k, 0.0)) for d in _cov_acc)
+                                / len(_cov_acc) for k in _keys}
+                        _cov_acc.clear()
+                        _vs = (f" loss_cov={'n/a' if cov_avg is None else f'{cov_avg:.4f}'}"
+                               f" cov_pcov={_avg.get('cov_pcov', 0.0):.3f}"
+                               f" cov_tgt={_avg.get('n_cov_tgt', 0.0):.1f}"
+                               f"(num={_avg.get('n_cov_num', 0.0):.1f}"
+                               f",ent={_avg.get('n_cov_ent', 0.0):.1f})")
                     print(f"[step {step}] loss_qa={qa_avg:.4f} "
                           f"loss_kl={'n/a' if kl_avg is None else f'{kl_avg:.4f}'} "
                           f"loss_addr={'n/a' if addr_avg is None else f'{addr_avg:.4f}'} "
@@ -2326,7 +2407,7 @@ def train(args):
                           f"compress={enc_info['compression_ratio']} "
                           f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
                           f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
-                          f"gnorm_pre={_gn_total_pre:.3e}{_cs}{_rs}{_bs} "
+                          f"gnorm_pre={_gn_total_pre:.3e}{_cs}{_rs}{_bs}{_vs} "
                           f"peakmem={_peak_mb():.0f}MiB "
                           f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
@@ -2343,6 +2424,17 @@ def train(args):
         raise RuntimeError("训练没有完成任何一个优化步：检查 --accum/--max-steps/--epochs")
     grad_ok = dict(grad_seen)
     print(f"[grad-check] {json.dumps(grad_ok, ensure_ascii=False)}", flush=True)
+    _cw = float(getattr(args, "cov_weight", 0.0) or 0.0)
+    if _cw > 0.0 and not args.bridge_only and not args.freeze_compressor:
+        if _cov_seen[0] == 0:
+            # 静默失效是最贵的一类错误：跑了 5 小时才发现 cov 项从没进过 loss。
+            raise RuntimeError(
+                f"--cov-weight={_cw} 但 L_cov 一次都没进入优化步："
+                f"检查词边界（word_boundary_source）是否为 none、"
+                f"或压缩器是否真的在训练（--freeze-compressor）。")
+        print(f"[cov-check] L_cov 进入优化步 {_cov_seen[0]} 次，"
+              f"cov_targets={int(getattr(args, 'cov_targets', 0) or 0)}"
+              f"（0=自动取槽数）", flush=True)
     if not all(v for k, v in grad_ok.items() if k != "model_has_no_grad"):
         raise RuntimeError(
             "梯度没有回传到 Compressor/Bridge —— 检查是否误把 student 前向放进了 "
@@ -3244,6 +3336,15 @@ def parse_args(argv=None):
                     help="重建时把答案段输入侧 token 随机替换的概率（切断前缀自回归捷径）")
     ap.add_argument("--recon-units", type=int, default=2,
                     help="recon 每次只重建这么多条记忆单元（0=整段；整段在长记忆上会 OOM）")
+    # ---- L_cov：重要事实词覆盖监督（v6 手术三）----
+    ap.add_argument("--cov-weight", type=float, default=0.0,
+                    help="L_cov 的权重（0=关闭，训练行为与加这个开关之前逐位一致）。"
+                         "它监督的是'4 个 z_lex 槽位有没有覆盖实体/数字'，"
+                         "梯度直接回到选择器的注意力（argmax 不可微，旧路径给不了信号）。"
+                         "对照实验用 0.1")
+    ap.add_argument("--cov-targets", type=int, default=LM.LATENT_COV_TARGETS,
+                    help="每块最多监督几个词（0=自动取槽数 m）。设得比槽数大就是"
+                         "'要求覆盖超过容量'，损失会留一个下不去的常数底")
     ap.add_argument("--counterfactual", action="store_true",
                     help="训练集加入『同主语同属性冲突，只记新值』样本")
     ap.add_argument("--data", default="",
@@ -3308,6 +3409,7 @@ def main(argv=None):
           f"kl={args.kl_weight} recon={args.recon_weight} "
           f"readout={args.readout_mode} teacher={args.teacher_scope} "
           f"recon_lex={args.recon_lex} alpha_max={LM.LATENT_ALPHA_MAX} "
+          f"cov={args.cov_weight}(targets={args.cov_targets or args.m}) "
           f"smoke={args.smoke_model} dry_run={args.dry_run}", flush=True)
     if args.fst:
         print(f"[cfg] fst=True hist_max={args.hist_max} "

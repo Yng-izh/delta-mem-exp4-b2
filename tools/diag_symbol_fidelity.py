@@ -338,9 +338,13 @@ def _word_kwargs(feats):
     wids = feats.get("chunk_word_ids") or []
     if not wids:
         return {}
-    wid, pen, grp = LM._pad_word_tensors(wids, feats.get("chunk_word_penalty") or [],
-                                         feats.get("chunk_word_group") or [])
-    return {"word_ids": wid, "word_penalty": pen, "word_group": grp}
+    wid, pen, grp, wgt = LM._pad_word_tensors(
+        wids, feats.get("chunk_word_penalty") or [],
+        feats.get("chunk_word_group") or [],
+        feats.get("chunk_word_weight") or [])
+    # word_weight 只服务训练期的 L_cov；诊断只做硬选择，不传也不影响选词结果
+    return {"word_ids": wid, "word_penalty": pen, "word_group": grp,
+            "word_weight": wgt}
 
 
 if __name__ == "__main__":

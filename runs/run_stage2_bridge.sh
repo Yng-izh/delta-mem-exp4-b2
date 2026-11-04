@@ -19,6 +19,14 @@
 #   5. --diag-every 50
 #      每 50 步打印 α / 残差比 / 输出范数 / 末层权重范数，并记录裁剪前总梯度与 clip_coef；
 #      v5 的初始 bridge 梯度是 1.85e10，当时日志里看不出来。
+#   6. --cov-weight（默认 0 = 关）
+#      L_cov：让词级选择器学会优先保存实体和数字。开关只在 Compressor 真的在训练时
+#      有意义（--freeze-compressor 下自动不生效），训练日志里会出现
+#      loss_cov / cov_pcov / cov_tgt 三个数。跑完会打印 [cov-check]，若为 0 次直接报错。
+#
+# A/B 用法（同一份脚本、同一套超参，只差 L_cov）：
+#   基线： COV=0.0 OUT=$B/ckpt/hotpot_router_10k_v6.pt      bash runs/run_stage2_bridge.sh
+#   实验： COV=0.1 OUT=$B/ckpt/hotpot_router_10k_v6_cov.pt  bash runs/run_stage2_bridge.sh
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
 PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
@@ -43,6 +51,7 @@ $PY train_latent_memory.py --router \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
   --init-router $B/ckpt/router_stage1_8slot.pt --freeze-router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
+  --cov-weight ${COV:-0.0} --cov-targets ${COV_TARGETS:-0} \
   --alpha-max 0.5 --lex-gate-init 0.05 --diag-every 50 \
   --inject-mode user --fence-style bracket \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \

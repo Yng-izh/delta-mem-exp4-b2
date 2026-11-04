@@ -495,7 +495,7 @@ def test_per_slot_ranking():
     w = torch.zeros(B, 4, L)
     w[0, 0] = torch.tensor([0.5, 0.5, 0.4, 0.4, 0.0, 0.0])
     w[0, 1] = torch.tensor([0.1, 0.1, 0.9, 0.9, 0.0, 0.0])
-    _z, pick, n_words = comp._lex_by_word(h0, w, mask, wid, None)
+    _z, pick, n_words, _cin = comp._lex_by_word(h0, w, mask, wid, None)
     ok("I24 每槽按自己的偏好选词（不是全局 Top-k）",
        pick[0].tolist()[:2] == [0, 1] and n_words == 4,
        extra=str(pick[0].tolist()))
@@ -569,7 +569,7 @@ def test_punct_hard_mask():
     w[0, :, 8] = 10.0
     w[0, :, 0] = 1.0
     w[0, :, 4] = 0.9
-    _z, pick, _n = comp._lex_by_word(
+    _z, pick, _n, _cin = comp._lex_by_word(
         h0, w, mask, torch.tensor([wids]), torch.tensor([pen]), torch.tensor([grp]))
     picked = [texts[i] for i in pick[0].tolist() if i >= 0]
     ok("J4 标点即使注意力最高也不会被选中",
@@ -584,7 +584,7 @@ def test_punct_hard_mask():
     w2[0, :, 0] = 5.0
     w2[0, :, 2] = 4.0
     w2[0, :, 3] = 1.0
-    _z2, pick2, _n2 = comp._lex_by_word(
+    _z2, pick2, _n2, _c2 = comp._lex_by_word(
         h0[:, :4], w2, mask[:, :4], torch.tensor([[0, 1, 2, 3]]),
         torch.tensor([pen2]), torch.tensor([grp2]))
     got2 = [i for i in pick2[0].tolist() if i >= 0]
@@ -598,7 +598,7 @@ def test_punct_hard_mask():
     w3 = torch.zeros(1, 4, 2)
     w3[0, :, 0] = 1.0
     w3[0, :, 1] = 9.0
-    _z3, pick3, _n3 = comp._lex_by_word(
+    _z3, pick3, _n3, _c3 = comp._lex_by_word(
         h0[:, :2], w3, mask[:, :2], torch.tensor([[0, 1]]),
         torch.tensor([pen3]), torch.tensor([grp3]))
     ok("J7 有效词不足时空位记 -1（不拿标点凑数）",
@@ -610,14 +610,175 @@ def test_punct_hard_mask():
     grp4 = LM._word_groups(texts4)
     w4 = torch.zeros(1, 4, 3)
     w4[0, :, 2] = 1.0
-    _z4, pick4, _n4 = comp._lex_by_word(
+    _z4, pick4, _n4, _c4 = comp._lex_by_word(
         h0[:, :3], w4, mask[:, :3], torch.tensor([[0, 1, 2]]),
         torch.tensor([pen4]), torch.tensor([grp4]))
     ok("J8 9,984 作为完整数字候选被选中", pick4[0, 0].item() == 2,
        extra=str(pick4[0].tolist()))
 
 
+# =====================================================================
+# K. L_cov：重要事实词覆盖监督
+# =====================================================================
+def test_cov_weights():
+    """词重要性标签只能由**记忆原文**生成（Query-Agnostic），且四类词分开。"""
+    texts = ["Smyrna", "is", "a", "city", "founded", "in", "1830", ".", "9,984"]
+    tok = _WordTok(texts)
+    ids = list(range(len(texts)))
+    wgt = LM._word_weight_for(tok, ids, ids)
+    ok("K1 数字/年份权重 3.0", wgt[6] == 3.0 and wgt[8] == 3.0, extra=str(wgt))
+    ok("K2 专有名词权重 2.0", wgt[0] == 2.0, extra=str(wgt))
+    ok("K3 普通内容词权重 0.5", wgt[3] == 0.5 and wgt[4] == 0.5, extra=str(wgt))
+    ok("K4 停用词/纯标点权重 0（不进监督目标）",
+       wgt[1] == 0.0 and wgt[2] == 0.0 and wgt[5] == 0.0 and wgt[7] == 0.0,
+       extra=str(wgt))
+    # 同一条规则必须对"干扰事实"生效：换个实体名、换个数字，权重结构不变
+    t2 = ["Atlanta", "is", "a", "city", "with", "22", "districts"]
+    w2 = LM._word_weight_for(_WordTok(t2), list(range(len(t2))), list(range(len(t2))))
+    ok("K5 干扰事实走同一套规则（无金标泄漏）",
+       w2[0] == 2.0 and w2[5] == 3.0 and w2[1] == 0.0, extra=str(w2))
+
+
+def test_cov_loss_formula():
+    """L_cov 的公式语义：完美覆盖 -> 0；全压在同一个词上 -> 大惩罚。"""
+    eps = 1e-6
+    W, m = 4, 4
+    # 4 个槽各自 one-hot 命中一个词 -> 全覆盖
+    mass = torch.zeros(1, m, W)
+    for r in range(m):
+        mass[0, r, r] = 1.0
+    elig = torch.ones(1, W, dtype=torch.bool)
+    wgt = torch.tensor([[3.0, 2.0, 2.0, 0.5]])
+    loss, st = LM.word_coverage_loss(mass, elig, wgt)
+    ok("K6 完美覆盖时 L_cov≈0", loss is not None and float(loss) < 1e-5,
+       extra=str(None if loss is None else float(loss)))
+    ok("K7 cov_pcov 在完美覆盖时≈1", abs(st["cov_pcov"] - 1.0) < 1e-5, extra=str(st))
+
+    # 4 个槽全部压在词 0 上：其余 3 个目标覆盖概率为 0 -> 惩罚接近 -log(eps)
+    mass2 = torch.zeros(1, m, W)
+    mass2[0, :, 0] = 1.0
+    loss2, st2 = LM.word_coverage_loss(mass2, elig, wgt)
+    ok("K8 全压在同一个词上时 L_cov 很大", float(loss2) > 1.0, extra=str(float(loss2)))
+    ok("K9 未被覆盖的词把 cov_pcov 拉低", st2["cov_pcov"] < 0.6, extra=str(st2))
+
+    # 均匀摊开（每个槽对每个词 0.25）：不是"覆盖"，pcov 只有 1-0.75^4
+    mass3 = torch.full((1, m, W), 1.0 / W)
+    loss3, st3 = LM.word_coverage_loss(mass3, elig, wgt)
+    ok("K10 均匀摊开不等于覆盖（pcov≈0.68 而不是 1）",
+       0.5 < st3["cov_pcov"] < 0.8, extra=str(st3["cov_pcov"]))
+    ok("K11 均匀摊开的损失明显大于完美覆盖",
+       float(loss3) > float(loss) + 0.1, extra=f"{float(loss3)} vs {float(loss)}")
+
+    # 全零权重（全是停用词/标点）-> 没有监督目标
+    loss4, _st4 = LM.word_coverage_loss(mass, elig, torch.zeros(1, W))
+    ok("K12 没有重要词时返回 None（不产生虚假监督）", loss4 is None)
+
+
+def test_cov_capacity_and_dedup():
+    """4 个槽装不下所有重要词时必须**筛目标**，同表面键必须去重。"""
+    W, m = 10, 4
+    mass = torch.zeros(1, m, W)
+    mass[0, :, 0] = 1.0
+    elig = torch.ones(1, W, dtype=torch.bool)
+    wgt = torch.tensor([[3.0] * 10])                 # 10 个数字，槽只有 4 个
+    _loss, st = LM.word_coverage_loss(mass, elig, wgt)
+    ok("K13 重要词超过容量时只监督 m 个（不强迫全覆盖）",
+       abs(st["n_cov_tgt"] - 4.0) < 1e-6, extra=str(st))
+    _loss2, st2 = LM.word_coverage_loss(mass, elig, wgt, max_targets=2)
+    ok("K14 max_targets 可显式调小", abs(st2["n_cov_tgt"] - 2.0) < 1e-6, extra=str(st2))
+
+    # 同表面键：`[Smyrna` 与 `Smyrna` 分到同一组，只能算**一个**监督目标。
+    # 构造：词 0 独立（槽 0 命中），词 1 与词 2 同组（槽 1 只命中词 1）。
+    # 不做去重时 3 个词都是目标，词 2 的覆盖概率是 0 -> 损失被拉到 -log(eps)；
+    # 去重后目标只剩 {0,1}，损失 0。两个数差一个数量级，能钉住"到底去没去重"。
+    W3, m3 = 3, 2
+    mass3 = torch.zeros(1, m3, W3)
+    mass3[0, 0, 0] = 1.0
+    mass3[0, 1, 1] = 1.0
+    elig3 = torch.ones(1, W3, dtype=torch.bool)
+    wgt3 = torch.tensor([[2.0, 2.0, 2.0]])
+    grp3 = torch.tensor([[-1, 0, 0]])
+    l_no, st_no = LM.word_coverage_loss(mass3, elig3, wgt3, max_targets=3)
+    l_dd, st_dd = LM.word_coverage_loss(mass3, elig3, wgt3, word_group=grp3,
+                                        max_targets=3)
+    ok("K15 同组同名词只占一个监督目标（3 -> 2）",
+       abs(st_no["n_cov_tgt"] - 3.0) < 1e-6 and abs(st_dd["n_cov_tgt"] - 2.0) < 1e-6,
+       extra=f"no_dedup={st_no['n_cov_tgt']} dedup={st_dd['n_cov_tgt']}")
+    ok("K16 去重后不再有结构性无法覆盖的目标（损失显著下降）",
+       float(l_dd) < 1e-5 and float(l_no) > 1.0,
+       extra=f"dedup={float(l_dd):.4f} no_dedup={float(l_no):.4f}")
+
+
+def test_cov_gradient_path():
+    """L_cov 必须**保留计算图**并把梯度送回选择器（argmax 路径给不了梯度）。"""
+    torch.manual_seed(0)
+    comp = LM.LatentCompressor(16, n_slots=4, inner_dim=16, num_heads=2, lex_skip=True)
+    B, L, d = 1, 8, 16
+    h0 = torch.randn(B, L, d)
+    h18 = torch.randn(B, L, d)
+    mask = torch.ones(B, L, dtype=torch.long)
+    wid = torch.arange(L).view(1, L)
+    pen = torch.ones(B, L)
+    wgt = torch.tensor([[3.0, 2.0, 2.0, 0.5, 0.5, 0.0, 0.0, 0.0]])
+    _z, _zlex, info = comp.forward_split(
+        h0, h18, mask, word_ids=wid, word_penalty=pen, word_weight=wgt,
+        want_cov=True)
+    cl = info.get("cov_loss")
+    ok("K17 want_cov=True 时 info 里带 cov_loss", cl is not None, extra=str(info.keys()))
+    ok("K18 cov_loss 是**可微**张量（保留了计算图）",
+       cl is not None and cl.requires_grad)
+    if cl is not None:
+        comp.zero_grad(set_to_none=True)
+        cl.backward()
+        qg = comp.queries.grad
+        ok("K19 梯度回到 queries（选择器的注意力参数）",
+           qg is not None and float(qg.abs().sum()) > 0.0,
+           extra=str(None if qg is None else float(qg.abs().sum())))
+        ok("K20 梯度也回到 input_proj",
+           comp.input_proj.weight.grad is not None
+           and float(comp.input_proj.weight.grad.abs().sum()) > 0.0)
+    # want_cov=False 时 info 里必须是 None（推理路径不付这份开销）
+    _z2, _zl2, i2 = comp.forward_split(h0, h18, mask, word_ids=wid, word_penalty=pen,
+                                       word_weight=wgt)
+    ok("K21 want_cov=False 时 cov_loss 为 None", i2.get("cov_loss") is None)
+
+
+def test_cov_plumbing():
+    """--pack 路径与 assemble_loss 都不能漏掉 L_cov。"""
+    qa = torch.tensor(2.0)
+    cov = torch.tensor(4.0)
+    base = T.assemble_loss(qa, None, None, None, 1.0, 1.0, 0.0)
+    with_cov = T.assemble_loss(qa, None, None, None, 1.0, 1.0, 0.0,
+                               loss_cov=cov, cov_weight=0.1)
+    ok("K22 assemble_loss 加上 cov_weight*L_cov",
+       abs(float(with_cov) - (float(base) + 0.4)) < 1e-6,
+       extra=f"{float(with_cov)} vs {float(base)}")
+    off = T.assemble_loss(qa, None, None, None, 1.0, 1.0, 0.0,
+                          loss_cov=cov, cov_weight=0.0)
+    ok("K23 cov_weight=0 时与旧行为逐位一致", float(off) == float(base))
+    # recon_stage（纯重建阶段）也必须保留 cov：它监督的是压缩器存了什么
+    rs = T.assemble_loss(qa, None, None, torch.tensor(1.0), 1.0, 1.0, 0.5,
+                         recon_stage=True, loss_cov=cov, cov_weight=0.1)
+    ok("K24 recon_stage 下 L_cov 仍然生效",
+       abs(float(rs) - (1.0 + 0.4)) < 1e-6, extra=str(float(rs)))
+
+    # _pad_word_tensors 必须把词重要性一起填出来，缺位填 0（不监督）
+    wid, pen, grp, wgt = LM._pad_word_tensors(
+        [[0, 1], [0, 1, 2]], [[1.0, 1.0], [1.0, 0.0, 1.0]],
+        [[0, 1], [0, 1, 2]], [[3.0, 2.0], [0.5, 0.0, 2.0]])
+    ok("K25 _pad_word_tensors 返回 4 个张量且形状对齐",
+       tuple(wgt.shape) == (2, 3) and float(wgt[0, 2]) == 0.0,
+       extra=str(wgt.tolist()))
+    ok("K26 词重要性逐块填入正确位置",
+       float(wgt[1, 0]) == 0.5 and float(wgt[1, 2]) == 2.0, extra=str(wgt.tolist()))
+
+
 def main():
+    test_cov_plumbing()
+    test_cov_gradient_path()
+    test_cov_capacity_and_dedup()
+    test_cov_loss_formula()
+    test_cov_weights()
     test_punct_hard_mask()
     test_train_eval_layout_identity()
     test_numeric_and_stopwords()

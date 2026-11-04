@@ -138,6 +138,32 @@ LATENT_INJECT_MODE     = _env_str("LATENT_INJECT_MODE", "user").lower()
 # verbose=旧的长围栏（isolate 时前后各一段，实测每题吃掉 46.6 个 token）。
 LATENT_FENCE_STYLE     = _env_str("LATENT_FENCE_STYLE", "bracket").lower()
 LATENT_EVIDENCE_HEADER = _env_str("LATENT_EVIDENCE_HEADER", "Evidence:")
+# ---- v6 手术三：重要事实词覆盖监督 L_cov ----
+# 现状（同一 ckpt 实测）：4 个 z_lex 槽位里 28.2% 落在停用词/标点上，完整答案覆盖率
+# 24.5%，数字覆盖率 8.3%。根因不是"停用词权重没调好"，而是**选择器本身拿不到梯度**：
+# 重建/QA 的梯度只经由 argmax 选中的那个词回流，而 argmax 不可微，于是
+# queries / input_proj / hidden_proj 全程没有有效信号（KNOWN_ISSUES 第 5 条）。
+# L_cov 直接在**未 argmax 的注意力质量** mass 上算"重要词有没有被 m 个槽覆盖"，
+# 把梯度送回选择器，让它学会优先保存实体和数字。
+#
+# 标签规则（只由**记忆原文**生成，不看问题、不看金标答案 —— Query-Agnostic；
+# 干扰事实与证据事实用完全同一套规则，不存在"只监督金标"的泄漏）：
+#     数字/年份/日期  -> LATENT_COV_NUMBER_W (3.0)
+#     专有名词/实体   -> LATENT_COV_ENTITY_W (2.0)
+#     普通内容词      -> LATENT_COV_CONTENT_W (0.5)
+#     停用词/纯标点   -> LATENT_COV_STOP_W   (0.0 = 不进监督目标)
+# 这些是**初始实验权重**，不是调好的超参数。
+# 已知误判：句首大写的普通名词（"Population was ..."）会被当成实体，属于刻意接受的
+# 噪声 —— 这一轮不引入词性/句法分析。
+LATENT_COV_ENTITY_W    = _env_float("LATENT_COV_ENTITY_W", 2.0)
+LATENT_COV_NUMBER_W    = _env_float("LATENT_COV_NUMBER_W", 3.0)
+LATENT_COV_CONTENT_W   = _env_float("LATENT_COV_CONTENT_W", 0.5)
+LATENT_COV_STOP_W      = _env_float("LATENT_COV_STOP_W", 0.0)
+# log 保护：P_covered 可能被压到 0（注意力全压在标点上），clamp 后最大惩罚 = -log(1e-6)
+LATENT_COV_EPS         = _env_float("LATENT_COV_EPS", 1e-6)
+# 每块监督几个词：0 = 自动取 n_slots（= 读出容量，覆盖目标天然可满足）。
+# 设得比槽数大就是"要求覆盖超过容量的词"，损失会有一个下不去的常数底。
+LATENT_COV_TARGETS     = _env_int("LATENT_COV_TARGETS", 0)
 
 _INJECT_MODES = ("user", "system", "between")
 _FENCE_STYLES = ("bracket", "verbose")
@@ -329,17 +355,21 @@ class LatentCompressor(nn.Module):
                 attention_mask: Optional[torch.Tensor] = None,
                 word_ids: Optional[torch.Tensor] = None,
                 word_penalty: Optional[torch.Tensor] = None,
-                word_group: Optional[torch.Tensor] = None) -> torch.Tensor:
+                word_group: Optional[torch.Tensor] = None,
+                word_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
         z_sem, _lex, _info = self.forward_split(
             h0, h18, attention_mask, word_ids=word_ids, word_penalty=word_penalty,
-            word_group=word_group)
+            word_group=word_group, word_weight=word_weight)
         return z_sem
 
     def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
                       attention_mask: Optional[torch.Tensor] = None,
                       word_ids: Optional[torch.Tensor] = None,
                       word_penalty: Optional[torch.Tensor] = None,
-                      word_group: Optional[torch.Tensor] = None
+                      word_group: Optional[torch.Tensor] = None,
+                      word_weight: Optional[torch.Tensor] = None,
+                      want_cov: bool = False, cov_targets: int = 0,
+                      cov_eps: float = LATENT_COV_EPS
                       ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
         """返回 (z_sem [B,m,d], z_lex [B,m,d] 或 None, info)。
 
@@ -350,6 +380,11 @@ class LatentCompressor(nn.Module):
         它和 `inputs_embeds` 是同一个空间。走一遍 input_proj -> 512 -> output_proj
         再回到 d_model，等价于对"专有名词的词形"做了一次低通滤波 —— HotpotQA 的
         人名/地名/年份正好活在这个被滤掉的高频段里。直通分支不做任何投影。
+
+        want_cov=True（只在训练路径打开）时，info 里多出：
+            cov_loss  —— 词覆盖损失（**保留计算图的标量**，见 word_coverage_loss）
+            cov_stats —— cov_pcov / n_cov_tgt / n_cov_num / n_cov_ent（纯 float）
+        推理与存储路径一律 want_cov=False：那边既没有梯度，也不该多付归一化与 Top-K。
         """
         h0 = _as_3d(h0, "h0")
         h18 = _as_3d(h18, "h18")
@@ -402,6 +437,7 @@ class LatentCompressor(nn.Module):
         z_lex: Optional[torch.Tensor] = None
         lex_word_pick: Optional[List[List[int]]] = None
         n_words = 0
+        cov_out: Tuple[Optional[torch.Tensor], Dict[str, Any]] = (None, {})
         if self.lex_skip:
             if w is None:
                 raise RuntimeError("lex_skip=True 但注意力权重为 None（need_weights 未生效）")
@@ -430,12 +466,23 @@ class LatentCompressor(nn.Module):
                     "请用 LatentEncoder.encode_full 传入 chunk_word_ids，"
                     "或显式构造 word_ids/word_penalty。")
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
-            z_lex, pick, n_words = self._lex_by_word(
-                h0, w, safe_mask, word_ids, word_penalty, word_group)
+            z_lex, pick, n_words, _cov_in = self._lex_by_word(
+                h0, w, safe_mask, word_ids, word_penalty, word_group, word_weight)
             if pick is not None:
                 lex_word_pick = pick.tolist()
             if bool(empty.any()):
                 z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
+            if want_cov and _cov_in is not None:
+                # L_cov 作用在**未 argmax 的注意力质量**上（_cov_in["mass"] 仍连着计算图）：
+                # 硬 argmax 不可微，若把损失建在 pick 的整数索引上，梯度根本回不到
+                # queries / input_proj / hidden_proj —— 那正是选择器一直没学会挑词的根因。
+                cov_loss, cov_stats = word_coverage_loss(
+                    _cov_in["mass"], _cov_in["eligible"], _cov_in["word_weight"],
+                    word_group=_cov_in["word_group"], max_targets=int(cov_targets),
+                    eps=float(cov_eps))
+                cov_out = (cov_loss, cov_stats)
+            else:
+                cov_out = (None, {})
 
         info = {"n_rows": int(B), "seq_len": int(L),
                 "n_tokens": [int(v) for v in mask.sum(dim=1).tolist()],
@@ -446,14 +493,18 @@ class LatentCompressor(nn.Module):
                 # 每行真正选到几个词（< n_slots 表示该块有效词不够，空位留零）
                 "n_lex_picks": ([int(sum(1 for v in row if int(v) >= 0))
                                  for row in lex_word_pick]
-                                if lex_word_pick is not None else None)}
+                                if lex_word_pick is not None else None),
+                # 覆盖损失：want_cov=False 时恒为 None / 空 dict（推理路径不付这份开销）
+                "cov_loss": cov_out[0],
+                "cov_stats": cov_out[1]}
         return z, z_lex, info
 
     def _lex_by_word(self, h0: torch.Tensor, w: torch.Tensor,
                      safe_mask: torch.Tensor, word_ids: torch.Tensor,
                      word_penalty: Optional[torch.Tensor],
-                     word_group: Optional[torch.Tensor] = None
-                     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int]:
+                     word_group: Optional[torch.Tensor] = None,
+                     word_weight: Optional[torch.Tensor] = None
+                     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int, Optional[Dict[str, Any]]]:
         """按**整词**挑 n_slots 个词，每个词的子词 h0 取均值当 1 个向量。
 
         输入：
@@ -461,8 +512,14 @@ class LatentCompressor(nn.Module):
             w         [B,m,L]  交叉注意力权重（float32、padding 已清零）
             safe_mask [B,L]    有效 token
             word_ids  [B,L]    token -> 词编号（-1 = 特殊/padding）
-            word_penalty [B,W] 词级降权（标点 0.1 / 停用词 0.35 / 其余 1.0）
-        返回 (z_lex [B,m,d], pick [B,m] 词编号, n_words)。
+            word_penalty [B,W] 词级降权（标点 0 / 停用词 0.35 / 其余 1.0）
+            word_weight  [B,W] 词重要性（L_cov 的监督权重；0 = 不进监督目标）
+        返回 (z_lex [B,m,d], pick [B,m] 词编号, n_words, cov_in)。
+
+        cov_in 把 L_cov 需要的东西原样带出去（mass 仍连着计算图）：
+            mass/eligible/word_weight/word_group/n_words；n_words<=0 时为 None。
+        覆盖损失**不在**这里算：本函数是"选词"（含不可微的 argmax 与互斥去重），
+        把可微损失混进来会让两条路径的职责纠缠不清。
 
         设备：**以 `w.device` 为准**。编码器为了省显存把 h0 留在 CPU，而 w / safe_mask
         在 Compressor 所在的 GPU 上；混用会在 mask 构造处直接报 "Expected all tensors to
@@ -479,7 +536,8 @@ class LatentCompressor(nn.Module):
         valid = wid >= 0
         n_words = int(wid.max().item()) + 1 if bool(valid.any()) else 0
         if n_words <= 0:
-            return torch.zeros((B, self.n_slots, d), dtype=h0.dtype, device=dev), None, 0
+            return (torch.zeros((B, self.n_slots, d), dtype=h0.dtype, device=dev),
+                    None, 0, None)
         ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
         mask_w = (wid.unsqueeze(1) == ar) & smask.unsqueeze(1)          # [B,W,L]
         mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())  # [B,m,W]
@@ -503,6 +561,15 @@ class LatentCompressor(nn.Module):
                 grp = torch.cat([grp, torch.full((B, n_words - int(grp.shape[1])), -1,
                                                  dtype=torch.long, device=dev)], dim=1)
             grp = grp[:, :n_words]
+        # 词重要性（L_cov 的监督目标权重）。缺省填 0.0 而不是 1.0：
+        # "没有标签"必须表示**不监督**，不能表示"所有词都同等重要"。
+        wgt = torch.zeros((B, n_words), dtype=torch.float32, device=dev)
+        if word_weight is not None:
+            v_in = word_weight.to(device=dev, dtype=torch.float32)
+            if int(v_in.shape[1]) < n_words:
+                v_in = torch.cat([v_in, torch.zeros((B, n_words - int(v_in.shape[1])),
+                                                    dtype=v_in.dtype, device=dev)], dim=1)
+            wgt = v_in[:, :n_words]
         taken = torch.zeros((B, n_words), dtype=torch.bool, device=dev)
         picks: List[torch.Tensor] = []
         for r in range(self.n_slots):
@@ -531,7 +598,10 @@ class LatentCompressor(nn.Module):
         wd = h0d.dtype if h0d.dtype.is_floating_point else torch.float32
         z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd), h0d.to(dtype=wd))
         z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
-        return z_lex, pick, n_words
+        # mass 是**乘过 pen、未 argmax** 的注意力质量，仍连着计算图 —— L_cov 就建在它上面。
+        cov_in = {"mass": mass, "eligible": eligible, "word_weight": wgt,
+                  "word_group": grp, "n_words": int(n_words)}
+        return z_lex, pick, n_words, cov_in
 
 # 词级选词用的停用词表（只用于**降权**）。
 # 注意**不能**把否定/时间/比较词算进来：`not`/`no` 决定答案对错，`before`/`after`
@@ -666,6 +736,70 @@ def _word_penalty_for(tok, ids, word_ids):
     return pens
 
 
+# 数字词允许出现的字符（`9,984` / `3.14` / `22%` / `+5`）。只用于**判定**，
+# 不参与分词 —— 分词在 `_group_word_ids` 里已经按"逗号/句点必须紧跟连续数字"的
+# 规则把 `9,984` 合成一个词了。
+_NUMERIC_CHARS = frozenset(",.%$+-")
+
+
+def _is_numeric_word(surf: str) -> bool:
+    """整串由数字（可含千分位/小数点/百分号/货币符号）构成。"""
+    if not surf or not any(ch.isdigit() for ch in surf):
+        return False
+    return all(ch.isdigit() or ch in _NUMERIC_CHARS for ch in surf)
+
+
+def _is_entity_word(surf: str) -> bool:
+    """含大写字母的字母词 = 专有名词/缩写。
+
+    只用大小写，不做词性标注。已知误判：句首大写的普通名词
+    （"Population was ..." 里的 Population）会被算成实体 —— 这一轮刻意接受这个噪声，
+    因为它在 HotpotQA 的 `[Title] ...` 段落里只是少数，而漏掉真实体代价更大。
+    """
+    if not surf or not any(ch.isalpha() for ch in surf):
+        return False
+    return any(ch.isupper() for ch in surf)
+
+
+def _word_weight_for(tok, ids, word_ids):
+    """每个词的**重要性权重**（L_cov 的监督目标），长度 = 词数。
+
+    规则只看这条记忆的原文，**不看问题、不看金标答案**，因此是 Query-Agnostic：
+    干扰事实和证据事实走完全同一套判定，不存在"只监督金标"的标签泄漏。
+
+        数字/年份/日期 -> LATENT_COV_NUMBER_W (3.0)
+        专有名词/实体  -> LATENT_COV_ENTITY_W (2.0)
+        普通内容词     -> LATENT_COV_CONTENT_W (0.5)
+        停用词/纯标点  -> LATENT_COV_STOP_W (0.0)  # 不进监督目标
+    """
+    out = []
+    for txt in _word_texts(tok, ids, word_ids):
+        surf = _strip_punct_edges(txt)
+        low = surf.lower()
+        if not surf or not any(ch.isalnum() for ch in surf):
+            out.append(float(LATENT_COV_STOP_W))        # 纯标点
+        elif low in _LATENT_STOPWORDS:
+            out.append(float(LATENT_COV_STOP_W))        # 停用词
+        elif _is_numeric_word(surf):
+            out.append(float(LATENT_COV_NUMBER_W))
+        elif _is_entity_word(surf):
+            out.append(float(LATENT_COV_ENTITY_W))
+        else:
+            out.append(float(LATENT_COV_CONTENT_W))
+    return out
+
+
+def _strip_punct_edges(text):
+    """去掉首尾非字母数字字符，**保留大小写**（实体判定要用大小写）。"""
+    t = str(text or "").strip()
+    a, b = 0, len(t)
+    while a < b and not t[a].isalnum():
+        a += 1
+    while b > a and not t[b - 1].isalnum():
+        b -= 1
+    return t[a:b]
+
+
 def _word_surface(text):
     """词的**表面键**：去掉首尾标点、转小写；中间的连字符/逗号/句点保留。
 
@@ -673,13 +807,7 @@ def _word_surface(text):
     （`[Smyrna]` 里的 `[Smyrna` 与正文 `Smyrna` 必须算同一个词）。
     只削首尾，`Gascoyne-Cecil`、`9,984` 的内部结构原样保留。
     """
-    t = str(text or "").strip()
-    a, b = 0, len(t)
-    while a < b and not t[a].isalnum():
-        a += 1
-    while b > a and not t[b - 1].isalnum():
-        b -= 1
-    return t[a:b].lower()
+    return _strip_punct_edges(text).lower()
 
 
 def _word_groups(word_texts):
@@ -713,11 +841,13 @@ def _word_texts(tok, ids, word_ids):
     return ["".join(p).strip() for p in parts]
 
 
-def _pad_word_tensors(chunk_word_ids, chunk_word_penalty, chunk_word_group=None):
-    """把逐块变长的 (词编号, 词降权) 填成 [Nc,T] / [Nc,W] 两个张量。
+def _pad_word_tensors(chunk_word_ids, chunk_word_penalty, chunk_word_group=None,
+                      chunk_word_weight=None):
+    """把逐块变长的 (词编号, 词降权, 词分组, 词重要性) 填成 [Nc,T] / [Nc,W] 张量。
 
-    T 取块内最长 token 数，W 取所有块里最多的词数；缺的位置分别填 -1 / 1.0
-    （-1 = 不属于任何词，1.0 = 不降权），保证 downstream 不必处理变长。
+    T 取块内最长 token 数，W 取所有块里最多的词数；缺的位置分别填 -1 / 1.0 / -1 / 0.0
+    （-1 = 不属于任何词或不去重，1.0 = 不降权，0.0 = **不监督**），保证 downstream
+    不必处理变长。
     """
     Nc = len(chunk_word_ids)
     T = max((len(x) for x in chunk_word_ids), default=1) or 1
@@ -725,6 +855,7 @@ def _pad_word_tensors(chunk_word_ids, chunk_word_penalty, chunk_word_group=None)
     wid = torch.full((Nc, T), -1, dtype=torch.long)
     pen = torch.ones((Nc, W), dtype=torch.float32)
     grp = torch.full((Nc, W), -1, dtype=torch.long)
+    wgt = torch.zeros((Nc, W), dtype=torch.float32)
     for i, w in enumerate(chunk_word_ids):
         if w:
             wid[i, :len(w)] = torch.tensor([int(v) for v in w], dtype=torch.long)
@@ -734,7 +865,113 @@ def _pad_word_tensors(chunk_word_ids, chunk_word_penalty, chunk_word_group=None)
     for i, g in enumerate(chunk_word_group or []):
         if g:
             grp[i, :len(g)] = torch.tensor([int(v) for v in g], dtype=torch.long)
-    return wid, pen, grp
+    for i, v in enumerate(chunk_word_weight or []):
+        if v:
+            wgt[i, :len(v)] = torch.tensor([float(x) for x in v], dtype=torch.float32)
+    return wid, pen, grp, wgt
+
+
+def word_coverage_loss(mass: torch.Tensor, eligible: torch.Tensor,
+                       word_weight: torch.Tensor,
+                       word_group: Optional[torch.Tensor] = None,
+                       max_targets: int = 0,
+                       eps: float = LATENT_COV_EPS) -> Tuple[Optional[torch.Tensor],
+                                                             Dict[str, Any]]:
+    """L_cov：鼓励 m 个槽位**覆盖**这条记忆里值得保存的词（实体/数字）。
+
+    记号（全部按词下标 j）：
+        P_rj         第 r 个槽选择第 j 个词的概率 = mass 在可选词上重新归一化
+        P_covered(j) = 1 - ∏_r (1 - P_rj)       # 至少被一个槽覆盖
+        L_cov        = -Σ_j w_j·log(P_covered(j)+ε) / Σ_j w_j
+
+    三个必须坚持的实现细节（改错不会报错，只会让选择器继续学不会挑词）：
+
+    1) **作用在 mass 上，不作用在 pick 上**。`pick` 是 argmax 出来的整数索引，
+       对 w/queries 没有梯度；把损失建在 pick 上等于什么都没训练。
+       mass 是交叉注意力权重按词聚合后的结果，是**可微**的。
+
+    2) **只监督容量内的词**（max_targets，默认 = 槽数）。每块只有 m 个槽，
+       若一块里有 12 个实体而强迫"全部覆盖"，损失会有一个下不去的常数底，
+       梯度方向也变成"把注意力摊平"（正好是反效果）。这里按 (重要性, 注意力显著度)
+       取 Top-K 当监督目标，K 默认等于槽数。
+
+    3) **同表面键去重**。`[Smyrna` 与正文 `Smyrna` 是同一个词，选词阶段本来就会
+       只占一个槽；同时要求覆盖两个是结构性不可满足的目标。每个分组只保留
+       显著度最高的那个当目标。
+
+    返回 (loss 或 None, stats)。loss 是**标量**（跨行取平均，无有效目标的行被跳过）。
+    """
+    if mass is None or word_weight is None:
+        return None, {}
+    if mass.dim() != 3:
+        raise ValueError(f"mass 必须是 [B,m,W]，得到 {tuple(mass.shape)}")
+    B, m, W = int(mass.shape[0]), int(mass.shape[1]), int(mass.shape[2])
+    if W <= 0 or m <= 0 or B <= 0:
+        return None, {}
+    dev = mass.device
+    elig = eligible.to(device=dev).bool() if eligible is not None else \
+        torch.ones((B, W), dtype=torch.bool, device=dev)
+    w = word_weight.to(device=dev, dtype=torch.float32)
+    if tuple(w.shape) != (B, W):
+        raise ValueError(f"word_weight 形状 {tuple(w.shape)} != {(B, W)}")
+
+    # 每个槽在**可选词**上的概率分布。mass 本身已经按词归一（注意力权重之和≈1），
+    # 但硬屏蔽掉的标点仍可能占着质量，所以要重新归一化。
+    p = mass.float().masked_fill(~elig.unsqueeze(1), 0.0).clamp_min(0.0)
+    denom = p.sum(dim=-1, keepdim=True)
+    p = p / denom.clamp_min(1e-6)
+    p = p.clamp(0.0, 1.0)
+    pcov = 1.0 - (1.0 - p).prod(dim=1)                 # [B,W]
+    pcov = pcov.clamp(0.0, 1.0)
+    sal = p.max(dim=1).values                          # [B,W] 注意力显著度（并列裁决用）
+
+    # 重要性优先，显著度只做 tie-break（权重是 0.5/2/3，相差 ≥1.5，乘 10 后严格压过 sal∈[0,1]）
+    key = w * 10.0 + sal
+    if word_group is not None:
+        g = word_group.to(device=dev).long()
+        if tuple(g.shape) == (B, W):
+            ok_g = g >= 0
+            G = int(g.max().item()) + 1 if bool(ok_g.any()) else 0
+            if G > 0:
+                gs = torch.where(ok_g, g, torch.zeros_like(g)).clamp(max=G - 1)
+                kk = torch.where(ok_g, key, torch.full_like(key, -1.0))
+                best = torch.full((B, G), -1.0, dtype=torch.float32, device=dev)
+                best = best.scatter_reduce(1, gs, kk, reduce="amax", include_self=True)
+                is_rep = (~ok_g) | (key >= best.gather(1, gs) - 1e-6)
+                key = key.masked_fill(~is_rep, float("-inf"))
+
+    K = int(max_targets) if int(max_targets) > 0 else int(m)
+    K = max(1, min(K, W))
+    tgt = torch.zeros((B, W), dtype=torch.bool, device=dev)
+    tgt = tgt.scatter(1, key.topk(K, dim=1).indices, True)
+    # 只监督"真的重要"的词：停用词/标点的权重是 0，去重被淘汰的 key=-inf
+    tgt = tgt & (w > 0) & torch.isfinite(key)
+
+    wt = w * tgt.to(w.dtype)
+    den_t = wt.sum(dim=1)                              # [B]
+    valid = den_t > 0
+    if not bool(valid.any()):
+        return None, {"n_cov_rows": 0, "n_cov_tgt": 0.0, "cov_pcov": 0.0,
+                      "n_cov_num": 0.0, "n_cov_ent": 0.0}
+    logp = torch.log(pcov.clamp_min(float(eps)))
+    row = -(wt * logp).sum(dim=1) / den_t.clamp_min(1e-6)
+    loss = row[valid].mean()
+
+    with torch.no_grad():
+        _wt = wt[valid]
+        _den = _wt.sum().clamp_min(1e-6)
+        stats = {
+            "n_cov_rows": int(valid.sum().item()),
+            "n_cov_tgt": float(tgt[valid].sum(dim=1).float().mean().item()),
+            # 加权平均覆盖概率（0..1，越高越好）：这是训练期能直接读的"覆盖到没到"
+            "cov_pcov": float((_wt * pcov[valid]).sum().item() / float(_den.item())),
+            "n_cov_num": float(((w[valid] >= float(LATENT_COV_NUMBER_W) - 1e-6)
+                                & elig[valid]).sum(dim=1).float().mean().item()),
+            "n_cov_ent": float(((w[valid] >= float(LATENT_COV_ENTITY_W) - 1e-6)
+                                & (w[valid] < float(LATENT_COV_NUMBER_W) - 1e-6)
+                                & elig[valid]).sum(dim=1).float().mean().item()),
+        }
+    return loss, stats
 
 
 
@@ -2837,6 +3074,9 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     chunk_word_ids: List[List[int]] = []
     chunk_word_penalty: List[List[float]] = []
     chunk_word_group: List[List[int]] = []
+    # 词重要性（v6 手术三）：L_cov 的监督目标权重，**只由这条记忆的原文生成**，
+    # 不看问题、不看金标答案，因此干扰事实与证据事实走同一套规则（Query-Agnostic）。
+    chunk_word_weight: List[List[float]] = []
     word_boundary_source = "offset"
     n_empty_units = 0
 
@@ -2880,6 +3120,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                         chunk_word_ids.append([])
                         chunk_word_penalty.append([])
                         chunk_word_group.append([])
+                        chunk_word_weight.append([])
                         n_empty_units += 1
                     else:
                         h0_out.append(h0[r, a:b].to("cpu"))
@@ -2899,6 +3140,8 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                             _word_penalty_for(tokenizer, _ids_chunk, _wids))
                         _wtexts = _word_texts(tokenizer, _ids_chunk, _wids)
                         chunk_word_group.append(_word_groups(_wtexts))
+                        chunk_word_weight.append(
+                            _word_weight_for(tokenizer, _ids_chunk, _wids))
                     parents.append(pid)
                     chunk_index.append(int(k))
                     n_chunks.append(len(spans))
@@ -2923,6 +3166,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
             "chunk_word_ids": chunk_word_ids,
             "chunk_word_penalty": chunk_word_penalty,
             "chunk_word_group": chunk_word_group,
+            "chunk_word_weight": chunk_word_weight,
             "word_boundary_source": word_boundary_source,
             "n_units": len(texts), "n_chunks_total": Nc, "n_empty_units": n_empty_units,
             "max_unit_tokens": int(max_unit_tokens), "layer": int(layer),
@@ -2976,7 +3220,8 @@ class LatentEncoder:
     def encode_full(self, texts: Sequence[str],
                     parent_ids: Optional[Sequence[str]] = None,
                     grad: bool = False, want_lex: bool = True,
-                    want_kfeat: bool = True
+                    want_kfeat: bool = True,
+                    cov_weight: float = 0.0, cov_targets: int = 0
                     ) -> Tuple[List[torch.Tensor], Optional[List[torch.Tensor]],
                                Optional[Dict[str, Any]], Dict[str, Any]]:
         """返回 (per-parent 语义载荷, per-parent 直通载荷, 逐槽 token 特征, info)。
@@ -3001,17 +3246,25 @@ class LatentEncoder:
         _wids_raw = feats.get("chunk_word_ids") or []
         _lex_kw: Dict[str, Any] = {}
         if _wids_raw:
-            _wid, _wpen, _wgrp = _pad_word_tensors(
+            _wid, _wpen, _wgrp, _wwgt = _pad_word_tensors(
                 _wids_raw, feats.get("chunk_word_penalty") or [],
-                feats.get("chunk_word_group") or [])
-            _lex_kw = {"word_ids": _wid, "word_penalty": _wpen, "word_group": _wgrp}
+                feats.get("chunk_word_group") or [],
+                feats.get("chunk_word_weight") or [])
+            _lex_kw = {"word_ids": _wid, "word_penalty": _wpen, "word_group": _wgrp,
+                       "word_weight": _wwgt}
+        # L_cov 只在**训练路径**上算：grad=False 是存储/评测路径，那里既没有梯度
+        # （损失无意义），也不该多付一次 [B,m,W] 的归一化与 Top-K。
+        _want_cov = bool(grad) and float(cov_weight or 0.0) > 0.0
+        _cov_kw = {"want_cov": _want_cov, "cov_targets": int(cov_targets or 0)}
         if grad:
             z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
-                                                           feats["mask"], **_lex_kw)
+                                                           feats["mask"],
+                                                           **_lex_kw, **_cov_kw)
         else:
             with torch.no_grad():
                 z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
-                                                               feats["mask"], **_lex_kw)
+                                                               feats["mask"],
+                                                               **_lex_kw, **_cov_kw)
         if not kw["want_lex"]:
             z_lex = None
         # 按父槽位分组（保持输入顺序，块内按 chunk_index）
@@ -3042,6 +3295,11 @@ class LatentEncoder:
                 # 词边界来源必须随 info 走：拿不到偏移而静默降级，指标变化就归因不了。
                 "n_words": int(cinfo.get("n_words", 0)),
                 "word_boundary_source": str(feats.get("word_boundary_source", "none"))}
+        # 覆盖损失**只在这条路径真的建了图时**才放进 info：
+        # 否则 info 会被写进日志/JSON，而 tensor 既不可序列化也没有意义。
+        if cinfo.get("cov_loss") is not None:
+            info["cov_loss"] = cinfo["cov_loss"]
+            info["cov_stats"] = dict(cinfo.get("cov_stats") or {})
         kfeat = None
         if want_kfeat:
             kfeat = self._kfeat_from_feats(feats, order, groups)
