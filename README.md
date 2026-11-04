@@ -12,8 +12,8 @@
         ↓  产出 ckpt/router_stage1.pt（召回 52.0%）
 ② 阶段二：训 Compressor+Bridge  train_latent_memory.py --init-router --freeze-router
    Router 冻结；KL 蒸馏（对齐明文 teacher）+ 事实重建 + 抗噪读出（金标恒在 + 难负例）
-        ↓  产出 ckpt/hotpot_router_10k_v5.pt
-③ 评测                        runs/eval_v5.sh
+        ↓  产出 ckpt/hotpot_router_10k_v6.pt
+③ 评测                        runs/eval_stage2.sh
    router（端到端） + oracle_latent（金标槽位直送 bridge 的读出上界）
 ```
 
@@ -21,7 +21,19 @@
 把它绑在生成循环里训练，等于用十几小时等一个本该一小时收敛的东西，而且 Router 没收敛
 时采出的难负例会把 Bridge 一起带偏（v4 就是这样把读出从 17.2% 带到 10.0% 的）。
 
-## 当前数字（HotpotQA val500，n=500）
+## 当前权重状态
+
+仓库和服务器上**没有**可直接出正式数字的阶段二权重：2026-11-04 之前那一版已整体删除
+（判据见下节"为什么重做"）。现在只剩两个中间产物：
+
+| 权重 | 位置 | 用途 |
+|---|---|---|
+| 阶段一 Router | `ckpt/router_stage1_8slot.pt` | 寻址能力基线：完整证据召回 52.0% |
+| L_cov 探针两臂 | `ckpt/probe_base_1000.pt` / `probe_cov_1000.pt` | 1000 步诊断，不出正式数字 |
+
+正式数字要等一轮完整阶段二（`runs/run_stage2_bridge.sh`，约 5 小时 × 2 臂）。
+
+## 历史数字（HotpotQA val500，n=500）
 
 | 方法 | 读出名额 | acc% | EM% | 完整证据召回% |
 |---|---|---|---|---|
@@ -31,19 +43,15 @@
 | Router（v3 权重） | 4 槽 | 12.6 | 12.8 | 5.6 |
 | Router（v4 权重，接线有 bug） | 4 槽 | 9.8 | 9.8 | 15.6 |
 | **阶段一 Router** | **8 槽** | — | — | **52.0** |
-| v5 Router（端到端，**作废**） | 8 槽 | 10.6 | 10.6 | 6.0 |
-| v5 oracle_latent（金标槽直送） | 8 槽 | 11.8 | 11.8 | 100 |
 
 阶段一（8 槽读出）把完整证据召回从 15.6% 拉到 **52.0%**（=2 条证据的题 63.1%，
 ≥3 条的题 28.6%）。
 
-**v5 的两个数字说明什么**（详见 `results/v5_2026-11-04/`）：
-
-- `v5 Router` 的 6.0% 与阶段一的 52.0% 矛盾，原因是 `encode_item_slots_full()` 的
-  缓存分支丢 `kfeat`（已修），这一行**不能用来判断 Router 能力**，需重跑；
-- `v5 oracle_latent` 11.8% 是**有效**的，且它完全绕过 Router —— 说明即使寻址全对，
-  当前压缩+读出也只能到"无记忆 +0.6 个点"。因此下一步不是继续训 Router，
-  而是先定位读出端（`runs/diag_readout.sh`）。
+**为什么重做**：已删除的那一版权重，端到端只有 10.6%（这个数作废，是
+`encode_item_slots_full()` 缓存分支丢 `kfeat` 造成的，已修）；而它**完全绕过 Router**
+的金标读出 `oracle_latent` 也只有 11.8% —— 即使寻址全对，压缩+读出也只到
+"无记忆 +0.6 个点"。所以瓶颈在读出端，不在 Router。这条结论直接引出
+`results/2026-11-04_diag/` 的四组诊断和 v6 的两处手术。
 
 ## 诊断脚本（每条只回答一个问题，不训练）
 
@@ -61,7 +69,7 @@
 
 | 实验 | 关键数字 | 结论 |
 |---|---|---|
-| P0-1 Router 缓存一致性 | 完整证据召回 **52.5% vs 52.5%** | 缓存丢 `kfeat` 的缺陷确认修好，v5 的 `6.0%` 作废 |
+| P0-1 Router 缓存一致性 | 完整证据召回 **52.5% vs 52.5%** | 缓存丢 `kfeat` 的缺陷确认修好，旧权重的 `6.0%` 作废 |
 | P0-2 Oracle 读出分解 | 明文 **54.0%** / 原始词向量 19.0%（18 token）/ 潜层 12.5%（65 token） | 不压缩只给 18 个 token 也只有 19%；潜层给 3.6 倍 token 反而更低 |
 | P1-3 符号保真 | 碎片命中 **29.3%**，整词 **36.2%**（58 个含答案槽） | 整词能多救 6.9 点；但每块 32 token 只准带 4 个，随机基线已 17% |
 | P1-4 小样本过拟合 | 64 题 200 步：31.25 / 31.25 / 32.81 | 能拟合（起点 12.5%）；三种目标无差别，但步数太少不足以下结论 |
@@ -81,7 +89,7 @@
 | `tools/diag_symbol_fidelity.py` | P1：压缩器选中的词 vs 答案实体，附 Bridge 的 α / 残差比 |
 | `tools/overfit_probe.py` | P1：64 题过拟合 + 三种目标（`qa_kl`/`recon_old`/`recon_qa`）对照 |
 | `tools/prep_hotpotqa.py` / `tools/prep_mab.py` | 数据转换（**不按答案挑候选**） |
-| `runs/run_stage1_router.sh` / `runs/run_stage2_bridge.sh` / `runs/eval_v5.sh` | 三段流程的启动脚本 |
+| `runs/run_stage1_router.sh` / `runs/run_stage2_bridge.sh` / `runs/eval_stage2.sh` | 三段流程的启动脚本 |
 | `runs/diag_*.sh` / `runs/overfit_probe.sh` | 上面四个诊断实验的启动脚本（不训练主模型） |
 | `tests/test_v4_refactor.py` | 8 组 CPU 自检（压缩/直通/Bridge/Router/beam/掩码/银行/数据） |
 | `tests/test_diag_contracts.py` | 29 项回归：Bridge 梯度量级、α 上限/死锁、重建与 QA 同路径、teacher scope、重建口径 |
@@ -97,7 +105,7 @@
    有 32.8% EM，而平滑平均出来的潜向量只有 17.2%。因此 Bridge 是**残差**：
    `E = z_lex + tanh(α)·Bridge(z_sem)`，最后一层零初始化，α 初值 **0.05**、硬上限 **0.5**。
    α 不能取 0：末层零初始化下 α=0 会让语义分支与门控**同时**失去梯度（死锁在"永远只有 z_lex"）。
-   α 也不能无限涨：v5 涨到 0.264 时读出 EM 反而低于 v3。
+   α 也不能无限涨：旧权重涨到 0.264 时读出 EM 反而低于 v3。
 3. **软 token 必须插在合法消息体内部**（v6）：`<|im_end|>` 与 `<|im_start|>user` 之间是
    "角色真空区"，Qwen3 只把它当对话块之间的换行空白读，跨层注意力会被系统性衰减。
    现在插进 user 消息体内的 `Evidence:` 段（`<|im_start|>user\nEvidence:\n[1] <soft>...`），

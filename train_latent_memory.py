@@ -2311,7 +2311,7 @@ def train(args):
                     gnorm_bridge = _grad_norm(bridge.parameters())
                     gnorm_router = (_grad_norm(router.parameters())
                                     if router is not None else 0.0)
-                    # 三个分支的**裁剪前**联合范数。v5 实测初始 bridge 分支到 1.85e10，
+                    # 三个分支的**裁剪前**联合范数。旧权重实测初始 bridge 分支到 1.85e10，
                     # 而 grad_clip=1.0：裁剪前后的比值（clip_coef）就是"实际更新里
                     # 有多大比例被裁掉"的直接证据，比单看裁剪后的数有意义。
                     _gn_total_pre = float((gnorm_comp ** 2 + gnorm_bridge ** 2
@@ -3334,7 +3334,7 @@ def parse_args(argv=None):
                     help="残差门控 α 的初值（tanh 前）。**不要设成 0**：末层零初始化下 "
                          "α=0 会让语义分支与门控同时失去梯度（死锁）")
     ap.add_argument("--alpha-max", type=float, default=LM.LATENT_ALPHA_MAX,
-                    help="α 的硬上限（tanh 之后截断）。v5 的 α 涨到 0.264 时读出退化，"
+                    help="α 的硬上限（tanh 之后截断）。旧权重的 α 涨到 0.264 时读出退化，"
                          "默认 0.5")
     ap.add_argument("--gold-readout-ratio", type=float, default=0.7,
                     help="前这么多比例的优化步**强制用金标槽读出**（切断"

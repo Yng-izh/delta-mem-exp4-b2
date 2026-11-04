@@ -9,22 +9,22 @@
 
 ## P0 — 会影响实验结论
 
-### 1. `v5-router` 的 500 题数字作废，正式数字尚未重跑
+### 1. 正式数字仍然空缺：旧权重已删除，新权重还没训
 
-**现象**：`results/v5_2026-11-04/v5_router_500.json` 里 `read_acc=6.0%`，而同一份权重在
-阶段一单独评测是 52.0%（28/28 张量已逐位核对相同）。
+**现状**：2026-11-04 之前那一版权重连同它的评测记录已整体删除
+（`results/v5_2026-11-04/`、服务器 `ckpt/` 与 `results/` 里的同名文件都不在了）。
+那条作废的"端到端 router 6.0%"因此不再存在于任何地方，也不必再重跑。
 
-**根因**（已修，`3815379`）：`encode_item_slots_full()` 的缓存分支返回 `kfeat=None`；
+**根因（已修，`3815379`）**：`encode_item_slots_full()` 的缓存分支返回 `kfeat=None`；
 评测脚本传 `cache={}`，于是 `HybridLatentRouter` 退回"潜载荷键"，MaxSim 与新信息抑制全部失效。
-
-**已确认修好**（2026-11-04 P0-1，200 题逐题对拍）：两条路径的完整证据召回
-**52.5% vs 52.5%**，`kfeat` 均非 None。详见 `results/2026-11-04_diag/README.md`。
+修好后两条路径的完整证据召回 **52.5% vs 52.5%**（200 题逐题对拍，
+见 `results/2026-11-04_diag/README.md`）。
 
 **仍未做**：
-- 500 题 `router` 正式重跑（把作废 json 换成正式数字，约 25 分钟）；
+- 新权重的 500 题 `router` 正式数字：`CKPT=... bash runs/eval_stage2.sh`；
 - P0-1 的判定行仍来自旧判据（把 `n_units` 记账字段也拿去比，误报 `inf`），判据已修
-  但未重跑；`ENC_BATCH=1 bash runs/diag_router_cache.sh` 可确认剩余的 23/200 picks
-  差异是否纯粹是 bf16 分批抖动。
+  但未重跑；`ENC_BATCH=1 CKPT=... bash runs/diag_router_cache.sh` 可确认剩余的
+  23/200 picks 差异是否纯粹是 bf16 分批抖动。
 
 ### 2. 训练侧的槽位隔离只有围栏，没有块对角
 
@@ -42,7 +42,8 @@ eager 路径接受 4D `attention_mask`），或显式禁止"训练 SDPA + 评测
 
 ### 3. 残差上限 0.5 只是先验，没有实验支撑
 
-`--alpha-max 0.5` 的依据是"v5 的 α=0.264 已在退化"，但 0.5 是否合适、是否仍偏大，
+`--alpha-max 0.5` 的依据是"旧权重的 α=0.264 已在退化"（`results/2026-11-04_diag/`），
+但 0.5 是否合适、是否仍偏大，
 需要 `runs/overfit_probe.sh` 或一轮短训练给证据。它现在是一条**未验证的约束**。
 
 ---
@@ -257,8 +258,8 @@ export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 
 - GPU 0/1 与别人的作业共享（曾见 34–39 GB 的 PRLM-C 训练与 YOLO 作业）：启动前用
   `nvidia-smi` 挑空卡，每步日志已打 `peakmem`，用于区分"自己涨"与"被挤"。
-- checkpoint 不入库（`ckpt/` 已 gitignore）：阶段一 100,991,977 B、v5 224,505,677 B
-  （含 AdamW 状态），只存在于服务器。
+- checkpoint 不入库（`ckpt/` 已 gitignore）：阶段一 100,991,977 B、阶段二与探针每份
+  约 224.5 MB（含 AdamW 状态），只存在于服务器。
 - `deltamem.core` 顶层硬依赖 `transformers.models.smollm3`（4.51 无此子包），
   必须经 `deltamem_compat` 注入占位后 import。
 

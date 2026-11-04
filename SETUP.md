@@ -109,8 +109,7 @@ GPU=0 bash runs/run_stage2_bridge.sh
 | `--router-kind {latent,hybrid}` | hybrid = 冻结 h0/h18 注意力池化 + Token-MaxSim 兜底 |
 | `--slot-isolation` | 槽位块对角掩码（**仅 eager 后端生效**，SDPA 会静默丢弃 4D 掩码） |
 
-产物：`$B/ckpt/hotpot_router_10k_v6.pt`（v5 的产物是 `hotpot_router_10k_v5.pt`，那一轮早于
-本轮的目标/读出对齐，见 `results/v5_2026-11-04/`）；`save_latent_checkpoint` 会写入
+产物：`$B/ckpt/hotpot_router_10k_v6.pt`；`save_latent_checkpoint` 会写入
 `lex_skip / router_kind / inner_dim` 等构建参数，加载时按 ckpt 重建结构，**不要手动对齐超参**。
 
 ## 5. 评测
@@ -120,7 +119,7 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
   --ckpt $B/ckpt/hotpot_router_10k_v6.pt \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
-  --label v5-router --save-json $B/results/v5_router_500.json
+  --label v6-router --save-json $B/results/v6_router_500.json
 ```
 
 `--mode`（别名 `--method`）七选一：

@@ -20,7 +20,7 @@
 不满足时**非零退出**，不做"差一点也算过"。
 
 用法（在仓库根目录）：
-    python tools/diag_router_cache.py --ckpt $B/ckpt/hotpot_router_10k_v5.pt \
+    python tools/diag_router_cache.py --ckpt $B/ckpt/<你的阶段二权重>.pt \
         --data $B/synth/hotpot_val500.jsonl --limit 200 \
         --base $B/models/Qwen3-4B-Instruct-2507 \
         --adapter $B/models/delta-mem_qwen3_4b_instruct \

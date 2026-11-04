@@ -769,15 +769,15 @@ def main(argv=None):
         # 两行数字就不是同一个方法。命令行显式给了才覆盖（A/B 对照用）。
         _ck_inj = str(reader.config.get("inject_mode", "") or "")
         _ck_fen = str(reader.config.get("fence_style", "") or "")
-        # **旧 ckpt 必须按旧口径评测**：v5 及以前的权重是在"消息之间 + 长围栏"下训出来的，
+        # **旧 ckpt 必须按旧口径评测**：2026-11-04 之前的权重是在"消息之间 + 长围栏"下训出来的，
         # 直接按新默认（消息体内 + 极简围栏）评测就是训练/推理不一致，数字没有意义。
         if not _ck_inj:
             _ck_inj = "between"
-            print("[inject][warn] ckpt 未记录 inject_mode（v5 及更早）：按旧行为 "
+            print("[inject][warn] ckpt 未记录 inject_mode（2026-11-04 之前）：按旧行为 "
                   "between（消息之间）评测。要评估新位置必须用新训的 ckpt", flush=True)
         if not _ck_fen:
             _ck_fen = "verbose"
-            print("[inject][warn] ckpt 未记录 fence_style（v5 及更早）：按旧行为 "
+            print("[inject][warn] ckpt 未记录 fence_style（2026-11-04 之前）：按旧行为 "
                   "verbose（长围栏）评测", flush=True)
         if not args.inject_mode:
             ctx["inject_mode"] = _ck_inj
@@ -798,7 +798,7 @@ def main(argv=None):
     if args.method in EMBED_ARMS:
         # oracle_embed 不加载 bridge/encoder，但**预算必须和 oracle_latent 对齐**：
         # 它按"每个金标槽 ceil(unit_tokens / max_unit_tokens) 块 × m 个向量"算注入
-        # token 数。CLI 默认 64 而 v5 训练时是 32，直接跑会让两边的预算差一倍，
+        # token 数。CLI 默认 64 而旧权重训练时是 32，直接跑会让两边的预算差一倍，
         # "软 token 注入机制 vs 压缩损失"的归因就不成立了。给了 --ckpt 就按 ckpt 的配置。
         if args.ckpt:
             _blob = LM._safe_torch_load(args.ckpt)

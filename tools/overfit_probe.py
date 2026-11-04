@@ -19,7 +19,7 @@
     同一份 items 列表、同一随机种子、同一评估函数与同一 ckpt 初始化。
 
 用法（本脚本**不会**自动跑，只在你明确要求时执行）：
-    python tools/overfit_probe.py --ckpt $B/ckpt/hotpot_router_10k_v5.pt \
+    python tools/overfit_probe.py --ckpt $B/ckpt/<你的阶段二权重>.pt \
         --data $B/synth/hotpot_train_10k.jsonl --n 64 --steps 200 --accum 4 \
         --arms qa_kl,recon_old,recon_qa \
         --base $B/models/Qwen3-4B-Instruct-2507 \
@@ -121,7 +121,7 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
         soft = LM.compose_routed_soft(
             model, tok, bridge, [reads[i] for i in idx], dev=dev,
             lex_list=([lex_all[i] for i in idx] if lex_all is not None else None),
-            # 与正式 v5 读出对齐：训练侧也开 isolate（旧写法两边都是 False，
+            # 与正式读出对齐：训练侧也开 isolate（旧写法两边都是 False，
             # 测出来的曲线不能代表正式读出）
             isolate=True, fence_style=_opt(getattr(args, "fence_style", "")))
         embeds, labels, n_ans = T.build_student_inputs(
