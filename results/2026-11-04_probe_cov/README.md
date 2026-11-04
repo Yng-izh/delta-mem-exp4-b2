@@ -86,3 +86,26 @@
    Query-Agnostic，数据说明它单独不足以抬高答案覆盖率。
 
 1 和 2 都只改一个环境变量，各约 1 小时；3 需要改代码。
+
+## 文件清单
+
+| 文件 | 内容 |
+|---|---|
+| `README.md` | 本文（结论与对照表） |
+| `probe_base_1000_symbol200.json` | 基线臂的 200 题符号保真逐题记录 |
+| `probe_cov_1000_symbol200.json` | L_cov 臂的 200 题符号保真逐题记录 |
+| `../../logs/2026-11-04/probe_base_1000.log` | 基线臂完整训练日志（含每 100 步的 loss/gnorm/评估） |
+| `../../logs/2026-11-04/probe_cov_1000.log` | L_cov 臂完整训练日志（多出 `loss_cov / cov_pcov / cov_tgt`） |
+
+复现：
+
+```bash
+# 基线
+COV=0.0 OUT=$B/ckpt/probe_base_1000.pt bash runs/probe_cov_1000.sh
+# L_cov
+COV=0.1 OUT=$B/ckpt/probe_cov_1000.pt bash runs/probe_cov_1000.sh
+# 符号保真（200 题）
+CKPT=$B/ckpt/probe_cov_1000.pt OUT=$B/results/x.json bash runs/diag_symbol_fidelity.sh
+```
+
+两臂的 ckpt 在服务器 `$B/ckpt/` 下（不入库），可以直接接着训或做别的评测。
