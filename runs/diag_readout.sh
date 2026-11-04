@@ -19,22 +19,34 @@ export CUDA_VISIBLE_DEVICES=${GPU:-0}
 cd "$R" || exit 1
 
 run() {
-  local mode=$1
-  echo "[diag $(date '+%F %T')] $mode 开始"
+  local mode=$1 tag=${2:-$1}
+  echo "[diag $(date '+%F %T')] $mode ($tag) 开始"
   # --ckpt 对 oracle_embed 也要传：它按 ckpt 的 max_unit_tokens/m 对齐预算，
   # 不传就会用 CLI 默认 64，与训练时的 32 不一致，两行不可比。
-  "$PY" eval_latent_table.py --mode "$mode" --ckpt "$CKPT" \
+  local extra=""
+  case "$tag" in
+    oracle_embed_full_between) extra="--embed-inject between" ;;
+    oracle_embed_full_user)    extra="--embed-inject user" ;;
+    oracle_embed_salient)      extra="--embed-inject user" ;;
+  esac
+  "$PY" eval_latent_table.py --mode "$mode" --ckpt "$CKPT" $extra \
     --data $B/synth/hotpot_val500.jsonl --limit 200 --max-new-tokens 16 \
     --topk-per-hop 4 --slot-isolation 1 --progress-every 25 \
     --base $B/models/Qwen3-4B-Instruct-2507 \
     --adapter $B/models/delta-mem_qwen3_4b_instruct \
-    --label "diag-$mode" --save-json "$OUT/$mode.json" \
-    > "$OUT/$mode.log" 2>&1
-  echo "[diag $(date '+%F %T')] $mode 结束 rc=$?  -> $OUT/$mode.json"
+    --label "diag-$tag" --save-json "$OUT/$tag.json" \
+    > "$OUT/$tag.log" 2>&1
+  echo "[diag $(date '+%F %T')] $mode ($tag) 结束 rc=$?  -> $OUT/$tag.json"
 }
 
 # MODES="oracle_embed" 可只重跑某一档（例如改了预算口径后只需重算 oracle_embed）
-for m in ${MODES:-"oracle oracle_embed oracle_lex oracle_sem oracle_latent"}; do
+for m in ${MODES:-"oracle oracle_embed oracle_embed_salient oracle_lex oracle_sem oracle_latent"}; do
   run "$m"
 done
+# 位置对照：同一条"不截断的原生词嵌入"，分别放在消息体内与消息之间。
+# 两者之差 = "注入位置不当"造成的准确率损失（这是 v6 手术一的直接证据）。
+if [ -z "${MODES:-}" ]; then
+  run oracle_embed_full oracle_embed_full_user      # 消息体内（默认）
+  run oracle_embed_full oracle_embed_full_between   # 旧软 token 插入点（消息之间）
+fi
 echo "[diag $(date '+%F %T')] 全部完成：$OUT"

@@ -44,6 +44,7 @@ $PY train_latent_memory.py --router \
   --init-router $B/ckpt/router_stage1_8slot.pt --freeze-router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
   --alpha-max 0.5 --lex-gate-init 0.05 --diag-every 50 \
+  --inject-mode user --fence-style bracket \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \
   --out "$OUT" --save-every 250

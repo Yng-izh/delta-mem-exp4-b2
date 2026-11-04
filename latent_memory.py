@@ -124,6 +124,34 @@ LATENT_NOVELTY_LAMBDA  = _env_float("LATENT_NOVELTY_LAMBDA", 1.0)
 # 自注意力里互相串扰，注入 token 从 22 涨到 58 而召回率没跟上（2026-11-03 实测）。
 # 只在 eager 后端真正生效；SDPA 下会自动降级为围栏并在 meta 里写明。
 LATENT_SLOT_ISOLATION  = _env_int("LATENT_SLOT_ISOLATION", 1)
+# ---- v6 手术一：软 token 的**注入位置**与围栏结构 ----
+# 旧实现把软 token 插在 `<|im_end|>`（system 结束）与 `<|im_start|>user` 之间，那是一段
+# "角色真空区"：Qwen3 在预训练/指令微调里从没在消息边界之外见过连续向量，自注意力对
+# 这段位置的默认解读是"对话块之间的换行空白"，跨层权重被系统性衰减。
+# 现在默认插进 **user 消息体内**（与明文 oracle 的 Evidence: 段落同构）：
+#     <|im_start|>user\nEvidence:\n[1] <soft1>\n[2] <soft2>\nQuestion: q<|im_end|>
+#     <|im_start|>assistant
+# 取值：user（默认，消息体内）/ system（放进 system 消息的 Evidence: 段，与明文 oracle
+#       逐字同构）/ between（旧行为，仅供 A/B 对照，不推荐）
+LATENT_INJECT_MODE     = _env_str("LATENT_INJECT_MODE", "user").lower()
+# 槽位围栏样式：bracket=极简原生分隔符 `\n[j] `（每槽 2~3 token）；
+# verbose=旧的长围栏（isolate 时前后各一段，实测每题吃掉 46.6 个 token）。
+LATENT_FENCE_STYLE     = _env_str("LATENT_FENCE_STYLE", "bracket").lower()
+LATENT_EVIDENCE_HEADER = _env_str("LATENT_EVIDENCE_HEADER", "Evidence:")
+
+_INJECT_MODES = ("user", "system", "between")
+_FENCE_STYLES = ("bracket", "verbose")
+
+
+def _check_inject_cfg(inject_mode: Any = None, fence_style: Any = None) -> Tuple[str, str]:
+    """校验注入位置 / 围栏样式。非法值**直接报错**，不静默退回默认（会改变实验口径）。"""
+    mode = str(LATENT_INJECT_MODE if inject_mode is None else inject_mode).lower()
+    style = str(LATENT_FENCE_STYLE if fence_style is None else fence_style).lower()
+    if mode not in _INJECT_MODES:
+        raise ValueError(f"inject_mode={mode!r} 非法；可选 {_INJECT_MODES}")
+    if style not in _FENCE_STYLES:
+        raise ValueError(f"fence_style={style!r} 非法；可选 {_FENCE_STYLES}")
+    return mode, style
 # >0 时只编码前 N 个槽位（smoke / 大池调试用）；0 = 不限制。
 LATENT_BANK_MAX = int(os.environ.get("LATENT_BANK_MAX", "0"))
 LATENT_DTYPE           = _env_str("LATENT_DTYPE", "bf16").lower()
@@ -159,6 +187,8 @@ def latent_config() -> Dict[str, Any]:
         "addr_gamma": float(LATENT_ADDR_GAMMA),
         "ms_tau": float(LATENT_MS_TAU),
         "slot_isolation": int(LATENT_SLOT_ISOLATION),
+        "inject_mode": str(LATENT_INJECT_MODE),
+        "fence_style": str(LATENT_FENCE_STYLE),
     }
 
 
@@ -1340,7 +1370,8 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
                         dev: Any = None,
                         lex_list: Optional[Sequence[torch.Tensor]] = None,
                         isolate: bool = False,
-                        return_segs: bool = False):
+                        return_segs: bool = False,
+                        fence_style: Optional[str] = None):
     """若干槽位载荷 -> 一段 soft 序列（每槽过一次 bridge，槽间插原生 "\\n"）。
 
     **训练与推理必须调同一个函数**：旧实现里训练是 `bridge(z_read)` 一段、
@@ -1350,10 +1381,19 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
     lex_list（v4）：每槽的 h0 符号直通向量，逐槽交给 bridge 做门控方向混合。
     isolate（v4）：槽位隔离。返回 (soft, seg_ids)（return_segs=True 时），
         seg_ids 是逐 token 的段号，供 `build_block_diag_mask` 构造块对角掩码。
+
+    fence_style（v6）：槽位围栏的样式，直接决定**注入 token 里有多少是泡沫**：
+        bracket（默认）`\n[j] ` —— 每槽 2~3 个 token，原生离散分隔符；
+        verbose        旧长围栏，isolate 时前后各一段，实测每题 46.6 个 token 是围栏
+                       （占 64.5 个注入 token 的 72.2%），真正的内容向量只有 17.9 个。
+    注意：bracket 样式下 `isolate` **不再改变围栏文本**，隔离只剩块对角掩码这一条路；
+    SDPA 后端拿不到 4D 掩码时会降级为"只有单个分隔符"，比旧的双围栏更弱 ——
+    实际生效模式写在 `meta["slot_isolation"]` 里，不做静默假设。
     """
     if not z_list:
         raise ValueError("compose_routed_soft 收到空载荷列表")
     dev = _model_device(model) if dev is None else dev
+    _mode, _style = _check_inject_cfg(None, fence_style)
     emb = model.get_input_embeddings()
     pieces = []
     segs: List[int] = []
@@ -1372,8 +1412,12 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
         # 而原生 token 会把"这是另一条事实"这件事显式写进序列，同时给出槽序号。
         # isolate=True 时用**加倍的围栏**（前后各一段），因为块对角掩码在 SDPA 后端
         # 拿不到时，这条围栏是唯一还能起作用的隔离手段。
-        fence = (f"\n[Fact {j + 1}]: " if not isolate
-                 else f"\n-- Fact {j + 1} (memory slot, isolated) --\n")
+        if _style == "verbose":
+            fence = (f"\n[Fact {j + 1}]: " if not isolate
+                     else f"\n-- Fact {j + 1} (memory slot, isolated) --\n")
+        else:
+            # 极简原生分隔符：与明文 oracle 的 "[1] / [2]" 编号一一对应
+            fence = f"\n[{j + 1}] "
         anchor = emb(_tokenize_no_special(tokenizer, fence, dev))
         pieces.append(anchor)
         segs.extend([0] * int(anchor.shape[1]))
@@ -1394,7 +1438,8 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
         s = s.reshape(1, -1, s.shape[-1])
         pieces.append(s)
         segs.extend([j + 1] * int(s.shape[1]))
-        if isolate:
+        if isolate and _style == "verbose":
+            # 只有旧长围栏才配尾段；bracket 样式不再付这份 token（这是本次改动的目的）
             tail = emb(_tokenize_no_special(tokenizer, f"\n-- end Fact {j + 1} --\n", dev))
             pieces.append(tail)
             segs.extend([0] * int(tail.shape[1]))
@@ -2930,6 +2975,50 @@ def build_chat_parts(tokenizer: Any, system_prompt: str, question: str) -> Tuple
     return full, len(sys_only)
 
 
+_SOFT_SENTINEL = "\u27e6SOFT_TOKENS\u27e7"
+
+
+def _chat_parts_with_soft_slot(tokenizer: Any, system_prompt: str, question: str,
+                               inject_mode: str = "user",
+                               header: str = LATENT_EVIDENCE_HEADER
+                               ) -> Tuple[str, str]:
+    """渲染 chat 文本，并在**合法消息体内部**留出软 token 占位，返回 (pre, post)。
+
+    为什么必须插在消息体内：`<|im_start|>role ... <|im_end|>` 是 Qwen3 训练期见过无数次的
+    结构边界，自注意力在这些位置形成 sink。把连续向量放在两个消息**之间**，模型只会把它
+    当成对话块之间的换行空白；插进 user 消息体内（Evidence: 段）后，软向量与明文证据
+    处在同一个"被当作内容读"的位置上。
+
+    实现要点：占位符是**字符串**，渲染后按它切分、两侧分别分词。这样既不硬编码任何 chat
+    模板片段（各模型模板不同），也不会出现 BPE 跨边界合并（软 token 本来就要替换掉这段
+    边界）。模板把占位符吃掉（strip/转义）时直接报错，绝不猜位置。
+    """
+    sysp = (system_prompt or "").strip()
+    mode, _ = _check_inject_cfg(inject_mode, None)
+    if mode == "user":
+        # 目标形态：<|im_start|>user\nEvidence:\n[1] <soft>\n[2] <soft>\nQuestion: q<|im_end|>
+        # 注意 header 后面**不加换行**：compose 的 bracket 围栏自带前导 "\n"，否则会出现空行。
+        user = f"{header}{_SOFT_SENTINEL}\nQuestion: {question}"
+        msgs = ([{"role": "system", "content": sysp}] if sysp else []) + \
+               [{"role": "user", "content": user}]
+    elif mode == "system":
+        # 与明文 oracle 完全同构：证据段放进 system 消息内部
+        sys_content = (f"{sysp}\n\n{header}{_SOFT_SENTINEL}".strip() if sysp
+                       else f"{header}{_SOFT_SENTINEL}")
+        msgs = [{"role": "system", "content": sys_content},
+                {"role": "user", "content": question}]
+    else:
+        raise ValueError("_chat_parts_with_soft_slot 只处理 user/system；"
+                         "between 走 build_chat_parts 旧路径")
+    full = tokenizer.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+    if _SOFT_SENTINEL not in str(full):
+        raise RuntimeError(
+            "chat 模板没有原样保留软 token 占位符（可能做了 strip/转义），"
+            "无法把软 token 放进消息体内；请改用显式模板或 --inject-mode between。")
+    pre, post = str(full).split(_SOFT_SENTINEL, 1)
+    return pre, post
+
+
 def _tokenize_no_special(tokenizer: Any, text: str, device: Any) -> torch.Tensor:
     enc = tokenizer(text, return_tensors="pt", add_special_tokens=False)
     return enc["input_ids"].to(device)
@@ -2974,9 +3063,18 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
                  pad_token_id: Optional[int] = None,
                  extra_meta: Optional[Dict[str, Any]] = None,
                  seg_ids: Optional[Sequence[int]] = None,
-                 isolate: bool = False
+                 isolate: bool = False,
+                 inject_mode: Optional[str] = None,
+                 header: Optional[str] = None,
+                 fence_style: Optional[str] = None
                  ) -> Tuple[str, Dict[str, Any]]:
-    """把**已经算好的** soft tokens（[1,T,d] 或 None）插进 system 段之后并生成。
+    """把**已经算好的** soft tokens（[1,T,d] 或 None）插进 prompt 并生成。
+
+    inject_mode 决定插在哪（默认 user：消息体内部的 Evidence: 段）：
+        user    `<|im_start|>user\nEvidence:\n[1] <soft>\nQuestion: q<|im_end|>`
+        system  证据段放进 system 消息内部（与明文 oracle 完全同构）
+        between 旧行为：插在 `<|im_end|>` 与 `<|im_start|>user` 之间的角色真空区（仅 A/B 用）
+    soft 为 None（明文基线）时恒按原样渲染，行为逐位不变。
 
     单独立出来是为了让两条读出路径（2.5 的单级 Router 与 FST 的两级 Router）
     共用同一套插入/掩码/解码逻辑：拷贝一份就是两份会漂移的实现，而"软 token 插在
@@ -2984,19 +3082,36 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
     """
     dev = _model_device(model)
     emb_layer = model.get_input_embeddings()
-    full, n_sys_chars = build_chat_parts(tokenizer, system_prompt, question)
-    ids_full = _tokenize_no_special(tokenizer, full, dev)
-    n_sys = 0
-    if n_sys_chars:
-        ids_pre = _tokenize_no_special(tokenizer, full[:n_sys_chars], dev)
-        n_sys = int(ids_pre.shape[1])
-        if ids_full[0, :n_sys].tolist() != ids_pre[0].tolist():
-            raise RuntimeError(
-                "system 段单独分词与整段分词在边界上不一致（BPE 边界跨界），"
-                "无法保证软 token 插在 system 之后；请改用带显式分隔符的模板。")
+    mode, style = _check_inject_cfg(inject_mode, fence_style)
+    hdr = LATENT_EVIDENCE_HEADER if header is None else str(header)
+    has_soft = bool(soft is not None and int(soft.numel()) > 0)
+    if not has_soft:
+        # 没有软 token 时不存在"插在哪"的问题：走原样渲染，明文基线行为逐位不变。
+        mode = "between"
+    if mode == "between":
+        # 旧行为：插在 system 的 <|im_end|> 与 user 的 <|im_start|> 之间（角色真空区）。
+        # 只保留给 A/B 对照；正式路径不应走这里。
+        full, n_sys_chars = build_chat_parts(tokenizer, system_prompt, question)
+        ids_full = _tokenize_no_special(tokenizer, full, dev)
+        n_pre = 0
+        if n_sys_chars:
+            ids_pre = _tokenize_no_special(tokenizer, full[:n_sys_chars], dev)
+            n_pre = int(ids_pre.shape[1])
+            if ids_full[0, :n_pre].tolist() != ids_pre[0].tolist():
+                raise RuntimeError(
+                    "system 段单独分词与整段分词在边界上不一致（BPE 边界跨界），"
+                    "无法保证软 token 插在 system 之后；请改用带显式分隔符的模板。")
+        ids_pre_t = ids_full[:, :n_pre]
+        ids_post_t = ids_full[:, n_pre:]
+    else:
+        pre_text, post_text = _chat_parts_with_soft_slot(
+            tokenizer, system_prompt, question, mode, hdr)
+        ids_pre_t = _tokenize_no_special(tokenizer, pre_text, dev)
+        ids_post_t = _tokenize_no_special(tokenizer, post_text, dev)
+        n_pre = int(ids_pre_t.shape[1])
 
-    pre = emb_layer(ids_full[:, :n_sys])
-    post = emb_layer(ids_full[:, n_sys:])
+    pre = emb_layer(ids_pre_t)
+    post = emb_layer(ids_post_t)
     parts = [pre]
     n_soft = 0
     if soft is not None:
@@ -3083,8 +3198,18 @@ def _emit_latent(model: Any, tokenizer: Any, soft: Optional[torch.Tensor], quest
         pred = tokenizer.decode(seq.tolist(), skip_special_tokens=True)
         decode_mode = "new_tokens_only"
         n_out = int(seq.shape[0])
+    # 注入 token 的构成必须分开记账：围栏泡沫与真正的内容向量混在一个 n_soft 里，
+    # 就会出现"64.5 个注入 token"看起来很多、其实 46.6 个是重复英文围栏的情况。
+    n_content = n_soft
+    n_fence = 0
+    if n_soft and seg_ids is not None:
+        _segs = [int(v) for v in seg_ids][:n_soft]
+        n_content = sum(1 for v in _segs if v > 0)
+        n_fence = n_soft - n_content
     meta = {"n_in": n_in, "n_out": n_out, "n_soft": n_soft,
-            "n_sys_tokens": int(n_sys), "insert_at": int(n_sys),
+            "n_soft_content": int(n_content), "n_fence": int(n_fence),
+            "n_sys_tokens": int(n_pre), "insert_at": int(n_pre),
+            "inject_mode": mode, "fence_style": style,
             "slot_isolation": slot_isolation,
             "decode_mode": decode_mode, "max_new_tokens": int(max_new_tokens)}
     meta.update(dict(extra_meta or {}))
@@ -3103,7 +3228,9 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
                            q_tok: Optional[torch.Tensor] = None,
                            lex_reads: Optional[Sequence[torch.Tensor]] = None,
                            topk_per_hop: int = 1,
-                           isolate: int = LATENT_SLOT_ISOLATION
+                           isolate: int = LATENT_SLOT_ISOLATION,
+                           inject_mode: Optional[str] = None,
+                           fence_style: Optional[str] = None
                            ) -> Tuple[str, Dict[str, Any]]:
     """潜层读出：只有 system / question 是正常 token，历史证据全部走 soft tokens。
 
@@ -3163,7 +3290,8 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
         routed = list(out["picks"])
         soft = compose_routed_soft(model, tokenizer, bridge, out["z_list"], dev=dev,
                                    lex_list=out.get("lex_list"),
-                                   isolate=bool(isolate), return_segs=True)
+                                   isolate=bool(isolate), return_segs=True,
+                                   fence_style=fence_style)
         soft, seg_ids = soft
     elif has_payload:
         # bridge 不做内容寻址：整库所有槽位**全给**，K*m 个软 token 一起注入，
@@ -3202,6 +3330,7 @@ def generate_latent_answer(model: Any, tokenizer: Any, bridge: LatentBridge,
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,
                               max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
                               seg_ids=seg_ids, isolate=bool(isolate),
+                              inject_mode=inject_mode, fence_style=fence_style,
                               extra_meta={
                                   "has_payload": has_payload, "routed": routed,
                                   "hops": int(hops), "topk_per_hop": int(topk_per_hop),
@@ -3333,12 +3462,14 @@ def generate_latent_answer_fst(model: Any, tokenizer: Any, bridge: LatentBridge,
     if all(x is None for x in lex_list):
         lex_list = None
     soft = compose_routed_soft(model, tokenizer, bridge, z_list, dev=dev,
-                              lex_list=lex_list, isolate=True, return_segs=True)
+                              lex_list=lex_list, isolate=True, return_segs=True,
+                              fence_style=fence_style)
     soft, seg_ids = soft
     g, v = picked[0]
     pred, meta = _emit_latent(model, tokenizer, soft, question, system_prompt,
                               max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
                               seg_ids=seg_ids, isolate=True,
+                              inject_mode=inject_mode, fence_style=fence_style,
                               extra_meta={
                                   "has_payload": True, "routed": [int(x[0]) for x in picked],
                                   "lex_skip": bool(lex_list is not None),

@@ -21,6 +21,7 @@ echo "[diag $(date '+%F %T')] 过拟合探针开始"
   --n 64 --steps 200 --accum 4 --lr 1e-4 --eval-every 25 \
   --kl-weight 1.0 --recon-weight 0.5 --recon-corrupt 0.5 \
   --arms qa_kl,recon_old,recon_qa \
+  --inject-mode user --fence-style bracket \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
   --save-json "$OUT"

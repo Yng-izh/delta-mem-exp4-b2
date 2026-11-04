@@ -52,6 +52,7 @@
 | `runs/diag_router_cache.sh` | 缓存路径与训练路径是否等价 | kfeat 最大差 < tol 且 picks 一致率 100%，否则非零退出 |
 | `runs/diag_readout.sh` | 读出损失在哪一段：注入 / 词形 / 语义 / 压缩 | 明文高而 embed 低 → 查注入；embed 高而 lex 低 → 查选词；lex 高而 latent 低 → 查残差 |
 | `runs/diag_symbol_fidelity.sh` | 答案实体有没有进潜层、进了有没有被改坏 | 命中率≈0 且 α 正常 → 压缩器选词/容量；命中率高但答错 → 读出端 |
+| `oracle_embed_full` / `oracle_embed_salient`（同一脚本） | 不压缩的原生词嵌入上限；同预算下按显著性挑词 | 与 `oracle_embed`（句首截断）对比，量化"截断/位置"造成的损失 |
 | `runs/overfit_probe.sh` | 64 题能不能拟合；重建目标是否在拖主任务 | 连训练集都拟合不上 → 先修梯度/接口；`qa_kl` vs `recon_old` vs `recon_qa` 三条曲线同框比较 |
 
 ## 定位实验结果（2026-11-04，四组诊断）
@@ -97,7 +98,12 @@
    `E = z_lex + tanh(α)·Bridge(z_sem)`，最后一层零初始化，α 初值 **0.05**、硬上限 **0.5**。
    α 不能取 0：末层零初始化下 α=0 会让语义分支与门控**同时**失去梯度（死锁在"永远只有 z_lex"）。
    α 也不能无限涨：v5 涨到 0.264 时读出 EM 反而低于 v3。
-3. **训练与推理必须是同一套算法**：v4 的教训是训练期 `kfeat/lex_payloads` 被清空、
+3. **软 token 必须插在合法消息体内部**（v6）：`<|im_end|>` 与 `<|im_start|>user` 之间是
+   "角色真空区"，Qwen3 只把它当对话块之间的换行空白读，跨层注意力会被系统性衰减。
+   现在插进 user 消息体内的 `Evidence:` 段（`<|im_start|>user\nEvidence:\n[1] <soft>...`），
+   与明文 oracle 的证据段同构；槽位围栏也从 46.6 token 的长文本换成 `\n[j] ` 的极简分隔符。
+   旧 ckpt 按旧口径（`between` + `verbose`）评测，不混用。
+4. **训练与推理必须是同一套算法**：v4 的教训是训练期 `kfeat/lex_payloads` 被清空、
    第二跳接力方向写反、KL 被 stage 门控静默跳过 —— 三处都让"训练在跑、指标不动"。
    同一条规则现在也适用于**读出分布**（`--readout-mode`）、**teacher 上下文**
    （`--teacher-scope`）与**重建的 bridge 输入**（`--recon-lex`）：任何训练期与推理期

@@ -19,7 +19,14 @@
 | `oracle_latent` | 金标槽 → Bridge(z_sem, z_lex)（残差锚定，当前方法） | K_gold × m |
 | `oracle_lex`    | 金标槽 → **只用 z_lex**（α=0，纯 h0 词形直通） | K_gold × m |
 | `oracle_sem`    | 金标槽 → **只用 Bridge(z_sem)**（不给 z_lex） | K_gold × m |
-| `oracle_embed`  | 金标证据原文的真实 token embedding（不压缩） | 与 oracle_latent 对齐 |
+| `oracle_embed`  | 金标证据原文的真实 token embedding（不压缩，**句首截断**到预算） | 与 oracle_latent 对齐 |
+| `oracle_embed_full`    | 同上但**不截断**（整条证据全给）；`--embed-inject {user,between}` 选位置 | 不压缩的上限 |
+| `oracle_embed_salient` | 同等预算下按显著性（大写/数字/长词/非停用词）挑词 | 与 oracle_latent 对齐 |
+
+软 token 的**注入位置**由 `--inject-mode` 控制（默认 `user`：user 消息体内的 `Evidence:` 段；
+`between` 是旧行为，插在消息之间的角色真空区）。槽位围栏由 `--fence-style` 控制
+（默认 `bracket`：每槽 `\n[j] `，2~3 token；`verbose` 是旧长围栏）。
+ckpt 里记录了两者，**留空即以 ckpt 为准**（旧 ckpt 自动按 between+verbose 评测）。
 
 明文基线与潜层基线**走同一个 `_emit_latent` 代码路径**（明文只是 `soft=None`），
 所以"潜层掉点"不可能用"两条路模板不一样"解释掉。
@@ -58,7 +65,94 @@ import latent_memory as LM
 import train_latent_memory as T
 
 METHODS = ("none", "text", "oracle", "oracle_latent", "oracle_embed",
+           "oracle_embed_full", "oracle_embed_salient",
            "oracle_lex", "oracle_sem", "bridge", "router", "fst")
+
+# 无压缩原生词嵌入的三条对照（同一批金标槽，只换"取哪些 token"）：
+#   prefix  旧行为：从句首截 budget 个 token —— 英语事实句的核心新值常在句尾，
+#           这个截法天然把答案切掉，是 19.0% 这个数字被低估的主因。
+#   full    完全不截断：整条金标证据的原生词嵌入全给，量化"不压缩的上限"。
+#   salient 同等预算下按显著性挑：大写开头 / 含数字 / 长词 / 非停用词 / 问题里没出现
+#           过的词优先，再按原序拼回。用来回答"18 个 token 到底能装多少信息"。
+EMBED_ARMS = {"oracle_embed": "prefix",
+              "oracle_embed_full": "full",
+              "oracle_embed_salient": "salient"}
+
+
+def _salient_pick(tok, ids, budget, question):
+    """在 budget 个 token 的预算内按**显著性**挑词，而不是从句首硬截。
+
+    评分是代理指标（离线环境拿不到语料 IDF）：
+        大写开头 +3（实体） / 含数字 +3（年份、数量） / 长度>=6 +1（实词）
+        停用词或空 -2 / 问题里没出现过 +1（新信息）
+    选完按**原序**排回去，保持句子的可读顺序（乱序拼接会额外引入噪声）。
+    """
+    n = int(ids.numel())
+    if n <= 0:
+        return ids
+    budget = max(1, min(int(budget), n))
+    q_toks = set(T._norm_ans(question).split())
+    scored = []
+    for pos in range(n):
+        t = tok.decode([int(ids[pos])]).strip()
+        low = t.lower()
+        sc = 0.0
+        if t[:1].isupper():
+            sc += 3.0
+        if any(ch.isdigit() for ch in t):
+            sc += 3.0
+        if len(low) >= 6:
+            sc += 1.0
+        if not low or low in T._STOPWORDS:
+            sc -= 2.0
+        if low and low not in q_toks:
+            sc += 1.0
+        scored.append((sc, pos))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    keep = sorted(p for _sc, p in scored[:budget])
+    return ids[torch.tensor(keep, dtype=torch.long)]
+
+
+def embed_arm_ids(item, ctx, arm):
+    """按 arm 取"金标证据的原生 token id"。返回 (ids 或 None, 预算, 槽数)。
+
+    arm:
+        prefix  —— 每槽从**句首**截 budget 个（旧行为）
+        full    —— 每槽全部 token，不截断
+        salient —— 每槽在同等 budget 内按显著性挑
+    预算口径与 `oracle_latent` 对齐：每槽 ceil(unit_tokens/max_unit_tokens) 个块 × m 个
+    向量，且 token 数按 `unit_encode_text`（"[标题] 原文"，压缩器实际看到的文本）计算。
+    """
+    tok = ctx["tokenizer"]
+    units = T.item_units(item)
+    idxe = [i for i in sorted(gold_slots(item, units)) if 0 <= i < len(units)]
+    if not idxe:
+        return None, 0, 0
+    mut = max(1, int(ctx.get("max_unit_tokens") or 32))
+    m = max(1, int(ctx.get("m_slots") or 4))
+    fixed = int(ctx.get("embed_budget") or 0)
+    if arm == "full":
+        budgets = [None] * len(idxe)
+    elif fixed > 0:
+        share = max(1, fixed // max(1, len(idxe)))
+        budgets = [share] * len(idxe)
+    else:
+        budgets = []
+        for i in idxe:
+            _ids = LM._tokenize_no_special(tok, T.unit_encode_text(item, i), ctx["dev"])
+            n = max(1, int(_ids.shape[1]))
+            budgets.append(max(1, (n + mut - 1) // mut) * m)
+    chunks = []
+    for i, b in zip(idxe, budgets):
+        ids = LM._tokenize_no_special(tok, T.unit_encode_text(item, i), ctx["dev"])[0]
+        if b is not None:
+            ids = (_salient_pick(tok, ids, b, item["question"])
+                   if arm == "salient" else ids[:int(b)])
+        if int(ids.numel()) > 0:
+            chunks.append(ids)
+    if not chunks:
+        return None, 0, len(idxe)
+    return torch.cat(chunks, dim=0), int(sum(len(c) for c in chunks)), len(idxe)
 
 # ---------------------------------------------------------------------
 # 指标与字段口径
@@ -256,73 +350,46 @@ def read_one(method, item, ctx):
                 "picked": list(idx), "gold": sorted(_gs2)}
         return pred, info
 
-    if method == "oracle_embed":
-        # ---- 读出机制归因：**不压缩**，直接注入金标证据原文的真实 token embedding ----
-        # 与 oracle_latent 用同一个注入位置、同一份 token 预算（每个金标槽 m 个向量），
-        # 唯一差别是"这些向量来自冻结 Qwen 的 embedding 表"还是"来自 bridge 的输出"。
-        # 因此这一个数就能把两种损失分开：
-        #   oracle_embed ≈ oracle(明文)，而 oracle_latent 低  -> 瓶颈在压缩器/bridge
-        #   oracle_embed 本身也低                            -> 瓶颈在 soft-token 注入机制
-        # 这条分支不加载 ckpt（不需要 encoder/bridge），只依赖主干与 tokenizer。
-        _gse = gold_slots(item, units)
-        _idxe = [i for i in sorted(_gse) if 0 <= i < len(units)]
-        if not _idxe:
+    if method in EMBED_ARMS:
+        # ---- 读出机制归因：**不压缩**，直接注入金标证据的原生 token embedding ----
+        # 三条 arm 只差"取哪些 token"，注入位置由 --embed-inject 控制：
+        #   prefix  句首截 budget 个（旧行为，会把句尾的核心新值切掉）
+        #   full    完全不截断（量化"不压缩的上限"）
+        #   salient 同等 budget 下按显著性挑（大写/数字/长词/非停用词/问题里没出现过）
+        # 位置对照（in-message vs between-message）用 --embed-inject 切换：
+        # 同一个 arm 跑两遍，差值就是"注入位置不当"造成的损失。
+        arm = EMBED_ARMS[method]
+        _ids, _budget, _nslots = embed_arm_ids(item, ctx, arm)
+        if _ids is None:
             return "", {"oracle_no_evidence": True, "mem_tokens": 0,
                         "mem_plain_tokens": 0, "prompt_tokens": 0, "pre_ms": 0.0,
                         "enc_ms": 0.0, "gen_ms": 0.0,
                         "total_ms": (time.time() - t0) * 1e3, "n_read_units": 0,
                         "read_ok": None, "read_all": None, "picked": [], "gold": []}
-        _m = max(1, int(ctx.get("m_slots") or 4))
-        _mut = max(1, int(ctx.get("max_unit_tokens") or 32))
-        # 预算必须与 oracle_latent **逐样本对齐**：那边每个金标槽产生
-        # ceil(单元token/ max_unit_tokens) 个块 × m 个软向量。旧写法按 len(idx)*m
-        # 给，长单元被砍掉大半（实测 9.7 vs 34.5 token），两个数就不可比了 ——
-        # 那一版结论是无效的，必须按块数算预算。
-        _per_slot = []
-        _fixed = int(ctx.get("embed_budget") or 0)
-        if _fixed > 0:
-            # 显式预算：与 oracle_latent 的实测平均 token 数对齐（34.5），
-            # 各槽均分，保证后面的槽也被表示到（只取前缀会系统性偏向第一槽）。
-            _share = max(1, _fixed // max(1, len(_idxe)))
-            _per_slot = [_share] * len(_idxe)
-        else:
-            for _i in _idxe:
-                # 块数必须按**压缩器实际看到的文本**算（`unit_encode_text` = "[标题] 原文"），
-                # 否则 oracle_embed 与 oracle_latent 的块数口径不同：同一句 60 token 的句子，
-                # 原文切 2 块、带标题切 3 块，两边的注入预算就差 1/3，归因直接失真。
-                _t = LM._tokenize_no_special(tok, T.unit_encode_text(item, _i), dev)
-                _n = max(1, int(_t.shape[1]))
-                _k = (int(_n) + _mut - 1) // _mut
-                _per_slot.append(max(1, _k) * _m)
-        budget = int(sum(_per_slot))
-        _chunks = [LM._tokenize_no_special(tok, T.unit_encode_text(item, _i), dev)[0, :int(_b)]
-                   for _i, _b in zip(_idxe, _per_slot)]
-        _chunks = [c for c in _chunks if int(c.numel()) > 0]
-        if not _chunks:
-            ids = LM._tokenize_no_special(tok, " ", dev)[0, :1]
-        else:
-            ids = torch.cat(_chunks, dim=0)
-        if int(ids.numel()) == 0:
-            return "", {"oracle_no_evidence": True, "mem_tokens": 0,
-                        "mem_plain_tokens": 0, "prompt_tokens": 0, "pre_ms": 0.0,
-                        "enc_ms": 0.0, "gen_ms": 0.0,
-                        "total_ms": (time.time() - t0) * 1e3, "n_read_units": 0,
-                        "read_ok": None, "read_all": None, "picked": [], "gold": []}
-        emb = model.get_input_embeddings()(ids.view(1, -1))
+        emb = model.get_input_embeddings()(_ids.view(1, -1))
+        _inj = str(ctx.get("embed_inject") or "user")
         pred, meta = LM._emit_latent(
             model, tok, emb, question, sysp,
             max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
-            extra_meta={"has_payload": True, "oracle_embed": True,
-                        "embed_budget": budget})
+            inject_mode=_inj,
+            extra_meta={"has_payload": True, "oracle_embed": True, "embed_arm": arm,
+                        "embed_inject": _inj, "embed_budget": int(_budget)})
         info = {"mem_tokens": int(meta.get("n_soft", 0)), "mem_plain_tokens": 0,
                 "prompt_tokens": int(meta.get("n_in", meta.get("n_soft", 0))),
                 "pre_ms": 0.0, "enc_ms": 0.0,
                 "gen_ms": (time.time() - t0) * 1e3,
                 "total_ms": (time.time() - t0) * 1e3,
-                "n_read_units": len(_idxe),
+                "n_read_units": int(_nslots),
                 "read_ok": True, "read_all": True,
-                "picked": list(_idxe), "gold": sorted(_gse),
-                "embed_budget": budget}
+                "picked": sorted(gold_slots(item, units)),
+                "gold": sorted(gold_slots(item, units)),
+                "embed_arm": arm, "embed_inject": _inj,
+                "embed_budget": int(_budget),
+                # 注入 token 的构成必须分开记账，否则"给得多反而更差"会被误读成
+                # "压缩器不行"，而实际上是围栏泡沫占了大多数位置。
+                "n_soft_content": meta.get("n_soft_content"),
+                "n_fence": meta.get("n_fence"),
+                "inject_mode": meta.get("inject_mode")}
         return pred, info
 
     # ---- 潜层：先编码（所有潜层方法都要付这笔前向） ----
@@ -400,12 +467,15 @@ def read_one(method, item, ctx):
         _iso = bool(ctx.get("slot_isolation"))
         _soft_seg = LM.compose_routed_soft(model, tok, ctx["bridge"], _z, dev=dev,
                                           lex_list=_lx, isolate=_iso,
-                                          return_segs=True)
+                                          return_segs=True,
+                                          fence_style=ctx.get("fence_style"))
         soft, _seg_ids = _soft_seg
         pred, meta = LM._emit_latent(
             model, tok, soft, question, sysp,
             max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
             seg_ids=_seg_ids, isolate=_iso,
+            inject_mode=ctx.get("inject_mode"),
+            fence_style=ctx.get("fence_style"),
             extra_meta={"has_payload": True, "routed": _idx,
                         "hops": item_hops(item), "oracle_addressing": True})
         meta = dict(meta)
@@ -437,17 +507,21 @@ def read_one(method, item, ctx):
             try:
                 soft, _seg_ids = LM.compose_routed_soft(
                     model, tok, ctx["bridge"], _z, dev=dev, lex_list=_lx,
-                    isolate=_iso, return_segs=True)
+                    isolate=_iso, return_segs=True,
+                    fence_style=ctx.get("fence_style"))
             finally:
                 _restore_alpha(ctx["bridge"], _saved)
         else:
             soft, _seg_ids = LM.compose_routed_soft(
                 model, tok, ctx["bridge"], _z, dev=dev, lex_list=None,
-                isolate=_iso, return_segs=True)
+                isolate=_iso, return_segs=True,
+                fence_style=ctx.get("fence_style"))
         pred, meta = LM._emit_latent(
             model, tok, soft, question, sysp,
             max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
             seg_ids=_seg_ids, isolate=_iso,
+            inject_mode=ctx.get("inject_mode"),
+            fence_style=ctx.get("fence_style"),
             extra_meta={"has_payload": True, "routed": _idx,
                         "hops": item_hops(item), "oracle_addressing": True,
                         "oracle_branch": method})
@@ -462,7 +536,9 @@ def read_one(method, item, ctx):
             hops=item_hops(item), reads=slot_reads, kfeat=kfeat,
             q_tok=qf_ex.get("h0_tok"), lex_reads=lex_payloads,
             topk_per_hop=int(ctx.get("topk_per_hop") or 1),
-            isolate=int(ctx.get("slot_isolation") or 0))
+            isolate=int(ctx.get("slot_isolation") or 0),
+            inject_mode=ctx.get("inject_mode"),
+            fence_style=ctx.get("fence_style"))
         # q_feat 已由 extract_query_feature_ex 算好并显式传入，避免 generate 内重跑前向
     t_gen = time.time()
     _gs = gold_slots(item, units)
@@ -475,6 +551,12 @@ def read_one(method, item, ctx):
             "total_ms": (time.time() - t0) * 1e3,
             "n_read_units": max(1, len(_picked)),
             "decode_mode": meta.get("decode_mode"),
+            # 注入 token 的构成：内容向量 vs 围栏泡沫。这是本轮改动的核心观测量，
+            # 不分开记账就分不清"给得多"和"给了有用的东西"。
+            "n_soft_content": meta.get("n_soft_content"),
+            "n_fence": meta.get("n_fence"),
+            "inject_mode": meta.get("inject_mode"),
+            "fence_style": meta.get("fence_style"),
             # 隔离到底有没有生效必须逐样本落盘：SDPA 下块对角会被静默丢弃，
             # 只报"开了 isolate=1"而不报实际生效模式，等于把降级藏起来。
             "slot_isolation": meta.get("slot_isolation"),
@@ -600,6 +682,17 @@ def main(argv=None):
     # 与训练保持一致：2 跳 × 4 = 8 个读出名额（金标 >=3 条的题在 4 名额下召回到顶）
     ap.add_argument("--topk-per-hop", type=int, default=4,
                     help="路由方法每跳读出几个槽（1=v3 上限 2 槽；2=两跳共 4 槽）")
+    ap.add_argument("--inject-mode", choices=("", "user", "system", "between"),
+                    default="",
+                    help="软 token 插在哪。留空=按 ckpt 里训练时的配置（推荐，训练/评测同源）；"
+                         "between 是旧行为（消息之间的角色真空区），只用于 A/B 对照")
+    ap.add_argument("--fence-style", choices=("", "bracket", "verbose"), default="",
+                    help="槽位围栏样式。留空=按 ckpt 配置；verbose 是旧长围栏")
+    ap.add_argument("--embed-inject", choices=("user", "system", "between"),
+                    default="user",
+                    help="oracle_embed* 三条基线把原生词嵌入放在哪：user=消息体内（默认）、"
+                         "between=消息之间（旧软 token 插入点）。同一 arm 跑两遍即可量化"
+                         "\"位置不当\"造成的损失")
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
                     help="1=尝试槽位块对角隔离（仅 eager 后端生效，否则降级并记账）")
     ap.add_argument("--train-max-slots", type=int, default=0,
@@ -633,6 +726,9 @@ def main(argv=None):
            "ver_policy": args.ver_policy,
            "topk_per_hop": int(args.topk_per_hop),
            "slot_isolation": int(args.slot_isolation),
+           "inject_mode": (args.inject_mode or LM.LATENT_INJECT_MODE),
+           "fence_style": (args.fence_style or LM.LATENT_FENCE_STYLE),
+           "embed_inject": str(args.embed_inject),
            # oracle_embed 用：每个金标槽给 m 个软 token，预算与 oracle_latent 对齐
            "m_slots": int(getattr(args, "m", 4) or 4),
            "max_unit_tokens": int(args.max_unit_tokens),
@@ -669,6 +765,27 @@ def main(argv=None):
         ctx.update({"encoder": reader.encoder, "bridge": reader.bridge,
                     "router": use_router, "fst_router": reader.fst_router,
                     "hist_max": args.hist_max})
+        # 注入位置/围栏样式**以 ckpt 为准**：训练时插在消息体内、评测却插在消息之间，
+        # 两行数字就不是同一个方法。命令行显式给了才覆盖（A/B 对照用）。
+        _ck_inj = str(reader.config.get("inject_mode", "") or "")
+        _ck_fen = str(reader.config.get("fence_style", "") or "")
+        # **旧 ckpt 必须按旧口径评测**：v5 及以前的权重是在"消息之间 + 长围栏"下训出来的，
+        # 直接按新默认（消息体内 + 极简围栏）评测就是训练/推理不一致，数字没有意义。
+        if not _ck_inj:
+            _ck_inj = "between"
+            print("[inject][warn] ckpt 未记录 inject_mode（v5 及更早）：按旧行为 "
+                  "between（消息之间）评测。要评估新位置必须用新训的 ckpt", flush=True)
+        if not _ck_fen:
+            _ck_fen = "verbose"
+            print("[inject][warn] ckpt 未记录 fence_style（v5 及更早）：按旧行为 "
+                  "verbose（长围栏）评测", flush=True)
+        if not args.inject_mode:
+            ctx["inject_mode"] = _ck_inj
+        if not args.fence_style:
+            ctx["fence_style"] = _ck_fen
+        print(f"[inject] inject_mode={ctx['inject_mode']} "
+              f"fence_style={ctx['fence_style']} "
+              f"（ckpt: {_ck_inj or '未记录'} / {_ck_fen or '未记录'}）", flush=True)
         if args.method in ("oracle_lex", "oracle_sem") and not getattr(
                 reader.bridge, "lex_skip", False):
             raise SystemExit(f"--method {args.method} 需要 ckpt 打开 lex_skip")
@@ -678,7 +795,7 @@ def main(argv=None):
                 raise SystemExit(f"checkpoint {args.ckpt} 里没有 "
                                  f"{'router' if args.method == 'router' else 'fst_router'} 权重")
 
-    if args.method == "oracle_embed":
+    if args.method in EMBED_ARMS:
         # oracle_embed 不加载 bridge/encoder，但**预算必须和 oracle_latent 对齐**：
         # 它按"每个金标槽 ceil(unit_tokens / max_unit_tokens) 块 × m 个向量"算注入
         # token 数。CLI 默认 64 而 v5 训练时是 32，直接跑会让两边的预算差一倍，
@@ -695,7 +812,7 @@ def main(argv=None):
                 ctx["max_unit_tokens"] = _mut
                 ctx["m_slots"] = _ms
         else:
-            print(f"[budget][warn] oracle_embed 未给 --ckpt：按 CLI max_unit_tokens="
+            print(f"[budget][warn] {args.method} 未给 --ckpt：按 CLI max_unit_tokens="
                   f"{ctx['max_unit_tokens']} 算预算，与训练配置不一致时该行不可比",
                   flush=True)
 

@@ -1121,9 +1121,10 @@ def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
                             f"第 {i} 槽直通载荷 {tuple(lx.shape)} 与语义载荷 "
                             f"{tuple(p.shape)} 元素数不一致，无法对齐")
         # 与 QA 逐位同构：单槽 compose（含同一道槽位围栏）→ bridge(z, z_lex)
-        soft_u = LM.compose_routed_soft(model, tokenizer, bridge, [p], dev=dev,
-                                       lex_list=([lx] if lx is not None else None),
-                                       isolate=False)
+        soft_u = LM.compose_routed_soft(
+            model, tokenizer, bridge, [p], dev=dev,
+            lex_list=([lx] if lx is not None else None), isolate=False,
+            fence_style=str(getattr(_ARGS_REF[0], "fence_style", LM.LATENT_FENCE_STYLE)))
         soft_u = soft_u.reshape(1, -1, soft_u.shape[-1])
         r_embeds, r_labels, _n = build_student_inputs(
             model, tokenizer, soft_u, system_prompt,
@@ -1206,7 +1207,14 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
             _kw = {"kfeat": kfeat, "q_tok": qf_ex.get("h0_tok"),
                    "lex_reads": lex_payloads,
                    "topk_per_hop": int(getattr(_ARGS_REF[0], "topk_per_hop", 1) or 1),
-                   "isolate": int(getattr(_ARGS_REF[0], "slot_isolation", 0) or 0)}
+                   "isolate": int(getattr(_ARGS_REF[0], "slot_isolation", 0) or 0),
+                   # 注入位置与围栏样式必须与正式评测同源：这两项直接决定
+                   # "注入 token 里有多少是泡沫"以及"软向量落在哪个角色段"，
+                   # 训练期日志的 EM 若用另一套口径，就不能与 eval_latent_table 对比。
+                   "inject_mode": str(getattr(_ARGS_REF[0], "inject_mode",
+                                              LM.LATENT_INJECT_MODE)),
+                   "fence_style": str(getattr(_ARGS_REF[0], "fence_style",
+                                              LM.LATENT_FENCE_STYLE))}
         pred, _meta = LM.generate_latent_answer(
             model=model, tokenizer=tokenizer, bridge=bridge, payloads=z_keys,
             question=item["question"], system_prompt=system_prompt, max_new_tokens=16,
@@ -1818,6 +1826,8 @@ def train(args):
                 "router_readout_p": float(getattr(args, "router_readout_p", 0.5)),
                 "teacher_scope": str(getattr(args, "teacher_scope", "gold")),
                 "recon_lex": int(getattr(args, "recon_lex", 1)),
+                "inject_mode": str(getattr(args, "inject_mode", LM.LATENT_INJECT_MODE)),
+                "fence_style": str(getattr(args, "fence_style", LM.LATENT_FENCE_STYLE)),
                 "bridge_alpha_max": float(getattr(bridge, "alpha_max",
                                                  LM.LATENT_ALPHA_MAX))}
 
@@ -2044,7 +2054,8 @@ def train(args):
                     _rstat["n_gold"] += 1
                 soft = LM.compose_routed_soft(
                     model, tokenizer, bridge, _zsel, dev=dev, lex_list=_lxsel,
-                    isolate=bool(args.slot_isolation))
+                    isolate=bool(args.slot_isolation),
+                    fence_style=str(getattr(args, "fence_style", LM.LATENT_FENCE_STYLE)))
             else:
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
@@ -3143,6 +3154,15 @@ def parse_args(argv=None):
                     help="金标之外再混入几个 router 高分干扰槽（0=不混，回到 v3 的纯净金标）")
     ap.add_argument("--topk-per-hop", type=int, default=2,
                     help="每跳读出几个槽（1=v3 的两槽上限；2=两跳共 4 槽）")
+    ap.add_argument("--inject-mode", choices=("user", "system", "between"),
+                    default=LM.LATENT_INJECT_MODE,
+                    help="软 token 插在哪：user=user 消息体内的 Evidence: 段（默认，"
+                         "与明文 oracle 同构）；system=system 消息内部；"
+                         "between=旧行为（消息之间的角色真空区，仅 A/B 对照）")
+    ap.add_argument("--fence-style", choices=("bracket", "verbose"),
+                    default=LM.LATENT_FENCE_STYLE,
+                    help="槽位围栏：bracket=极简 `\n[j] `（每槽 2~3 token）；"
+                         "verbose=旧长围栏（isolate 时前后各一段，每题约 46.6 token）")
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
                     help="1=读出侧尝试槽位块对角隔离（eager 后端生效，否则降级为围栏）")
     ap.add_argument("--no-lex-skip", dest="lex_skip", action="store_false", default=True,

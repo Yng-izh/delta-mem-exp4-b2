@@ -102,6 +102,8 @@ GPU=0 bash runs/run_stage2_bridge.sh
 | `--recon-lex {1,0}` | 重建是否与 QA 走同一条 `bridge(z_sem, z_lex)`。默认 1；0 复现"重建只训语义分支"的旧行为 |
 | `--kl-weight 1.0 --recon-weight 0.5` | 蒸馏与重建权重 |
 | `--alpha-max 0.5 --lex-gate-init 0.05` | 残差 α 的硬上限与初值。初值**不能为 0**（末层零初始化下 α=0 会让语义分支与门控同时失去梯度） |
+| `--inject-mode {user,system,between}` | 软 token 插在哪。默认 `user`（user 消息体内的 Evidence: 段，与明文 oracle 同构）；`between` 是旧行为（消息之间的角色真空区，仅 A/B 对照） |
+| `--fence-style {bracket,verbose}` | 槽位围栏。默认 `bracket`（每槽 `\n[j] `，2~3 token）；`verbose` 是旧长围栏（每题约 46.6 token） |
 | `--diag-every 50` | 每 50 步打印 α / 残差比 / 输出范数 / 末层权重范数，并记录裁剪前总梯度与 clip_coef |
 | `--topk-per-hop 4` | 2 跳 Top-4 beam → 最多 8 槽读出 |
 | `--router-kind {latent,hybrid}` | hybrid = 冻结 h0/h18 注意力池化 + Token-MaxSim 兜底 |
@@ -131,7 +133,9 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
 | `oracle_latent` | **金标槽位直送 Bridge**（不经 Router） | 潜层读出上界：测"100% 选对证据"时能到多少 |
 | `oracle_lex` | 金标槽位、**只用 z_lex**（α=0） | 读出分解：纯词形保真那条腿 |
 | `oracle_sem` | 金标槽位、**只用 Bridge(z_sem)** | 读出分解：纯语义映射那条腿 |
-| `oracle_embed` | 金标证据原文的真实 token embedding（不压缩） | 区分"软 token 注入机制"与"压缩损失"；预算按 ckpt 的 `max_unit_tokens/m` 对齐 |
+| `oracle_embed` | 金标证据原文的真实 token embedding（不压缩，**句首截断**到预算） | 区分"软 token 注入机制"与"压缩损失"；预算按 ckpt 的 `max_unit_tokens/m` 对齐 |
+| `oracle_embed_full` | 同上但**不截断**（整条证据的原生词嵌入全给） | 不压缩的上限；配 `--embed-inject {user,between}` 可量化"注入位置不当"的损失 |
+| `oracle_embed_salient` | 同等预算下按**显著性**挑词（大写/数字/长词/非停用词/问题里没出现过） | 回答"18 个 token 到底能装多少信息"，排除句首截断的物理假象 |
 | `bridge` | 压缩器潜向量，单槽 | 保真诊断 |
 | `router` | Router 寻址 + Bridge | 主方法 |
 | `fst` | 多跳潜层接力 + 版本策略 | 动态更新场景 |

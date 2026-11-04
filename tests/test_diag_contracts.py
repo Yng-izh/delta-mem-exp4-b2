@@ -297,7 +297,81 @@ def test_word_span():
     ok("G7 无关词不算命中", S._hit(["is"], "Mercedes-AMG") is False)
 
 
+# =====================================================================
+# H. 注入位置（消息体内 vs 消息之间）与围栏泡沫
+# =====================================================================
+class _WordTok:
+    """按词表 decode 的假分词器（给显著性挑词用）。"""
+
+    def __init__(self, words):
+        self.words = list(words)
+
+    def decode(self, ids, skip_special_tokens=True):
+        return " ".join(self.words[int(i)] for i in ids)
+
+
+def test_inject_position():
+    import eval_latent_table as E
+    model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
+    tok = T.StubTok(vocab_size=256)
+    bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True)
+    z = [torch.randn(1, 4, 32), torch.randn(1, 4, 32)]
+    lex = [torch.randn(1, 4, 32) for _ in z]
+
+    # H1/H2 围栏泡沫：bracket 必须显著短于 verbose（这是本次改动的目的）
+    soft_b, segs_b = LM.compose_routed_soft(
+        model, tok, bridge, z, lex_list=lex, isolate=True, return_segs=True,
+        fence_style="bracket")
+    soft_v, segs_v = LM.compose_routed_soft(
+        model, tok, bridge, z, lex_list=lex, isolate=True, return_segs=True,
+        fence_style="verbose")
+    content = 2 * 4                      # 2 槽 × m=4
+    fence_b = int(soft_b.shape[1]) - content
+    fence_v = int(soft_v.shape[1]) - content
+    ok("H1 bracket 围栏 token 数显著少于 verbose", fence_b < fence_v,
+       extra=f"bracket={fence_b} verbose={fence_v}")
+    ok("H2 bracket 每槽围栏 <= 4 token", fence_b <= 8, extra=f"fence={fence_b}")
+
+    # H3 注入位置：默认 user，软 token 落在 user 消息体内
+    pre, post = LM._chat_parts_with_soft_slot(tok, "sys", "Q?", "user")
+    ok("H3 软 token 插在 user 消息体内",
+       "<user>" in pre and "Evidence:" in pre and "Question:" in post,
+       extra=f"pre={pre!r} post={post!r}")
+    ok("H4 占位符不会泄漏进最终 prompt",
+       LM._SOFT_SENTINEL not in pre and LM._SOFT_SENTINEL not in post)
+    pre_s, post_s = LM._chat_parts_with_soft_slot(tok, "sys", "Q?", "system")
+    # system 模式下问题是**独立的一条 user 消息**（与明文 oracle 同构），
+    # 所以 post 里是问题本身，而不是 "Question:" 前缀。
+    ok("H5 system 模式把证据段放进 system 消息内部",
+       "<system>" in pre_s and "Evidence:" in pre_s and "Q?" in post_s,
+       extra=f"pre={pre_s!r} post={post_s!r}")
+    ok("H6 between 不是合法体内模式（走旧路径）",
+       _raises(lambda: LM._chat_parts_with_soft_slot(tok, "sys", "Q?", "between")))
+    ok("H7 非法 inject_mode 直接报错", _raises(lambda: LM._check_inject_cfg("nope")))
+    ok("H8 非法 fence_style 直接报错", _raises(lambda: LM._check_inject_cfg(None, "nope")))
+
+    # H9 记账：内容 token 与围栏 token 必须分开
+    pred, meta = LM._emit_latent(model, tok, soft_b, "Q?", "sys", max_new_tokens=2,
+                                 pad_token_id=0, seg_ids=segs_b, isolate=True,
+                                 inject_mode="user", fence_style="bracket")
+    ok("H9 meta 分开记账 content/fence",
+       int(meta["n_soft_content"]) + int(meta["n_fence"]) == int(meta["n_soft"]),
+       extra=str({k: meta[k] for k in ("n_soft", "n_soft_content", "n_fence")}))
+    ok("H10 meta 记录注入位置与围栏样式",
+       meta["inject_mode"] == "user" and meta["fence_style"] == "bracket")
+
+    # H11 显著性挑词：优先实体与数字，丢掉停用词
+    wt = _WordTok(["the", "Rome", "was", "9984"])
+    ids = torch.tensor([0, 1, 2, 3])
+    keep = E._salient_pick(wt, ids, 2, "what happened")
+    ok("H11 同等预算下按显著性挑词（Rome + 9984）",
+       keep.tolist() == [1, 3], extra=str(keep.tolist()))
+    ok("H12 预算 >= 词数时全保留",
+       E._salient_pick(wt, ids, 99, "q").tolist() == [0, 1, 2, 3])
+
+
 def main():
+    test_inject_position()
     test_word_span()
     test_bridge_numerics()
     test_recon_uses_lex()

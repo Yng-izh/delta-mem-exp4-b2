@@ -48,8 +48,14 @@ import train_latent_memory as T
 ARMS = ("qa_kl", "recon_old", "recon_qa")
 
 
-def _gold_read(comp, bridge, enc, model, tok, item, sysp, dev, pad, max_new=16):
-    """oracle_latent 自由生成：金标槽 -> compose -> 注入生成。返回 (pred, gold)。"""
+def _gold_read(comp, bridge, enc, model, tok, item, sysp, dev, pad, max_new=16,
+               fence_style=None, inject_mode=None):
+    """oracle_latent 自由生成：金标槽 -> compose -> 注入生成。返回 (pred, gold)。
+
+    训练与评测**必须用同一套** isolate / fence_style / inject_mode：
+    SDPA 下 isolate=False 与 isolate=True 的掩码与围栏分布完全不同，
+    一边开一边关，测出来的 EM 就不是同一个方法。
+    """
     units = T.item_units(item)
     gold_idx = T.evidence_slot_indices(units, item.get("evidence"))
     payloads, _z, _info, _kf, lex_all = T.encode_item_slots_full(
@@ -59,22 +65,25 @@ def _gold_read(comp, bridge, enc, model, tok, item, sysp, dev, pad, max_new=16):
     soft = LM.compose_routed_soft(
         model, tok, bridge, [reads[i] for i in idx], dev=dev,
         lex_list=([lex_all[i] for i in idx] if lex_all is not None else None),
-        isolate=False)
+        isolate=True, fence_style=fence_style)
     pred, _meta = LM._emit_latent(model, tok, soft, item["question"], sysp,
-                                  max_new_tokens=int(max_new), pad_token_id=pad)
+                                  max_new_tokens=int(max_new), pad_token_id=pad,
+                                  inject_mode=inject_mode, fence_style=fence_style)
     gold = item["answer"]
     if isinstance(gold, (list, tuple)):
         gold = " ".join(str(x) for x in gold)
     return str(pred), str(gold)
 
 
-def eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad, max_new=16):
+def eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad, max_new=16,
+                fence_style=None, inject_mode=None):
     """同一批题上的 oracle_latent EM（自由生成，与评测同一条构造）。"""
     hit = 0
     for item in items:
         T.reset_delta_state(model)
         pred, gold = _gold_read(comp, bridge, enc, model, tok, item, sysp, dev,
-                                pad, max_new=max_new)
+                                pad, max_new=max_new, fence_style=fence_style,
+                                inject_mode=inject_mode)
         hit += int(T._norm_ans(pred) == T._norm_ans(gold))
     return hit / max(1, len(items))
 
@@ -106,7 +115,9 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
         soft = LM.compose_routed_soft(
             model, tok, bridge, [reads[i] for i in idx], dev=dev,
             lex_list=([lex_all[i] for i in idx] if lex_all is not None else None),
-            isolate=False)
+            # 与正式 v5 读出对齐：训练侧也开 isolate（旧写法两边都是 False，
+            # 测出来的曲线不能代表正式读出）
+            isolate=True, fence_style=str(getattr(args, "fence_style", "") or None))
         embeds, labels, n_ans = T.build_student_inputs(
             model, tok, soft, sysp, item["question"], item["answer"])
         with LM.delta_write_disabled(model):
@@ -145,7 +156,9 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
             opt.step()
             opt.zero_grad(set_to_none=True)
             if args.eval_every > 0 and (step + 1) % int(args.eval_every) == 0:
-                em = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad)
+                em = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad,
+                                 fence_style=str(getattr(args, "fence_style", "") or None),
+                                 inject_mode=str(getattr(args, "inject_mode", "") or None))
                 curve.append({"step": step + 1, "em": em,
                               "loss_qa": float(loss_qa.detach()),
                               "loss_kl": float(loss_kl.detach()) if loss_kl is not None else None,
@@ -156,7 +169,9 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
                       f"rec={'n/a' if loss_r is None else round(float(loss_r), 4)} "
                       f"α={float(bridge.alpha()):.3f} ({time.time() - t0:.0f}s)",
                       flush=True)
-    em_final = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad)
+    em_final = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad,
+                           fence_style=str(getattr(args, "fence_style", "") or None),
+                           inject_mode=str(getattr(args, "inject_mode", "") or None))
     curve.append({"step": int(args.steps), "em": em_final, "final": True})
     print(f"[{arm}] 训练集 oracle_latent EM = {em_final:.4f} "
           f"（{len(items)} 题，{args.steps} 步）", flush=True)
@@ -181,6 +196,10 @@ def main(argv=None):
     ap.add_argument("--grad-clip", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arms", default="qa_kl,recon_old,recon_qa")
+    ap.add_argument("--fence-style", choices=("", "bracket", "verbose"), default="",
+                    help="围栏样式（留空=用 latent_memory 的默认；训练与评测共用）")
+    ap.add_argument("--inject-mode", choices=("", "user", "system", "between"),
+                    default="", help="软 token 注入位置（训练与评测共用）")
     ap.add_argument("--gpu", default="0")
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.",
@@ -221,19 +240,31 @@ def main(argv=None):
         # 每个 arm 都从**同一份 ckpt** 重新加载，保证初始化逐位相同
         reader = LM.load_latent_reader(a.ckpt, model, tok, device=dev)
         print(f"\n===== arm={arm} =====", flush=True)
+        # **Step 0 必须在同一批 64 题上测**：否则"64 题比验证集简单"这个偏差
+        # 会被算进"训练带来的提升"里，三条曲线也就不可比。
+        em0 = eval_oracle(reader.compressor, reader.bridge, reader.encoder,
+                          model, tok, items, sysp, dev, pad,
+                          fence_style=str(a.fence_style or None),
+                          inject_mode=str(a.inject_mode or None))
+        print(f"[{arm}] step=0 训练集 EM = {em0:.4f}（同一批 {len(items)} 题，"
+              f"未训练）", flush=True)
         curve, em = train_arm(arm, reader, model, tok, items, a, dev, pad)
-        results[arm] = {"curve": curve, "train_em": em,
+        curve.insert(0, {"step": 0, "em": em0, "untrained": True})
+        results[arm] = {"curve": curve, "train_em": em, "train_em_step0": em0,
+                        "gain": em - em0,
                         "alpha": float(reader.bridge.alpha()),
                         "n_items": len(items)}
 
     print("\n" + "=" * 70)
-    print("| arm | 训练集 oracle_latent EM | 说明 |")
-    print("|---|---|---|")
+    print("| arm | step0 EM | 训练后 EM | 增益 | 说明 |")
+    print("|---|---|---|---|---|")
     _note = {"qa_kl": "不加重建（干净对照）",
              "recon_old": "重建走 bridge(z_sem)（与 QA 目标不一致）",
              "recon_qa": "重建走 bridge(z_sem, z_lex)（与 QA 同路径）"}
     for arm in arms:
-        print(f"| {arm} | {results[arm]['train_em']:.4f} | {_note[arm]} |")
+        r = results[arm]
+        print(f"| {arm} | {r['train_em_step0']:.4f} | {r['train_em']:.4f} "
+              f"| {r['gain']:+.4f} | {_note[arm]} |")
     if a.save_json:
         os.makedirs(os.path.dirname(os.path.abspath(a.save_json)) or ".", exist_ok=True)
         with open(a.save_json, "w", encoding="utf-8") as f:

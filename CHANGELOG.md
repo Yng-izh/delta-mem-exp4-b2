@@ -2,6 +2,29 @@
 
 只保留对**当前代码**有约束力的条目。历史实验的逐轮流水已随旧版本一起移除。
 
+## 软 token 的注入位置与围栏结构（2026-11-04 第四轮，v6 手术一）
+
+**问题**：软 token 插在 `<|im_end|>` 与 `<|im_start|>user` 之间的"角色真空区"，而
+Qwen3 在指令微调里从没在消息边界外见过连续向量，自注意力只把这段当换行空白；
+同时 `slot_isolation=1` 的围栏是 `-- Fact j (memory slot, isolated) --` 前后两段长文本，
+实测每题 64.5 个注入 token 里有 46.6 个（72.2%）是重复英文围栏，真正的内容向量只有 17.9 个。
+
+| 改动 | 做法 | 影响 |
+|---|---|---|
+| 注入位置 | `--inject-mode user`（默认）：`<\|im_start\|>user\nEvidence:\n[1] <soft>\nQuestion: q`；`system` 放进 system 消息内部（与明文 oracle 同构）；`between` 保留旧行为供 A/B | 软向量落在"被当内容读"的位置 |
+| 围栏 | `--fence-style bracket`（默认）：每槽 `\n[j] `，2~3 token；`verbose` 保留旧长围栏 | 注入 token 里围栏占比从 72% 降到个位数 |
+| 记账 | `meta["n_soft_content"]` / `meta["n_fence"]` 分开报 | "给得多"与"给了有用的东西"不再混为一谈 |
+| 兼容 | ckpt 未记录这两个字段（v5 及更早）时**按旧口径**（between + verbose）评测并告警 | 旧结果仍可复现，不会静默换口径 |
+
+**注意**：bracket 样式下 `isolate` 不再改变围栏文本，隔离只剩块对角掩码一条路；
+SDPA 后端拿不到 4D 掩码时会降级为"单个分隔符"，比旧的双围栏更弱。实际模式仍写在
+`meta["slot_isolation"]` 里。
+
+同轮新增三条原生词嵌入对照（`eval_latent_table.py`）：`oracle_embed_full`（不截断，
+可分别放消息体内/消息之间，量化"位置不当"的损失）、`oracle_embed_salient`（同等预算下
+按大写/数字/长词/非停用词挑词，而不是从句首硬截）。`overfit_probe.py` 补上**同题 Step 0**
+并把训练/评测统一为 `isolate=1`。
+
 ## 四组定位实验的结论（2026-11-04 第三轮）
 
 四组实验全部执行完毕，完整记录见 [`results/2026-11-04_diag/README.md`](results/2026-11-04_diag/README.md)。
