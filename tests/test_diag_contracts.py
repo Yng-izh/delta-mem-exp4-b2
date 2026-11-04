@@ -258,7 +258,47 @@ def test_alpha_toggle():
     ok("F3 无直通分支时安全返回 None", E._zero_alpha(br2) is None)
 
 
+# =====================================================================
+# G. 符号保真的词边界还原（碎片 vs 整词）
+# =====================================================================
+class _TokStub:
+    """字节级 BPE 风格的假分词器：'Ġ' 表示词前空格。"""
+
+    def __init__(self, toks):
+        self.toks = list(toks)
+
+    def convert_ids_to_tokens(self, i):
+        return self.toks[int(i)]
+
+    def decode(self, ids):
+        # 真实字节级 BPE 的 decode 会把 "Ġ" 还原成空格；假分词器必须同样处理，
+        # 否则 `.strip()` 去不掉 "Ġ"，测试会因为"分词器不真实"而误报失败。
+        return "".join(self.toks[int(i)] for i in ids).replace("Ġ", " ")
+
+
+def test_word_span():
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import diag_symbol_fidelity as S
+    tok = _TokStub(["ĠMer", "cedes", "Ġis", "Ġhead", "-", "Ġx"])
+    ids = list(range(6))
+    ok("G1 子词向后合并成整词", S._word_span(tok, ids, 1) == (0, 2),
+       extra=str(S._word_span(tok, ids, 1)))
+    ok("G2 词首 token 只覆盖自己", S._word_span(tok, ids, 2) == (2, 3))
+    ok("G3 标点单独成词", S._word_span(tok, ids, 4) == (4, 5))
+    # 整词还原：选中 'cedes'（列 1）应还原出 'Mercedes'
+    feats = {"chunk_ids": [ids]}
+    cinfo = {"lex_pick": [[1, 3]]}
+    pieces, whole = S._slot_picks(tok, feats, cinfo)
+    ok("G4 碎片口径保留子词", pieces == ["cedes", "head"], extra=str(pieces))
+    ok("G5 整词口径还原成整词", whole == ["Mercedes", "head"], extra=str(whole))
+
+    # 命中判定：子词前缀也算命中（'Mer' ⊂ 'Mercedes'）
+    ok("G6 子词前缀算命中", S._hit(["Mer"], "Mercedes-AMG") is True)
+    ok("G7 无关词不算命中", S._hit(["is"], "Mercedes-AMG") is False)
+
+
 def main():
+    test_word_span()
     test_bridge_numerics()
     test_recon_uses_lex()
     test_teacher_scope()

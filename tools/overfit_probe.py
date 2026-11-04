@@ -182,6 +182,9 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arms", default="qa_kl,recon_old,recon_qa")
     ap.add_argument("--gpu", default="0")
+    ap.add_argument("--system-prompt",
+                    default="You are a helpful assistant. Answer with the shortest exact value.",
+                    help="必须与训练/评测用同一个 system prompt，否则读出的分布不一致")
     ap.add_argument("--base", default=T.BASE)
     ap.add_argument("--adapter", default=T.ADAPTER)
     ap.add_argument("--no-adapter", action="store_true")

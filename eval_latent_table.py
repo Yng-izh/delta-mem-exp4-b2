@@ -287,12 +287,15 @@ def read_one(method, item, ctx):
             _per_slot = [_share] * len(_idxe)
         else:
             for _i in _idxe:
-                _t = LM._tokenize_no_special(tok, str(units[_i]), dev)
+                # 块数必须按**压缩器实际看到的文本**算（`unit_encode_text` = "[标题] 原文"），
+                # 否则 oracle_embed 与 oracle_latent 的块数口径不同：同一句 60 token 的句子，
+                # 原文切 2 块、带标题切 3 块，两边的注入预算就差 1/3，归因直接失真。
+                _t = LM._tokenize_no_special(tok, T.unit_encode_text(item, _i), dev)
                 _n = max(1, int(_t.shape[1]))
                 _k = (int(_n) + _mut - 1) // _mut
                 _per_slot.append(max(1, _k) * _m)
         budget = int(sum(_per_slot))
-        _chunks = [LM._tokenize_no_special(tok, str(units[_i]), dev)[0, :int(_b)]
+        _chunks = [LM._tokenize_no_special(tok, T.unit_encode_text(item, _i), dev)[0, :int(_b)]
                    for _i, _b in zip(_idxe, _per_slot)]
         _chunks = [c for c in _chunks if int(c.numel()) > 0]
         if not _chunks:

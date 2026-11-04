@@ -33,9 +33,8 @@ run() {
   echo "[diag $(date '+%F %T')] $mode 结束 rc=$?  -> $OUT/$mode.json"
 }
 
-run oracle
-run oracle_embed
-run oracle_lex
-run oracle_sem
-run oracle_latent
+# MODES="oracle_embed" 可只重跑某一档（例如改了预算口径后只需重算 oracle_embed）
+for m in ${MODES:-"oracle oracle_embed oracle_lex oracle_sem oracle_latent"}; do
+  run "$m"
+done
 echo "[diag $(date '+%F %T')] 全部完成：$OUT"
