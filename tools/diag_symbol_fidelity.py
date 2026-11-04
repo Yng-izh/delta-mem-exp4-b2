@@ -113,46 +113,28 @@ def _numbers_covered(words, answer):
 
 
 def _slot_words(tok, feats, cinfo):
-    """把选词结果还原成**整词**列表，返回 (words, granularity)。
+    """把选词结果还原成**整词**列表。
 
-    词级（新）：`cinfo["lex_word_pick"]` 是逐块选中的**词编号**，用
-        `feats["chunk_word_ids"]` 把该词的全部子词拼回整词。
-    token 级（旧 ckpt / 未传词边界）：`cinfo["lex_pick"]` 是 token 列号，
-        按词边界扩展成整词（能对齐就对齐，对不齐就原样返回子词）。
+    `cinfo["lex_word_pick"]` 是逐块选中的**词编号**；用 `feats["chunk_word_ids"]`
+    把该词的全部子词拼回整词。选词已经是词级，这里不再有 token 级降级路径
+    （`forward_split` 缺词边界时直接报错，不会产出 token 列号）。
     """
     wids_all = feats.get("chunk_word_ids") or []
     cids_all = feats.get("chunk_ids") or []
     word_pick = cinfo.get("lex_word_pick")
-    if word_pick is not None:
-        words = []
-        for k, cols in enumerate(word_pick):
-            if k >= len(wids_all) or k >= len(cids_all):
-                continue
-            wmap, cids = wids_all[k], cids_all[k]
-            for wid in (cols or []):
-                toks = [cids[i] for i, w in enumerate(wmap) if int(w) == int(wid)]
-                if toks:
-                    words.append(_decode(tok, toks))
-        return [w for w in words if w], "word"
-    # token 级降级：把子词按词边界合并
-    token_pick = cinfo.get("lex_pick") or []
+    if word_pick is None:
+        raise RuntimeError("压缩器没有返回 lex_word_pick：ckpt 不是词级选词版本，"
+                           "或 forward_split 没有收到 word_ids")
     words = []
-    for k, cols in enumerate(token_pick):
-        if k >= len(cids_all):
+    for k, cols in enumerate(word_pick):
+        if k >= len(wids_all) or k >= len(cids_all):
             continue
-        cids = cids_all[k]
-        wmap = wids_all[k] if k < len(wids_all) else None
-        for col in (cols or []):
-            col = int(col)
-            if not (0 <= col < len(cids)):
-                continue
-            if wmap is not None and int(wmap[col]) >= 0:
-                wid = int(wmap[col])
-                toks = [cids[i] for i, w in enumerate(wmap) if int(w) == wid]
-            else:
-                toks = [cids[col]]
-            words.append(_decode(tok, toks))
-    return [w for w in words if w], "token"
+        wmap, cids = wids_all[k], cids_all[k]
+        for wid in (cols or []):
+            toks = [cids[i] for i, w in enumerate(wmap) if int(w) == int(wid)]
+            if toks:
+                words.append(_decode(tok, toks))
+    return [w for w in words if w]
 
 
 def _decode(tok, ids):
@@ -255,14 +237,14 @@ def main(argv=None):
                 _z2, _zl2, cinfo = comp.forward_split(
                     feats["h0"], feats["h18"], feats["mask"],
                     **_word_kwargs(feats))
-            words, gran = _slot_words(tok, feats, cinfo)
+            words = _slot_words(tok, feats, cinfo)
             ans_in_slot = bool(T._norm_ans(gold)) and (
                 T._norm_ans(gold) in T._norm_ans(units[j]))
             n_invalid = sum(int(_is_invalid_word(w)) for w in words)
             rec = {
                 "slot": int(j), "n_chunks": int(feats["n_chunks_total"]),
                 "n_tokens": int(sum(feats["n_tokens"])),
-                "ans_in_slot": ans_in_slot, "granularity": gran,
+                "ans_in_slot": ans_in_slot,
                 "words": words, "n_picks": len(words), "n_invalid": n_invalid,
                 "hit": _hit(words, gold),
                 "full_answer": _full_answer_covered(words, gold),
@@ -292,7 +274,7 @@ def main(argv=None):
         for rec in per_slot:
             mark = "含答案" if rec["ans_in_slot"] else "不含答案"
             print(f"  槽{rec['slot']}({rec['n_chunks']}块/{rec['n_tokens']}tok,{mark},"
-                  f"{rec['granularity']}级): 选中={rec['words']}")
+                  f"): 选中={rec['words']}")
             if rec["ans_in_slot"]:
                 print(f"      命中={rec['hit']} 完整答案={rec['full_answer']} "
                       f"数字={rec['numbers']} 无效选择={rec['n_invalid']}/"
@@ -309,16 +291,11 @@ def main(argv=None):
         return (sum(int(v) for v in vals) / len(vals)) if vals else None
 
     invalid_rate = (sum(pick_stats) / len(pick_stats)) if pick_stats else None
-    gran_counts = {}
-    for r in rows:
-        for s in r["slots"]:
-            gran_counts[s["granularity"]] = gran_counts.get(s["granularity"], 0) + 1
     summary = {
         "n_items": n, "n_scanned": n_scanned, "n_answer_slots": n_slots,
         "n_ok": sum(int(r["ok"]) for r in rows),
         "n_wrong": sum(int(not r["ok"]) for r in rows),
         "sample_mode": ("only_wrong" if a.only_wrong else "first_n"),
-        "granularity": gran_counts,
         "hit_rate": _rate("hit"),
         "full_answer_rate": _rate("full_answer"),
         "number_rate": _rate("numbers"),
@@ -332,7 +309,7 @@ def main(argv=None):
     print("\n" + "=" * 70)
     print(f"样本 {n} 条（扫了 {n_scanned} 条；答对 {summary['n_ok']} / "
           f"答错 {summary['n_wrong']}；取样={summary['sample_mode']}）；"
-          f"含答案的金标槽 {n_slots} 个；选词粒度 {gran_counts}")
+          f"含答案的金标槽 {n_slots} 个")
     if n_slots:
         _nr = summary["number_rate"]
         _nr_s = "n/a" if _nr is None else f"{100 * _nr:.1f}%"

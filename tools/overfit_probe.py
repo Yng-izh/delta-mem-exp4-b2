@@ -48,6 +48,12 @@ import train_latent_memory as T
 ARMS = ("qa_kl", "recon_old", "recon_qa")
 
 
+def _opt(v):
+    """空字符串/None -> None。注意 `str(x or None)` 会得到字符串 "None"，
+    传进 _check_inject_cfg 会直接报错，所以必须显式转换。"""
+    return (str(v) if v else None)
+
+
 def _gold_read(comp, bridge, enc, model, tok, item, sysp, dev, pad, max_new=16,
                fence_style=None, inject_mode=None):
     """oracle_latent 自由生成：金标槽 -> compose -> 注入生成。返回 (pred, gold)。
@@ -117,10 +123,10 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
             lex_list=([lex_all[i] for i in idx] if lex_all is not None else None),
             # 与正式 v5 读出对齐：训练侧也开 isolate（旧写法两边都是 False，
             # 测出来的曲线不能代表正式读出）
-            isolate=True, fence_style=str(getattr(args, "fence_style", "") or None))
+            isolate=True, fence_style=_opt(getattr(args, "fence_style", "")))
         embeds, labels, n_ans = T.build_student_inputs(
             model, tok, soft, sysp, item["question"], item["answer"],
-            inject_mode=str(getattr(args, "inject_mode", "") or None))
+            inject_mode=_opt(getattr(args, "inject_mode", "")))
         with LM.delta_write_disabled(model):
             s_logits = model(inputs_embeds=embeds,
                              attention_mask=torch.ones(embeds.shape[:2],
@@ -158,8 +164,8 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
             opt.zero_grad(set_to_none=True)
             if args.eval_every > 0 and (step + 1) % int(args.eval_every) == 0:
                 em = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad,
-                                 fence_style=str(getattr(args, "fence_style", "") or None),
-                                 inject_mode=str(getattr(args, "inject_mode", "") or None))
+                                 fence_style=_opt(getattr(args, "fence_style", "")),
+                                 inject_mode=_opt(getattr(args, "inject_mode", "")))
                 curve.append({"step": step + 1, "em": em,
                               "loss_qa": float(loss_qa.detach()),
                               "loss_kl": float(loss_kl.detach()) if loss_kl is not None else None,
@@ -171,8 +177,8 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
                       f"α={float(bridge.alpha()):.3f} ({time.time() - t0:.0f}s)",
                       flush=True)
     em_final = eval_oracle(comp, bridge, enc, model, tok, items, sysp, dev, pad,
-                           fence_style=str(getattr(args, "fence_style", "") or None),
-                           inject_mode=str(getattr(args, "inject_mode", "") or None))
+                           fence_style=_opt(getattr(args, "fence_style", "")),
+                           inject_mode=_opt(getattr(args, "inject_mode", "")))
     curve.append({"step": int(args.steps), "em": em_final, "final": True})
     print(f"[{arm}] 训练集 oracle_latent EM = {em_final:.4f} "
           f"（{len(items)} 题，{args.steps} 步）", flush=True)
@@ -245,8 +251,8 @@ def main(argv=None):
         # 会被算进"训练带来的提升"里，三条曲线也就不可比。
         em0 = eval_oracle(reader.compressor, reader.bridge, reader.encoder,
                           model, tok, items, sysp, dev, pad,
-                          fence_style=str(a.fence_style or None),
-                          inject_mode=str(a.inject_mode or None))
+                          fence_style=_opt(a.fence_style),
+                          inject_mode=_opt(a.inject_mode))
         print(f"[{arm}] step=0 训练集 EM = {em0:.4f}（同一批 {len(items)} 题，"
               f"未训练）", flush=True)
         curve, em = train_arm(arm, reader, model, tok, items, a, dev, pad)

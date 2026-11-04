@@ -282,10 +282,11 @@ def test_slot_words():
     ids = list(range(6))
     # 词结构：[Mer cedes] [is] [head] [-] [x]
     feats = {"chunk_ids": [ids], "chunk_word_ids": [[0, 0, 1, 2, 3, 4]]}
-    words, gran = S._slot_words(
-        tok, feats, {"lex_word_pick": [[0, 2]], "lex_latent": None})
+    words = S._slot_words(tok, feats, {"lex_word_pick": [[0, 2]]})
     ok("G1 词级还原出整词（不是子词）",
-       words == ["Mercedes", "head"] and gran == "word", extra=f"{words}/{gran}")
+       words == ["Mercedes", "head"], extra=str(words))
+    ok("G1b 没有 lex_word_pick 时直接报错（不再静默降级）",
+       _raises(lambda: S._slot_words(tok, feats, {})))
 
     ok("G3 命中判定用内容词（子词拼回整词后命中）",
        S._hit(["Mercedes"], "Mercedes-AMG") is True)
@@ -496,7 +497,37 @@ def test_student_inputs_inject_mode():
        n_u == n_b and torch.equal(l_u[0, -n_u:], l_b[0, -n_b:]))
 
 
+def test_train_eval_layout_identity():
+    """训练前向的 prompt 必须与评测侧**逐位相同**（不只是"调了同一个函数"）。
+
+    做法：给 `_emit_latent` 打一个捕获钩子，拿到它真正喂给模型的 inputs_embeds，
+    再和 `build_student_inputs` 造出来的前缀逐元素比较。三种注入位置都要对。
+    """
+    class _Cap(T.SmokeModel):
+        def generate(self, inputs_embeds=None, attention_mask=None, max_new_tokens=8,
+                     pad_token_id=None, **kw):
+            self.cap = inputs_embeds.detach().clone()
+            return super().generate(inputs_embeds=inputs_embeds,
+                                    attention_mask=attention_mask,
+                                    max_new_tokens=max_new_tokens,
+                                    pad_token_id=pad_token_id)
+
+    for mode in ("user", "system", "between"):
+        model = _Cap(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
+        tok = T.StubTok(vocab_size=256)
+        soft = torch.randn(1, 4, 32)
+        LM._emit_latent(model, tok, soft, "Q?", "sys", max_new_tokens=1,
+                        pad_token_id=0, inject_mode=mode)
+        cap = model.cap[0]
+        emb, _lab, _n = T.build_student_inputs(
+            model, tok, soft, "sys", "Q?", "ANS", inject_mode=mode)
+        ok(f"I27 训练/评测 prompt 逐位相同（{mode}）",
+           torch.equal(emb[0, :cap.shape[0]], cap),
+           extra=f"n_in={cap.shape[0]} n_train={emb.shape[1]}")
+
+
 def main():
+    test_train_eval_layout_identity()
     test_numeric_and_stopwords()
     test_per_slot_ranking()
     test_student_inputs_inject_mode()
