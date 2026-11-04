@@ -1383,6 +1383,13 @@ def evaluate(reader_like, model, tokenizer, data, system_prompt, limit=32,
     return (hit / n if n else None), n
 
 
+def _gn_one(t) -> float:
+    """单张量梯度范数（没有梯度就是 0.0，不是 nan —— 0 才是"没被更新"这个事实）。"""
+    if t is None or getattr(t, "grad", None) is None:
+        return 0.0
+    return float(t.grad.detach().float().norm())
+
+
 def _grad_norm(params) -> float:
     """参数组的全局梯度范数（L2）。None 梯度跳过；全 None 返回 0.0。"""
     total = 0.0
@@ -2465,6 +2472,27 @@ def train(args):
                     # 有多大比例被裁掉"的直接证据，比单看裁剪后的数有意义。
                     _gn_total_pre = float((gnorm_comp ** 2 + gnorm_bridge ** 2
                                            + gnorm_router ** 2) ** 0.5)
+                    # 分组梯度范数：E1 的全部意义是"L_cov 的梯度只进词形头"，
+                    # 只看 gnorm_comp（全体参数合起来的范数）看不出这件事。
+                    # 这里把语义注意力 / 语义投影 / 词形头分开打，开没开 --lex-head
+                    # 一眼就能对比：开了之后 lex_scorer 必须有梯度，
+                    # 而 queries/attn 的梯度只能来自 QA/KL/重建（不该被 cov 放大）。
+                    if _diag_now and (args.bridge_only or args.freeze_compressor) is False:
+                        def _gn(mod):
+                            ps = [p for p in mod.parameters() if p.grad is not None]
+                            if not ps:
+                                return 0.0
+                            return float(sum(float(p.grad.detach().float().pow(2).sum())
+                                             for p in ps) ** 0.5)
+                        _lg = (0.0 if comp.lex_scorer is None
+                               else _gn(comp.lex_scorer))
+                        print(f"[grad-group] step={int(step) + 1}"
+                              f" queries={_gn_one(comp.queries):.3e}"
+                              f" attn={_gn(comp.attn):.3e}"
+                              f" input_proj={_gn_one(comp.input_proj.weight):.3e}"
+                              f" output_proj={_gn_one(comp.output_proj.weight):.3e}"
+                              f" lex_scorer={_lg:.3e}"
+                              f" bridge={_gn(bridge):.3e}", flush=True)
                 else:
                     gnorm_comp = gnorm_bridge = gnorm_router = float("nan")
                     _gn_total_pre = float("nan")
