@@ -4,7 +4,7 @@
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
 PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
-CKPT=$B/ckpt/hotpot_router_10k_v5.pt
+CKPT=${CKPT:-$B/ckpt/hotpot_router_10k_v5.pt}
 OUT=${OUT:-$B/results/diag_symbol_fidelity.json}
 export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem

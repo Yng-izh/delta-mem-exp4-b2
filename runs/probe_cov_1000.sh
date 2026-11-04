@@ -29,6 +29,9 @@ OUT=${OUT:-$B/ckpt/probe_cov_1000.pt}
 COV=${COV:-0.1}
 RESUME=${RESUME:-0}
 STEPS=${STEPS:-1000}
+SAVE_EVERY=${SAVE_EVERY:-100}
+EVAL_EVERY=${EVAL_EVERY:-500}
+TEACHER_PROBE=${TEACHER_PROBE:-16}
 export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
 export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
@@ -52,10 +55,10 @@ $PY train_latent_memory.py --router \
   --data $B/synth/hotpot_train_10k.jsonl --val-data $B/synth/hotpot_val500.jsonl \
   --n-train 10000 --n-val 120 --epochs 2 --accum 4 --pack 4 \
   --max-steps $STEPS \
-  --eval-every 500 --eval-limit 40 --log-every 10 --enc-batch 24 \
+  --eval-every $EVAL_EVERY --eval-limit 40 --log-every 10 --enc-batch 24 \
   --recon-weight 0.5 --recon-units 2 --recon-lex 1 --addr-weight 1.0 --kl-weight 1.0 \
   --gold-readout-ratio 0.5 --readout-mode mixed --router-readout-p 0.5 --hard-neg-k 2 \
-  --teacher-scope gold --teacher-probe-n 16 \
+  --teacher-scope gold --teacher-probe-n $TEACHER_PROBE \
   --topk-per-hop 4 \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
   --init-router $B/ckpt/router_stage1_8slot.pt --freeze-router \
@@ -65,4 +68,4 @@ $PY train_latent_memory.py --router \
   --inject-mode user --fence-style bracket \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \
-  --out "$OUT" --save-every 100 $RESUME_ARG
+  --out "$OUT" --save-every $SAVE_EVERY $RESUME_ARG
