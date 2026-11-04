@@ -1,0 +1,334 @@
+[diag 2026-11-04 20:23:58] 符号保真开始
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 38.0G
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards:  33%|███▎      | 1/3 [00:01<00:03,  1.51s/it]Loading checkpoint shards:  67%|██████▋   | 2/3 [00:03<00:01,  1.55s/it]Loading checkpoint shards: 100%|██████████| 3/3 [00:03<00:00,  1.04s/it]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[compat] transformers 无 smollm3 子包，已注入占位模块（deltamem.core 顶层 import 需要；本实验只用 Qwen3，不涉及 SmolLM3）
+[adapter] 校验通过：324/324 个张量与模型参数一一对应
+[ckpt] α=0.1226 scale=1.156 |Wlast|=5.872 lex_skip=True m=4 max_unit_tokens=32 inject=user/bracket
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+
+[1] ✗ q='What government position was held by the woman who portrayed Corliss A'
+  gold='Chief of Protocol'  pred='Secretary of State'  金标槽=[0, 1, 2]
+  槽0(3块/72tok,不含答案,): 选中=['23', 'Shirley', '1928', '2014', '193', 'American', "Hollywood's", 'draw', '1938', '5', 'to']
+  槽1(2块/36tok,含答案,): 选中=['Shirley', 'States', 'Temple', 'Ghana', 'United', 'States', 'the']
+      命中=False 完整答案=False 数字=None 无效选择=1/7
+  槽2(2块/39tok,不含答案,): 选中=['1945', '[Kiss', 'American', '17-year-old', 'Corliss', 'Archer', 'Temple', 'as']
+  α=0.123 res/lex=0.159 |E|=0.90 |Wlast|=5.87
+
+[2] ✗ q='What science fantasy young adult series, told in first person, has a s'
+  gold='Animorphs'  pred='The Chronicles of Narnia'  金标槽=[0, 1, 2, 4, 5]
+  槽0(2块/39tok,含答案,): 选中=['Chronicles', 'The', 'Hork-Bajir', 'series', 'Applegate', 'K', 'A']
+      命中=False 完整答案=False 数字=None 无效选择=2/7
+  槽1(2块/58tok,不含答案,): 选中=['Chronicles', 'The', '23', 'Hork-Bajir', 'Ellimist', 'Chronicles', 'Andalite', 'story']
+  槽2(3块/89tok,不含答案,): 选中=['Chronicles', 'The', 'Hork-Bajir', 'J', 'Yeerks', 'Hork-Bajir', 'Andalite', 'Hamee', 'Dak', 'Hork-Bajir', 'Hamee', 'tried']
+  槽4(2块/47tok,含答案,): 选中=['Grant', 'Animorphs', 'Applegate', 'Katherine', 'K', 'Scholastic', 'Applegate', 'published']
+      命中=True 完整答案=True 数字=None 无效选择=0/8
+  槽5(1块/28tok,不含答案,): 选中=['Animorphs', 'all', 'person', 'told']
+  α=0.123 res/lex=0.150 |E|=0.95 |Wlast|=5.87
+
+[4] ✗ q='The director of the romantic comedy "Big Stone Gap" is based in what N'
+  gold='Greenwich Village, New York City'  pred='None of the provided evidence mentions the director of "Big '  金标槽=[0, 2]
+  槽0(2块/41tok,含答案,): 选中=['Trigiani', 'Adriana', 'American', 'director', 'New', 'Greenwich', 'York', 'City']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  槽2(2块/50tok,不含答案,): 选中=['American', 'Big', '2014', 'Adriana', 'Altar', 'Studios', 'Gigliotti', 'Media']
+  α=0.123 res/lex=0.152 |E|=0.94 |Wlast|=5.87
+
+[5] ✗ q='2014 S/S is the debut album of a South Korean boy group that was forme'
+  gold='YG Entertainment'  pred='3 Entertainment'  金标槽=[0, 3]
+  槽0(1块/26tok,不含答案,): 选中=['S/S', '2014', 'Korean', 'South']
+  槽3(2块/46tok,含答案,): 选中=['201', 'Winner', 'Korean', 'South', '2014', 'YG', 'Entertainment', '3']
+      命中=True 完整答案=True 数字=None 无效选择=0/8
+  α=0.123 res/lex=0.146 |E|=0.98 |Wlast|=5.87
+
+[7] ✗ q='What is the name of the fight song of the university whose main campus'
+  gold='Kansas Song'  pred='The Kansas State University fight song is "The Kansas State '  金标槽=[0, 2, 3]
+  槽0(1块/22tok,含答案,): 选中=['Song', '[Kansas', 'University', 'We’re']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  槽2(1块/32tok,不含答案,): 选中=['Kansas', 'University', 'Oread', 'Mount']
+  槽3(2块/36tok,不含答案,): 选中=['Kansas', 'University', 'City', 'Park', 'City', 'Kansas', 'in']
+  α=0.123 res/lex=0.144 |E|=1.02 |Wlast|=5.87
+
+[8] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold'
+  gold='1999'  pred='1989'  金标槽=[1, 2, 3]
+  槽1(3块/77tok,不含答案,): 选中=['Days', 'End', 'Schwarzenegger', 'Department', 'Tunney', 'religious', 'Byrne', 'woman', 'Antichrist', 'evil', 'Satan', 'forces']
+  槽2(2块/43tok,含答案,): 选中=['My', 'Oh', '1999', 'Roses', 'End', 'of', 'Days', 'film']
+      命中=True 完整答案=True 数字=True 无效选择=1/8
+  槽3(2块/37tok,含答案,): 选中=['My', 'Oh', '1999', 'Roses', 'band', 'soundtrack', 'and', 'the']
+      命中=True 完整答案=True 数字=True 无效选择=2/8
+  α=0.123 res/lex=0.140 |E|=1.02 |Wlast|=5.87
+
+[9] ✗ q='The football manager who recruited David Beckham managed Manchester Un'
+  gold='from 1986 to 2013'  pred='1992–1999'  金标槽=[2, 3, 4]
+  槽2(2块/61tok,不含答案,): 选中=['96', '1995', 'United', 'F.C', 'Hughes', 'Kanchelskis', 'Paul', 'Ince']
+  槽3(2块/43tok,不含答案,): 选中=['96', '1995', 'United', 'Manchester', 'Scholes', 'Gary', 'Phil', 'Neville']
+  槽4(2块/48tok,含答案,): 选中=['31', '[Alex', '1941', 'Scottish', '2013', 'Manchester', '1986', 'United']
+      命中=True 完整答案=True 数字=True 无效选择=0/8
+  α=0.123 res/lex=0.154 |E|=0.93 |Wlast|=5.87
+
+[10] ✗ q='Brown State Fishing Lake is in a country that has a population of how '
+  gold='9,984'  pred='The evidence provided does not contain information about the'  金标槽=[0, 4]
+  槽0(2块/37tok,不含答案,): 选中=['[Brown', 'Kansas', 'County', 'Wildlife', 'United', 'States', 'the', 'in']
+  槽4(1块/27tok,含答案,): 选中=['County', '[Brown', '2010', 'Kansas']
+      命中=False 完整答案=False 数字=False 无效选择=0/4
+  α=0.123 res/lex=0.149 |E|=0.96 |Wlast|=5.87
+
+[12] ✗ q='This singer of A Rather Blustery Day also voiced what hedgehog?'
+  gold='Sonic'  pred='DuckTales\n'  金标槽=[1, 6]
+  槽1(2块/34tok,含答案,): 选中=['Darkwing', 'Jim', 'Cummings', 'Duck', 'Pete']
+      命中=False 完整答案=False 数字=None 无效选择=0/5
+  槽6(1块/25tok,不含答案,): 选中=['Day', '[A', 'Cummings', 'Robert']
+  α=0.123 res/lex=0.135 |E|=1.06 |Wlast|=5.87
+
+[13] ✗ q='Aside from the Apple Remote, what other device can control the program'
+  gold='keyboard function keys'  pred='TV'  金标槽=[0, 1, 5, 6]
+  槽0(2块/39tok,不含答案,): 选中=['Remote', 'Apple', '2005', 'Inc', 'infrared', 'use', 'capabilities', 'products']
+  槽1(2块/39tok,不含答案,): 选中=['Remote', 'Apple', 'G5', 'iMac', 'Macintosh', 'portable', 'computers', 'desktop']
+  槽5(2块/63tok,不含答案,): 选中=['Row', 'Front', 'TV', 'Apple', 'Media', '10-foot', 'Center', 'Kodi']
+  槽6(1块/27tok,含答案,): 选中=['Row', 'Apple', 'Remote', 'iPhoto']
+      命中=False 完整答案=False 数字=None 无效选择=0/4
+  α=0.123 res/lex=0.147 |E|=0.98 |Wlast|=5.87
+
+[14] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1'
+  gold="World's Best Goalkeeper"  pred='Kasper Schmeichel'  金标槽=[0, 2, 3]
+  槽0(3块/67tok,含答案,): 选中=['18', 'Peter', '1963', 'November', '1992', 'Goalkeeper', '19', 'Best', '93']
+      命中=True 完整答案=False 数字=None 无效选择=0/9
+  槽2(2块/48tok,不含答案,): 选中=['5', '[Kasper', '1986', 'November', 'Premier', 'Denmark', 'City', 'League']
+  槽3(1块/23tok,不含答案,): 选中=['[Kasper', 'United', 'Schmeichel', 'Manchester']
+  α=0.123 res/lex=0.160 |E|=0.90 |Wlast|=5.87
+
+[15] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in"
+  gold='Barton Lee Hazlewood'  pred='Nancy Sinatra'  金标槽=[0, 2]
+  槽0(2块/34tok,不含答案,): 选中=['Boots', 'These', 'Hazlewood', 'Walkin', 'Sinatra']
+  槽2(3块/80tok,含答案,): 选中=['9', '[Lee', '1929', '2007', '19', 'Duane', 'American', 'singer', '1960s', 'Nancy', '50s', 'Sinatra']
+      命中=True 完整答案=False 数字=None 无效选择=0/12
+  α=0.123 res/lex=0.155 |E|=0.93 |Wlast|=5.87
+
+[16] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coa"
+  gold='1838'  pred='1969'  金标槽=[1, 7]
+  槽1(2块/40tok,含答案,): 选中=['Virginia', 'Commonwealth', '1838', 'College', '1854', 'Virginia', 'in']
+      命中=True 完整答案=True 数字=True 无效选择=1/7
+  槽7(2块/42tok,不含答案,): 选中=['12', '2011', 'Smart', 'Rams', 'Final', 'Four', 'run', 'season']
+  α=0.123 res/lex=0.134 |E|=1.06 |Wlast|=5.87
+
+[18] ✗ q='Kaiser Ventures corporation was founded by an American industrialist w'
+  gold='Henry J. Kaiser'  pred='Henry Kaiser'  金标槽=[0, 1, 6]
+  槽0(1块/19tok,不含答案,): 选中=['[Kaiser', 'Ontario', 'Steel', 'California']
+  槽1(2块/43tok,含答案,): 选中=['[Kaiser', 'Pacific', 'II', 'War', 'Korean', 'expanded', 'War', 'again']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  槽6(2块/48tok,不含答案,): 选中=['9', 'Henry', '1967', 'August', 'American', 'shipbuilding', 'industrialist', 'modern']
+  α=0.123 res/lex=0.153 |E|=0.94 |Wlast|=5.87
+
+[19] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?'
+  gold='2000'  pred='2003'  金标槽=[0, 6]
+  槽0(2块/37tok,不含答案,): 选中=['American', 'Poison', '1980s', '1', '990s']
+  槽6(2块/58tok,含答案,): 选中=['American', 'Shut', '2000', 'band', 'Crack', 'a', '2000', 'stations']
+      命中=True 完整答案=True 数字=True 无效选择=1/8
+  α=0.123 res/lex=0.149 |E|=0.96 |Wlast|=5.87
+
+[22] ✗ q='The battle in which Giuseppe Arimondi lost his life secured what for E'
+  gold='sovereignty'  pred='None'  金标槽=[1, 4]
+  槽1(1块/32tok,含答案,): 选中=['[Battle', 'Italy', 'War', 'First']
+      命中=False 完整答案=False 数字=None 无效选择=0/4
+  槽4(2块/38tok,不含答案,): 选中=['Giuseppe', 'After', 'Arimondi', 'awarded', 'Gold', 'of', 'Valor', 'Military']
+  α=0.123 res/lex=0.156 |E|=0.92 |Wlast|=5.87
+
+[23] ✗ q='Alfred Balk served as the secretary of the Committee on the Employment'
+  gold='Nelson Rockefeller'  pred='Alfred Balk served as the secretary of the Committee on the '  金标槽=[0, 4, 6]
+  槽0(2块/37tok,不含答案,): 选中=['8', '[Nelson', '1979', 'July', 'American', 'businessman', 'politician', 'and']
+  槽4(2块/60tok,不含答案,): 选中=['24', '1930', '2010', 'July', 'Nation', 'of', 'American', 'author']
+  槽6(3块/84tok,含答案,): 选中=['Alfred', 'National', "Fund's", 'Twentieth', 'Minority', 'Committee', "Rockefeller's", 'Governor', 'Cronkite', 'Shall', 'Know', 'Challenge']
+      命中=True 完整答案=False 数字=None 无效选择=0/12
+  α=0.123 res/lex=0.149 |E|=0.96 |Wlast|=5.87
+
+[26] ✗ q='Ellie Goulding worked with what other writers on her third studio albu'
+  gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh'  pred='Alistair Hulett'  金标槽=[0, 2, 6, 9]
+  槽0(2块/41tok,不含答案,): 选中=['Mind', 'English', 'Ellie', 'Goulding', '2015', 'irium']
+  槽2(2块/34tok,含答案,): 选中=['Mind', 'Martin', 'Ellie', 'Goulding', 'h']
+      命中=True 完整答案=False 数字=None 无效选择=0/5
+  槽6(2块/44tok,不含答案,): 选中=['6', 'Delirium', 'English', 'Goulding', '2015', 'Polydor', 'Records', 'November']
+  槽9(2块/34tok,不含答案,): 选中=['Ellie', 'Delirium', 'Goulding', 'Army', 'Move']
+  α=0.123 res/lex=0.161 |E|=0.99 |Wlast|=5.87
+
+[27] ✗ q='D1NZ is a series based on what oversteering technique?'
+  gold='Drifting'  pred='Oversteering is not a technique in a series. The evidence pr'  金标槽=[0, 2]
+  槽0(2块/48tok,含答案,): 选中=['Drifting', 'wheels', 'oversteers', 'motorsport', 'corner', 'driving', 'entirety', 'tires']
+      命中=True 完整答案=True 数字=None 无效选择=0/8
+  槽2(1块/17tok,含答案,): 选中=['[D1NZ', 'New', 'Zealand', 'series']
+      命中=False 完整答案=False 数字=None 无效选择=0/4
+  α=0.123 res/lex=0.151 |E|=0.95 |Wlast|=5.87
+
+[28] ✗ q='According to the 2001 census, what was the population of the city in w'
+  gold='35,124'  pred='The population of Kirton End in the 2001 census is not'  金标槽=[2, 4]
+  槽2(2块/57tok,含答案,): 选中=['Lincolnshire', '[Boston', '66,900', '2015', '35,124', '2001', 'population', 'census']
+      命中=True 完整答案=True 数字=True 无效选择=0/8
+  槽4(1块/29tok,不含答案,): 选中=['End', '[Kirton', 'England', 'district']
+  α=0.123 res/lex=0.151 |E|=0.95 |Wlast|=5.87
+
+[29] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?'
+  gold='Adeline Virginia Woolf'  pred='Emma Bull was born earlier than Virginia Woolf.'  金标槽=[0, 4]
+  槽0(1块/28tok,不含答案,): 选中=['13', 'Emma', '1954', 'American']
+  槽4(3块/67tok,含答案,): 选中=['25', 'Virginia', 'Stephen', '1882', 'English', 'stream', '1', 'one', 'narrative', 'device']
+      命中=True 完整答案=False 数字=None 无效选择=0/10
+  α=0.123 res/lex=0.142 |E|=1.03 |Wlast|=5.87
+
+[30] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corpora'
+  gold='more than 70 countries'  pred='2'  金标槽=[1, 5]
+  槽1(1块/31tok,不含答案,): 选中=['Parkin', 'Scott', 'American', 'Halliburton']
+  槽5(1块/27tok,含答案,): 选中=['Halliburton', '70', 'companies', 'service']
+      命中=True 完整答案=False 数字=True 无效选择=0/4
+  α=0.123 res/lex=0.154 |E|=0.93 |Wlast|=5.87
+
+[32] ✗ q="What is the name of the singer who's song was released as the lead sin"
+  gold='Usher'  pred='The name of the singer is Beyoncé.'  金标槽=[1, 8]
+  槽1(2块/47tok,含答案,): 选中=['[I', "Don't", '2', 'States', 'Usher', 'Yeah', 'behind', 'respectively']
+      命中=True 完整答案=True 数字=None 无效选择=1/8
+  槽8(3块/69tok,含答案,): 选中=['2004', 'Yeah', 'album', "Usher's", '27', 'Arista', 'Records', '2004', 'tracks', 'album', 'the', 'for']
+      命中=True 完整答案=False 数字=None 无效选择=2/12
+  α=0.123 res/lex=0.154 |E|=0.93 |Wlast|=5.87
+
+[33] ✗ q='who is the younger brother of The episode guest stars of The Hard Easy'
+  gold='Bill Murray'  pred='The evidence provided does not contain sufficient or relevan'  金标槽=[1, 7]
+  槽1(2块/58tok,含答案,): 选中=['[Brian', 'Doyle-Murray', 'Murray', 'Bill', "Razor's", 'shack', 'II', 'Day']
+      命中=True 完整答案=True 数字=None 无效选择=0/8
+  槽7(1块/29tok,不含答案,): 选中=['Hard', 'Adventure', 'Time', 'Prince']
+  α=0.123 res/lex=0.134 |E|=1.07 |Wlast|=5.87
+
+[34] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the tea'
+  gold='Carabao Cup'  pred='EFL Cup'  金标槽=[1, 3]
+  槽1(2块/41tok,不含答案,): 选中=['2017', 'Athletic', '18', 'FA', 'EFL', 'Trophy', 'Cup', 'and']
+  槽3(2块/50tok,含答案,): 选中=['[EFL', 'Cup', 'colloquially', 'League', 'English', 'domestic', 'Cup', 'competition']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  α=0.123 res/lex=0.138 |E|=1.04 |Wlast|=5.87
+
+[35] ✗ q='Which of Tara Strong major voice role in animated series is an America'
+  gold='Teen Titans Go!'  pred="Tara Strong's major voice role in the animated series based "  金标槽=[1, 4, 7, 10]
+  槽1(2块/53tok,含答案,): 选中=['Strong', '[Tara', 'Girls', 'Powerpuff', 'Titans', 'Drawn', 'Go', 'Parents']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  槽4(1块/13tok,含答案,): 选中=['Titans', 'Teen', 'TV', 'Go']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  槽7(1块/13tok,含答案,): 选中=['Teen', '[List', 'Titans', 'Go']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  槽10(1块/13tok,含答案,): 选中=['Teen', '[List', 'Titans', 'Go']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  α=0.123 res/lex=0.128 |E|=1.12 |Wlast|=5.87
+
+[36] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous p'
+  gold='Apalachees'  pred='Alvaro Mexia had a diplomatic mission with the Apalachee tri'  金标槽=[0, 1, 5]
+  槽0(1块/31tok,不含答案,): 选中=['17th-century', 'Alvaro', 'Spanish', 'Florida']
+  槽1(2块/39tok,不含答案,): 选中=['Augustine', 'Alvaro', 'Mexia', 'St', 'Canaveral', 'Cape', 'area', 'the']
+  槽5(2块/59tok,含答案,): 选中=['Spanish', 'Indigenous', 'Apalachees', 'Mexico', 'Miccosukee', '18th', 'Seminole', 'tribes']
+      命中=True 完整答案=True 数字=None 无效选择=0/8
+  α=0.123 res/lex=0.177 |E|=0.82 |Wlast|=5.87
+
+[37] ✗ q='What is the county seat of the county where East Lempster, New Hampshi'
+  gold='Newport'  pred='Rindge'  金标槽=[2, 3]
+  槽2(1块/13tok,含答案,): 选中=['County', '[Sullivan', 'Hampshire', 'New']
+      命中=True 完整答案=False 数字=None 无效选择=0/4
+  槽3(2块/37tok,不含答案,): 选中=['Hampshire', 'East', 'Lempster', 'County', 'United', 'Hampshire', 'States']
+  α=0.123 res/lex=0.138 |E|=1.06 |Wlast|=5.87
+
+[38] ✗ q='Handi-Snacks are a snack food product line sold by what American multi'
+  gold='Mondelez International, Inc.'  pred="Hershey's"  金标槽=[0, 2]
+  槽0(1块/25tok,不含答案,): 选中=['Handi-Snacks', 'International', 'Mondelez', 'food']
+  槽2(2块/52tok,含答案,): 选中=['Mondelez', 'American', 'International', 'Mondelēz', '107,000', 'Illinois', 'around', 'company']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  α=0.123 res/lex=0.159 |E|=0.90 |Wlast|=5.87
+
+[39] ✗ q='What was the name of a woman from the book titled "Their Lives: The Wo'
+  gold='Monica Lewinsky'  pred='Jones'  金标槽=[0, 1, 2]
+  槽0(1块/25tok,不含答案,): 选中=['Lives', 'Machine', 'Clinton', 'E']
+  槽1(3块/67tok,含答案,): 选中=['31', 'Ahead', '2005', 'Publishing', 'Jones', 'Juanita', 'Bill', 'Clinton', 'Perdue']
+      命中=False 完整答案=False 数字=None 无效选择=0/9
+  槽2(2块/41tok,不含答案,): 选中=['23', 'Monica', '1973', 'American', 'White', 'fashion', 'House', 'designer']
+  α=0.123 res/lex=0.144 |E|=0.99 |Wlast|=5.87
+
+[40] ✗ q="How many copies of Roald Dahl's variation on a popular anecdote sold?"
+  gold='250 million'  pred='Unknown'  金标槽=[1, 3]
+  槽1(1块/19tok,含答案,): 选中=['250', 'Roald', 'Dahl', 'worldwide']
+      命中=True 完整答案=False 数字=True 无效选择=0/4
+  槽3(2块/53tok,不含答案,): 选中=['[Mrs', "Colonel's", '193', "Dahl's", '9', 'married', 'man', 'affair']
+  α=0.123 res/lex=0.154 |E|=0.93 |Wlast|=5.87
+
+[42] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrati'
+  gold='Beijing'  pred='Rabat'  金标槽=[0, 1, 2]
+  槽0(3块/74tok,不含答案,): 选中=['[Rabat', 'Moroccan', 'Berber', 'Arabic', '2014', 'Morocco', '580,000', 'city', '1.2', 'metropolitan', 'population', 'million']
+  槽1(1块/23tok,不含答案,): 选中=['[Rabat', 'Rabat-Salé-Kénitra', 'region', 'administrative']
+  槽2(2块/33tok,含答案,): 选中=['[Moroccan', 'Republic', 'Ambassador', 'China']
+      命中=False 完整答案=False 数字=None 无效选择=0/4
+  α=0.123 res/lex=0.150 |E|=1.06 |Wlast|=5.87
+
+[43] ✗ q='Where did the descendants of the group of black Indians associated wit'
+  gold='Coahuila, Mexico'  pred='Oklahoma'  金标槽=[0, 2]
+  槽0(2块/33tok,含答案,): 选中=['[Mascogos', 'Mexico', 'Coahuila', 'afrodescendant']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  槽2(1块/26tok,不含答案,): 选中=['Seminoles', 'Black', 'Oklahoma', 'Florida']
+  α=0.123 res/lex=0.158 |E|=0.91 |Wlast|=5.87
+
+[44] ✗ q='David Huntsinger has worked with this gospel singer born in the month '
+  gold='Larnelle Harris'  pred='Johnny Cash'  金标槽=[4, 11]
+  槽4(2块/48tok,含答案,): 选中=['Green', 'David', 'Campbell', 'Patti', 'Johnny', 'Larnelle', 'Cash', 'Parton']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  槽11(1块/31tok,不含答案,): 选中=['6', '[Larnelle', '1947', 'American']
+  α=0.123 res/lex=0.162 |E|=0.88 |Wlast|=5.87
+
+[45] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets footbal'
+  gold='North Avenue at Techwood Drive'  pred='Atlanta'  金标槽=[1, 3]
+  槽1(2块/41tok,不含答案,): 选中=['Yellow', '1964', '20th-year', 'Dodd', 'Grant', 'Georgia', 'Field', 'Atlanta']
+  槽3(2块/39tok,含答案,): 选中=['[Bobby', 'Techwood', 'Dodd', 'Field', 'Georgia', 'Institute', 'Technology', 'Atlanta']
+      命中=True 完整答案=False 数字=None 无效选择=0/8
+  α=0.123 res/lex=0.144 |E|=0.99 |Wlast|=5.87
+
+[46] ✗ q='Which American film actor and dancer starred in the 1945 film Johnny A'
+  gold='George Raft'  pred='Johnny Weissmuller'  金标槽=[1, 2]
+  槽1(1块/26tok,含答案,): 选中=['Angel', 'Johnny', 'Trevor', 'Hasso']
+      命中=False 完整答案=False 数字=None 无效选择=0/4
+  槽2(3块/71tok,含答案,): 选中=['24', 'George', '26', '1901', '1930s', 'crime', 'American', '980', '1940s']
+      命中=True 完整答案=False 数字=None 无效选择=0/9
+  α=0.123 res/lex=0.157 |E|=0.97 |Wlast|=5.87
+
+[47] ✗ q='When was the  former Indian cricketer who made his ODI debuts during t'
+  gold='7 October 1978'  pred='1978'  金标槽=[0, 5]
+  槽0(2块/53tok,含答案,): 选中=['7', '[Zaheer', '1978', 'Indian', '2000', 'Indian', '2014', 'team']
+      命中=True 完整答案=False 数字=True 无效选择=0/8
+  槽5(2块/34tok,不含答案,): 选中=['KnockOut', '2000', 'Singh', 'Samuels', 'competition']
+  α=0.123 res/lex=0.150 |E|=1.03 |Wlast|=5.87
+
+[48] ✗ q='Which airplane was this Major test-flying after whom the base, that 51'
+  gold='B-17 Flying Fortress bomber'  pred='Flying Fortress'  金标槽=[1, 4]
+  槽1(2块/40tok,不含答案,): 选中=['514th', 'Force', 'Command', 'Ogden', 'Hill', 'Air', 'Utah', 'Base']
+  槽4(2块/45tok,含答案,): 选中=['Air', '[Hill', 'Army', 'U.S', '17', 'Flying', 'Fortress', 'B']
+      命中=True 完整答案=False 数字=True 无效选择=0/8
+  α=0.123 res/lex=0.147 |E|=0.97 |Wlast|=5.87
+
+[49] ✗ q='The Argentine PGA Championship record holder has won how many tourname'
+  gold='230'  pred='10'  金标槽=[2, 4]
+  槽2(2块/41tok,不含答案,): 选中=['Argentine', 'British', '19', 'Open', '44', '1985', 'and']
+  槽4(2块/39tok,含答案,): 选中=['230', 'Roberto', 'Tour', 'PGA', '1967', 'Open', 'Championship']
+      命中=True 完整答案=True 数字=True 无效选择=0/7
+  α=0.123 res/lex=0.143 |E|=1.02 |Wlast|=5.87
+
+[50] ✗ q="Suicide's 1977 released album features a song based on what brand's co"
+  gold='Marvel'  pred='Ghost Rider'  金标槽=[0, 1, 2, 3]
+  槽0(1块/26tok,不含答案,): 选中=['Ghost', 'Rider', 'Suicide', 'album']
+  槽1(1块/18tok,含答案,): 选中=['Ghost', 'Marvel', 'Rider', 'Comics']
+      命中=True 完整答案=True 数字=None 无效选择=0/4
+  槽2(1块/22tok,不含答案,): 选中=['1977', 'Suicide', 'American', 'band']
+  槽3(2块/33tok,不含答案,): 选中=['1977', 'Suicide', 'Records', 'Thau']
+  α=0.123 res/lex=0.154 |E|=1.04 |Wlast|=5.87
+
+======================================================================
+样本 50 条（扫了 50 条；答对 10 / 答错 40；取样=first_n）；含答案的金标槽 53 个
+命中率（任一答案词）= 79.2%   **完整答案覆盖** = 39.6%   **数字完整保留** = 91.7%
+**无效选择比例**（标点/停用词占被选词的比例）= 3.4%（共 820 个被选词）
+读法：
+  完整答案覆盖率低 -> 选中的词没有覆盖答案的全部内容词（只抓到一半）
+  数字覆盖率低     -> 数字被拆开或没被选中（`9,984` 只剩 `9`）
+  无效选择比例高   -> 4 个槽被标点/停用词占着，白占预算
+[out] -> /data/zhangjiayang/yyz3/results/probe_cov_1000_symbol.json
+[diag 2026-11-04 20:27:44] 结束 rc=0 -> /data/zhangjiayang/yyz3/results/probe_cov_1000_symbol.json

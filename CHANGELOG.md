@@ -41,6 +41,7 @@
 | 仓库 `runs/eval_v5.sh` | v5 专用评测脚本 |
 | 服务器 `ckpt/hotpot_router_10k_v5.pt` | 224.5 MB 权重（含 AdamW） |
 | 服务器 `results/v5_*.json`、`logs/eval_v5_*.log` | 那两次评测的原始记录 |
+| 仓库 `logs/2026-11-04/` 里 4 份 v5 日志 | `train_stage2.log`（1596 行，产出 v5 那次训练）+ `eval_v5*.log` 三份 |
 | 服务器 `results/diag_readout_200/` | 权重已删，原始 json/log 也已入库，服务器副本随之清掉 |
 
 **代码与脚本的连带改动**：
