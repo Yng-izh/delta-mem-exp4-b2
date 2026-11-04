@@ -2677,17 +2677,27 @@ def train(args):
         # 纯潜层还是 hybrid（hybrid 多出 pool_in/proj_in/gamma_logit 等 14 个张量）。
         _bcfg = _blob["config"]
         _lex2 = bool(_bcfg.get("lex_skip", False))
+        # 结构开关必须**从 ckpt 还原**：E1 之后 compressor 的 state_dict 里可能多出
+        # lex_scorer.*，这里若按默认结构重建，strict load 会直接 Unexpected key 崩掉
+        # （2026-11-05 首次 2 题 sanity 就撞上了，位置在训练收尾的重建自检）。
         _comp2 = LM.LatentCompressor(LM._model_hidden_size(model),
                                      n_slots=_bcfg["n_slots"],
                                      inner_dim=_bcfg["inner_dim"],
                                      num_heads=_bcfg["num_heads"],
-                                     lex_skip=_lex2).to(dev)
+                                     lex_skip=_lex2,
+                                     lex_head=bool(_bcfg.get("lex_head", False)),
+                                     lex_head_hidden=int(_bcfg.get("lex_head_hidden", 0) or 0),
+                                     lex_token_mode=str(_bcfg.get("lex_token_mode", "mean")),
+                                     bpe_backfill=int(_bcfg.get("bpe_backfill", 0) or 0)).to(dev)
         _bridge2 = LM.LatentBridge(LM._model_hidden_size(model),
                                    bottleneck=_bcfg["bottleneck"],
                                    target_norm=float(_bcfg["target_norm"]),
                                    lex_skip=bool(_bcfg.get("bridge_lex_skip", _lex2)),
                                    alpha_max=float(_bcfg.get("bridge_alpha_max",
-                                                            LM.LATENT_ALPHA_MAX))).to(dev)
+                                                            LM.LATENT_ALPHA_MAX)),
+                                   split_inject=bool(_bcfg.get("split_inject", False)),
+                                   split_n_lex=int(_bcfg.get("split_n_lex",
+                                                            LM.LATENT_SPLIT_N_LEX))).to(dev)
         _comp2.load_state_dict(_blob["compressor"]); _bridge2.load_state_dict(_blob["bridge"])
         _comp2.eval(); _bridge2.eval()
         _router2 = None
