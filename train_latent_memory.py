@@ -1945,6 +1945,27 @@ def train(args):
             rng_recon.setstate(_xr["rng_recon"])
         # L_cov 开关必须跟着 ckpt 走：续训时命令行忘了带 --cov-weight，
         # 损失会**静默**少一项，跑完才发现两组实验其实都没开 L_cov。
+        # 结构开关**不能**像 cov_weight 那样"按 ckpt 覆盖"：comp/bridge 已经按命令行
+        # 建好了，结构对不上时 load_state_dict 会报一串 Unexpected/Missing key。
+        # 这里提前给出能看懂的报错，而不是让人对着 state_dict 报错猜。
+        _ckcfg = dict(_rb.get("config") or {})
+        _struct = {"lex_head": bool(_ckcfg.get("lex_head", False)),
+                   "split_inject": bool(_ckcfg.get("split_inject", False))}
+        _cli_struct = {"lex_head": bool(int(getattr(args, "lex_head", 0) or 0)),
+                       "split_inject": bool(int(getattr(args, "split_inject", 0) or 0))}
+        _bad = {k: (v, _cli_struct[k]) for k, v in _struct.items()
+                if v != _cli_struct[k]}
+        if _bad:
+            raise SystemExit(
+                "[resume][错误] 结构与 ckpt 不一致：" +
+                "；".join(f"{k}: ckpt={v[0]} 命令行={v[1]}" for k, v in _bad.items()) +
+                "。结构开关决定参数集合，不能用命令行改；续训请带上与原来一致的开关"
+                "（例如 --lex-head 1 --split-inject 1）")
+        if str(_ckcfg.get("lex_token_mode", "mean")) != str(
+                getattr(args, "lex_token_mode", "ckpt")) and str(
+                getattr(args, "lex_token_mode", "ckpt")) != "ckpt":
+            print(f"[resume][warn] 词形口径 ckpt={_ckcfg.get('lex_token_mode')} 与命令行 "
+                  f"{args.lex_token_mode} 不一致：载荷编码会变，续训轨迹不连续", flush=True)
         _ck_cov = (_rb.get("config") or {}).get("cov_weight")
         _cli_cov = float(getattr(args, "cov_weight", 0.0) or 0.0)
         if _ck_cov is not None and abs(float(_ck_cov) - _cli_cov) > 1e-12:
