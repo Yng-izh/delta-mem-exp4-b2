@@ -1,0 +1,11 @@
+[diag 2026-11-04 12:22:43] oracle 开始
+[diag 2026-11-04 12:24:38] oracle 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle.json
+[diag 2026-11-04 12:24:38] oracle_embed 开始
+[diag 2026-11-04 12:27:25] oracle_embed 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_embed.json
+[diag 2026-11-04 12:27:25] oracle_lex 开始
+[diag 2026-11-04 12:37:51] oracle_lex 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_lex.json
+[diag 2026-11-04 12:37:51] oracle_sem 开始
+[diag 2026-11-04 12:48:15] oracle_sem 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_sem.json
+[diag 2026-11-04 12:48:15] oracle_latent 开始
+[diag 2026-11-04 12:58:04] oracle_latent 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_latent.json
+[diag 2026-11-04 12:58:04] 全部完成：/data/zhangjiayang/yyz3/results/diag_readout_200

@@ -1,0 +1,471 @@
+[diag 2026-11-04 13:16:27] 符号保真开始
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 37.1G
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards:  33%|███▎      | 1/3 [00:01<00:02,  1.28s/it]Loading checkpoint shards:  67%|██████▋   | 2/3 [00:02<00:01,  1.29s/it]Loading checkpoint shards: 100%|██████████| 3/3 [00:02<00:00,  1.15it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[compat] transformers 无 smollm3 子包，已注入占位模块（deltamem.core 顶层 import 需要；本实验只用 Qwen3，不涉及 SmolLM3）
+[adapter] 校验通过：324/324 个张量与模型参数一一对应
+[ckpt] α=0.2641 scale=1.361 |Wlast|=13.292 lex_skip=True m=4 max_unit_tokens=32
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+
+[1] ✗ q='What government position was held by the woman who portrayed Corliss A'
+  gold='Chief of Protocol'  pred='The woman who portrayed Corliss Archer in the film *Kiss and'  金标槽=[0, 1, 2]
+  槽0(3块/72tok,不含答案): 选中=['[', 'Sh', 'ir', 'ley', 'and', 'was', 'as', 'actress', 'to', '', '.', '8']
+      整词=['[Shirley', 'and', 'was', 'as', 'actress', 'to', '1938', '.']  命中 碎片=False 整词=False
+  槽1(2块/36tok,含答案): 选中=['[', 'Sh', 'ir', 'ley', 'the', '.', 'United', 'States']
+      整词=['[Shirley', 'the', '.', 'United', 'States']  命中 碎片=False 整词=False
+  槽2(2块/39tok,不含答案): 选中=['[K', 'iss', 'and', 'Tell', 'as', '.', 'l', 'Temple']
+      整词=['[Kiss', 'and', 'Tell', 'as', '.', 'Corliss', 'Temple']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.398 |E|=0.97 |Wlast|=13.29
+
+[2] ✗ q='What science fantasy young adult series, told in first person, has a s'
+  gold='Animorphs'  pred='The series you\'re referring to is **"The Chronicles of Narni'  金标槽=[0, 1, 2, 4, 5]
+  槽0(2块/39tok,含答案): 选中=['[', 'The', 'H', 'ork', '.', 'App', 'legate']
+      整词=['[The', 'Hork', '.', 'Applegate']  命中 碎片=False 整词=False
+  槽1(2块/58tok,不含答案): 选中=['[', 'The', 'H', 'ork', 'im', 'of', 'in', 'and']
+      整词=['[The', 'Hork', 'Ellimist', 'of', 'in', 'and']  命中 碎片=False 整词=False
+  槽2(3块/89tok,不含答案): 选中=['[', 'The', 'H', 'ork', 'ks', 'how', 'ite', 'from', 'aj', 'invasion']
+      整词=['[The', 'Hork', 'Yeerks', 'how', 'Andalite', 'from', '-Bajir', 'invasion']  命中 碎片=False 整词=False
+  槽4(2块/47tok,含答案): 选中=['[', 'Anim', 'orph', 's', '.', ',', 'astic']
+      整词=['[Animorphs', '.', ',', 'Scholastic']  命中 碎片=True 整词=True
+  槽5(1块/28tok,不含答案): 选中=['[', 'Anim', 'orph', 's']
+      整词=['[Animorphs']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.526 |E|=0.79 |Wlast|=13.29
+
+[3] ✗ q='Are the Laleli Mosque and Esma Sultan Mansion located in the same neig'
+  gold='no'  pred='Yes'  金标槽=[0, 1]
+  槽0(2块/50tok,不含答案): 选中=['[L', 'ale', 'li', 'Mosque', '.', 'Turkey', '-century', 'ih']
+      整词=['[Laleli', 'Mosque', '.', 'Turkey', '-century', 'Fatih']  命中 碎片=False 整词=False
+  槽1(3块/73tok,不含答案): 选中=['[', 'Es', 'ma', 'Sultan', 'of', 'is', 'ö', '.', 'after', 'ed', 'develop']
+      整词=['[Esma', 'Sultan', 'of', 'is', 'Ortaköy', '.', 'after', 'redeveloped']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.395 |E|=0.98 |Wlast|=13.29
+
+[4] ✗ q='The director of the romantic comedy "Big Stone Gap" is based in what N'
+  gold='Greenwich Village, New York City'  pred='The film "Big Stone Gap" is not a romantic comedy, and there'  金标槽=[0, 2]
+  槽0(2块/41tok,含答案): 选中=['[', 'Ad', 'ri', 'ana', '.', 'in', 'City', ',']
+      整词=['[Adriana', '.', 'in', 'City', ',']  命中 碎片=True 整词=True
+  槽2(2块/50tok,不含答案): 选中=['[', 'Big', 'Stone', 'Gap', '.', 'of', 'for', 'otti']
+      整词=['[Big', 'Stone', 'Gap', '.', 'of', 'for', 'Gigliotti']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.458 |E|=0.87 |Wlast|=13.29
+
+[5] ✗ q='2014 S/S is the debut album of a South Korean boy group that was forme'
+  gold='YG Entertainment'  pred='SM Entertainment'  金标槽=[0, 3]
+  槽0(1块/26tok,不含答案): 选中=['[', '0', 'S', '2']
+      整词=['[2014', 'S']  命中 碎片=False 整词=False
+  槽3(2块/46tok,含答案): 选中=['[', 'Winner', '(', 'band', '.', 'in', '4', 'Entertainment']
+      整词=['[Winner', '(band', '.', 'in', '2014', 'Entertainment']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.419 |E|=0.93 |Wlast|=13.29
+
+[6] ✗ q='What is the name of the fight song of the university whose main campus'
+  gold='Kansas Song'  pred='"The Lawrence Fight Song"'  金标槽=[0, 2, 3]
+  槽0(1块/22tok,含答案): 选中=['[K', 'ansas', 'Song', ']']
+      整词=['[Kansas', 'Song', ']']  命中 碎片=True 整词=True
+  槽2(1块/32tok,不含答案): 选中=['[', 'University', 'of', 'Kansas']
+      整词=['[University', 'of', 'Kansas']  命中 碎片=True 整词=True
+  槽3(2块/36tok,不含答案): 选中=['[', 'University', 'of', 'Kansas', 'in', '.', 'City']
+      整词=['[University', 'of', 'Kansas', 'in', '.', 'City']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.430 |E|=0.91 |Wlast|=13.29
+
+[7] ✗ q='What year did Guns N Roses perform a promo for a movie starring Arnold'
+  gold='1999'  pred='1989'  金标槽=[1, 2, 3]
+  槽1(3块/77tok,不含答案): 选中=['[', 'End', 'of', 'Days', 'religious', 'un', 'and', 'rne', '.', 'evil', 'by', 'rist']
+      整词=['[End', 'of', 'Days', 'religious', '(Tunney', 'and', '(Byrne', '.', 'evil', 'by', 'Antichrist']  命中 碎片=False 整词=False
+  槽2(2块/43tok,含答案): 选中=['[', 'Oh', 'My', 'God', 'to', 'of', '".', 'Days']
+      整词=['[Oh', 'My', 'God', 'to', 'of', '".', 'Days']  命中 碎片=False 整词=False
+  槽3(2块/37tok,含答案): 选中=['[', 'Oh', 'My', 'God', '.', 'the', 'soundtrack', 'band']
+      整词=['[Oh', 'My', 'God', '.', 'the', 'soundtrack', 'band']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.426 |E|=0.92 |Wlast|=13.29
+
+[8] ✗ q='The football manager who recruited David Beckham managed Manchester Un'
+  gold='from 1986 to 2013'  pred='1992–1997'  金标槽=[2, 3, 4]
+  槽2(2块/61tok,不含答案): 选中=['[', '9', '5', '1', 'and', 'of', 'els', 'Hughes']
+      整词=['[1995–96', 'and', 'of', 'Kanchelskis', 'Hughes']  命中 碎片=False 整词=False
+  槽3(2块/43tok,不含答案): 选中=['[', '9', '5', '1', '.', 'and', 'les']
+      整词=['[1995–96', '.', 'and', 'Scholes']  命中 碎片=False 整词=False
+  槽4(2块/48tok,含答案): 选中=['[A', 'lex', 'Ferguson', ']', '', 'to', 'from', 'United']
+      整词=['[Alex', 'Ferguson', ']', '2013', 'to', 'from', 'United']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.440 |E|=0.89 |Wlast|=13.29
+
+[9] ✗ q='Brown State Fishing Lake is in a country that has a population of how '
+  gold='9,984'  pred='I cannot determine the population of the country where Brown'  金标槽=[0, 4]
+  槽0(2块/37tok,不含答案): 选中=['[B', 'rown', 'State', 'Fishing', '.', 'in', 'United', 'the']
+      整词=['[Brown', 'State', 'Fishing', '.', 'in', 'United', 'the']  命中 碎片=False 整词=False
+  槽4(1块/27tok,含答案): 选中=['[B', 'rown', ',', 'County']
+      整词=['[Brown', ',', 'County']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.386 |E|=1.00 |Wlast|=13.29
+
+[10] ✗ q='This singer of A Rather Blustery Day also voiced what hedgehog?'
+  gold='Sonic'  pred='The singer of "A Rather Blustery Day" is Pete Seeger.'  金标槽=[1, 6]
+  槽1(2块/34tok,含答案): 选中=['[', 'Jim', 'Cummings', ']', '.', 'Pete']
+      整词=['[Jim', 'Cummings', ']', '.', 'Pete']  命中 碎片=False 整词=False
+  槽6(1块/25tok,不含答案): 选中=['[A', 'Rather', 'Bl', 'ust']
+      整词=['[A', 'Rather', 'Blustery']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.528 |E|=0.80 |Wlast|=13.29
+
+[11] ✗ q='Aside from the Apple Remote, what other device can control the program'
+  gold='keyboard function keys'  pred='The Apple Remote was originally designed to interact with th'  金标槽=[0, 1, 5, 6]
+  槽0(2块/39tok,不含答案): 选中=['[', 'Apple', 'Remote', ']', '.', 'its', 'which', 'infrared']
+      整词=['[Apple', 'Remote', ']', '.', 'its', 'which', 'infrared']  命中 碎片=False 整词=False
+  槽1(2块/39tok,不含答案): 选中=['[', 'Apple', 'Remote', ']', 'and', '.', 'Mac', 'computers']
+      整词=['[Apple', 'Remote', ']', 'and', '.', 'Macintosh', 'computers']  命中 碎片=False 整词=False
+  槽5(2块/63tok,不含答案): 选中=['[', 'Front', '(', 'Row', ').', 'and', 'Kodi']
+      整词=['[Front', '(software', 'Row', ').', 'and', 'Kodi']  命中 碎片=False 整词=False
+  槽6(1块/27tok,含答案): 选中=['[', 'Front', '(', 'Row']
+      整词=['[Front', '(software', 'Row']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.419 |E|=0.94 |Wlast|=13.29
+
+[12] ✗ q='What was the father of Kasper Schmeichel voted to be by the IFFHS in 1'
+  gold="World's Best Goalkeeper"  pred='Peter Schmeichel'  金标槽=[0, 2, 3]
+  槽0(3块/67tok,含答案): 选中=['[', 'Peter', 'Sch', 'me', 'and', 'HS', '9', 'as', '3', '.']
+      整词=['[Peter', 'Schmeichel', 'and', 'IFFHS', '19', 'as', '93', '.']  命中 碎片=False 整词=False
+  槽2(2块/48tok,不含答案): 选中=['[K', 'asper', '', 'Sch', '.', 'the', 'City', 'a']
+      整词=['[Kasper', '1986', 'Schmeichel', '.', 'the', 'City', 'a']  命中 碎片=False 整词=False
+  槽3(1块/23tok,不含答案): 选中=['[K', 'asper', 'Sch', 'me']
+      整词=['[Kasper', 'Schmeichel']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.488 |E|=0.85 |Wlast|=13.29
+
+[13] ✗ q="Who was the writer of These Boots Are Made for Walkin' and who died in"
+  gold='Barton Lee Hazlewood'  pred='Lee Hazlewood'  金标槽=[0, 2]
+  槽0(2块/34tok,不含答案): 选中=['[', 'These', 'Boots', 'Are', '.', 'Sinatra']
+      整词=['[These', 'Boots', 'Are', '.', 'Sinatra']  命中 碎片=False 整词=False
+  槽2(3块/80tok,含答案): 选中=['[L', 'ee', '2', 'Haz', 'was', 'and', 'late', 'ddy', '.', 'in', '1', 'Sinatra']
+      整词=['[Lee', '2007', 'Hazlewood', 'was', 'and', 'late', 'Eddy', '.', 'in', '1960s', 'Sinatra']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.381 |E|=1.01 |Wlast|=13.29
+
+[14] ✗ q="The 2011–12 VCU Rams men's basketball team, led by third year head coa"
+  gold='1838'  pred='1969'  金标槽=[1, 7]
+  槽1(2块/40tok,含答案): 选中=['[', 'Virginia', 'Commonwealth', 'University', '.', 'in', '4']
+      整词=['[Virginia', 'Commonwealth', 'University', '.', 'in', '1854', 'Virginia']  命中 碎片=False 整词=False
+  槽7(2块/42tok,不含答案): 选中=['[', '0', '2', '1', 'to', 'marked', 'by', 'Four']
+      整词=['[2011–12', 'to', 'marked', 'by', 'Four']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.451 |E|=0.88 |Wlast|=13.29
+
+[15] ✗ q='When was Poison\'s album "Shut Up, Make Love" released?'
+  gold='2000'  pred='Poison did not release an album titled "Shut Up, Make Love."'  金标槽=[0, 6]
+  槽0(2块/37tok,不含答案): 选中=['[', 'Po', 'ison', '(', '.', '9', '0', 's']
+      整词=['[Poison', '(American', '.', '990s']  命中 碎片=False 整词=False
+  槽6(2块/58tok,含答案): 选中=['[', 'Sh', 'ut', 'Up', 'ack', 'a', 'single', 'from']
+      整词=['[Shut', 'Up', '"Crack', 'a', 'single', 'from']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.411 |E|=0.95 |Wlast|=13.29
+
+[16] ✗ q='Ralph Hefferline was a psychology professor at a university that is lo'
+  gold='New York City'  pred='Ralph Hefferline was a psychology professor at the Universit'  金标槽=[0, 1]
+  槽0(2块/45tok,不含答案): 选中=['[R', 'alph', '1', 'He', 'at', '.', 'University']
+      整词=['[Ralph', '1910', 'Hefferline', 'at', '.', '1974', 'University']  命中 碎片=False 整词=False
+  槽1(2块/55tok,含答案): 选中=['[C', 'olumbia', 'University', ']', 'one', 'of', 'League', 'most']
+      整词=['[Columbia', 'University', ']', 'one', 'of', 'League', 'most']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.429 |E|=0.92 |Wlast|=13.29
+
+[17] ✗ q='The battle in which Giuseppe Arimondi lost his life secured what for E'
+  gold='sovereignty'  pred='The battle in which Giuseppe Arimondi lost his life was the '  金标槽=[1, 4]
+  槽1(1块/32tok,含答案): 选中=['[B', 'attle', 'of', 'Ad']
+      整词=['[Battle', 'of', 'Adwa']  命中 碎片=False 整词=False
+  槽4(2块/38tok,不含答案): 选中=['[', 'Gi', 'useppe', 'Ar', 'of', '.', 'Gold', 'Valor']
+      整词=['[Giuseppe', 'Arimondi', 'of', '.', 'Gold', 'Valor']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.444 |E|=0.89 |Wlast|=13.29
+
+[18] ✗ q='Alfred Balk served as the secretary of the Committee on the Employment'
+  gold='Nelson Rockefeller'  pred='Alfred Balk served as the secretary of the Committee on the '  金标槽=[0, 4, 6]
+  槽0(2块/37tok,不含答案): 选中=['[N', 'elson', 'Rockefeller', ']', 'politician', '.', 'and', 'businessman']
+      整词=['[Nelson', 'Rockefeller', ']', 'politician', '.', 'and', 'businessman']  命中 碎片=True 整词=True
+  槽4(2块/60tok,不含答案): 选中=['[', 'Al', '1', 'fred', 'editor', '.', 'and', 'non']
+      整词=['[Alfred', '1930', 'editor', '.', 'and', 'nonfiction']  命中 碎片=False 整词=False
+  槽6(3块/84tok,含答案): 选中=['[', 'Al', 'fred', 'Balk', 'and', 'foundations', 'of', 'Rockefeller', 'k', 'the', ':', 'ite']
+      整词=['[Alfred', 'Balk', 'and', 'foundations', 'of', 'Rockefeller', 'Cronkite', 'the', ':']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.412 |E|=0.95 |Wlast|=13.29
+
+[19] ✗ q='In what city did the "Prince of tenors" star in a film based on an ope'
+  gold='Rome'  pred='New York'  金标槽=[2, 7]
+  槽2(1块/32tok,不含答案): 选中=['[F', 'ran', 'co', 'Core']
+      整词=['[Franco', 'Corelli']  命中 碎片=False 整词=False
+  槽7(1块/22tok,含答案): 选中=['[T', 'os', 'ca', '(']
+      整词=['[Tosca', '(1956']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.496 |E|=0.82 |Wlast|=13.29
+
+[20] ✗ q='Ellie Goulding worked with what other writers on her third studio albu'
+  gold='Max Martin, Savan Kotecha and Ilya Salmanzadeh'  pred='MNEK, Dan Wilson, and Jules Shear'  金标槽=[0, 2, 6, 9]
+  槽0(2块/41tok,不含答案): 选中=['[', 'On', 'My', 'Mind', '(', ').', 'ir', 'ium']
+      整词=['[On', 'My', 'Mind', '(2015', ').', 'irium']  命中 碎片=False 整词=False
+  槽2(2块/34tok,含答案): 选中=['[', 'On', 'My', 'Mind', 'h', '.']
+      整词=['[On', 'My', 'Mind', 'h', '.']  命中 碎片=False 整词=False
+  槽6(2块/44tok,不含答案): 选中=['[', 'Del', 'ir', 'ium', 'November', '.', 'd', 'or']
+      整词=['[Delirium', 'November', '.', 'Polydor']  命中 碎片=False 整词=False
+  槽9(2块/34tok,不含答案): 选中=['[', 'Del', 'ir', 'ium', 'Move', '".']
+      整词=['[Delirium', 'Move', '".']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.619 |E|=0.73 |Wlast|=13.29
+
+[21] ✗ q='D1NZ is a series based on what oversteering technique?'
+  gold='Drifting'  pred='D1NZ is not a known series based on an oversteering techniqu'  金标槽=[0, 2]
+  槽0(2块/48tok,含答案): 选中=['[', 'Dr', 'ifting', '(', '.', 'of', 'corner', 'entirety']
+      整词=['[Drifting', '(motorsport', '.', 'of', 'corner', 'entirety']  命中 碎片=True 整词=True
+  槽2(1块/17tok,含答案): 选中=['[D', '1', 'NZ', ']']
+      整词=['[D1NZ', ']']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.523 |E|=0.79 |Wlast|=13.29
+
+[22] ✗ q='According to the 2001 census, what was the population of the city in w'
+  gold='35,124'  pred='The population of Kirton End in the 2001 census was not'  金标槽=[2, 4]
+  槽2(2块/57tok,含答案): 选中=['[B', 'oston', ',', 'Lincoln', '.', '0', 'at', 'census']
+      整词=['[Boston', ',', 'Lincolnshire', '.', '2001', 'at', 'census']  命中 碎片=False 整词=False
+  槽4(1块/29tok,不含答案): 选中=['[K', 'ir', 'ton', 'End']
+      整词=['[Kirton', 'End']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.504 |E|=0.81 |Wlast|=13.29
+
+[23] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?'
+  gold='Adeline Virginia Woolf'  pred='Emma Bull was born earlier than Virginia Woolf.'  金标槽=[0, 4]
+  槽0(1块/28tok,不含答案): 选中=['[', 'Emma', 'Bull', ']']
+      整词=['[Emma', 'Bull', ']']  命中 碎片=False 整词=False
+  槽4(3块/67tok,含答案): 选中=['[', 'Virginia', 'Wool', 'f', 'of', 'who', 'writer', 'device', '.', 'narrative']
+      整词=['[Virginia', 'Woolf', 'of', 'who', 'writer', 'device', '.', 'narrative']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.457 |E|=0.88 |Wlast|=13.29
+
+[24] ✗ q='Scott Parkin has been a vocal critic of Exxonmobil and another corpora'
+  gold='more than 70 countries'  pred='30'  金标槽=[1, 5]
+  槽1(1块/31tok,不含答案): 选中=['[', 'Scott', 'Park', 'in']
+      整词=['[Scott', 'Parkin']  命中 碎片=False 整词=False
+  槽5(1块/27tok,含答案): 选中=['[', 'Hall', 'ibur', 'ton']
+      整词=['[Halliburton']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.497 |E|=0.82 |Wlast|=13.29
+
+[25] ✗ q='What WB supernatrual drama series was Jawbreaker star Rose Mcgowan bes'
+  gold='Charmed'  pred='The WB supernatural drama series that Rose McGowan was best '  金标槽=[1, 2, 3]
+  槽1(2块/40tok,含答案): 选中=['[R', 'ose', 'McG', 'owan', 'to', '', '.', '6']
+      整词=['[Rose', 'McGowan', 'to', '2006', '.']  命中 碎片=False 整词=False
+  槽2(1块/26tok,不含答案): 选中=['[J', 'aw', 'breaker', '(']
+      整词=['[Jawbreaker', '(film']  命中 碎片=False 整词=False
+  槽3(1块/31tok,不含答案): 选中=['[J', 'aw', 'breaker', '(']
+      整词=['[Jawbreaker', '(film']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.545 |E|=0.77 |Wlast|=13.29
+
+[26] ✗ q="What is the name of the singer who's song was released as the lead sin"
+  gold='Usher'  pred='TLC'  金标槽=[1, 8]
+  槽1(2块/47tok,含答案): 选中=['[I', 'Don', "'t", 'Wanna', '.', 'and', '"', 'sher']
+      整词=['[I', 'Don', "'t", 'Wanna', '.', 'and', '"', 'Usher']  命中 碎片=False 整词=True
+  槽8(3块/69tok,含答案): 选中=['[', 'Yeah', '!', '(', ',', '7', 'the', 'ista', '.', 'album', 'for']
+      整词=['[Yeah', '!', '(Usher', ',', '27', 'the', 'Arista', '.', 'album', 'for']  命中 碎片=False 整词=True
+  α=0.264 res/lex=0.397 |E|=0.97 |Wlast|=13.29
+
+[27] ✗ q='who is the younger brother of The episode guest stars of The Hard Easy'
+  gold='Bill Murray'  pred='The query is unclear and contains fragmented or incorrect in'  金标槽=[1, 7]
+  槽1(2块/58tok,含答案): 选中=['[B', 'rian', 'Doyle', '-M', '".', 'and', 'II', 'ack']
+      整词=['[Brian', 'Doyle', '-Murray', '".', 'and', 'II', 'shack']  命中 碎片=False 整词=False
+  槽7(1块/29tok,不含答案): 选中=['[', 'The', 'Hard', 'Easy']
+      整词=['[The', 'Hard', 'Easy']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.613 |E|=0.71 |Wlast|=13.29
+
+[28] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the tea'
+  gold='Carabao Cup'  pred='EFL Cup'  金标槽=[1, 3]
+  槽1(2块/41tok,不含答案): 选中=['[', '0', '2', '1', 'and', '.', ',', 'Cup']
+      整词=['[2017–18', 'and', '.', ',', 'Cup']  命中 碎片=True 整词=True
+  槽3(2块/50tok,含答案): 选中=['[E', 'FL', 'Cup', ']', '.', 'in', "'s"]
+      整词=['[EFL', 'Cup', ']', '.', 'in', "'s"]  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.441 |E|=0.90 |Wlast|=13.29
+
+[29] ✗ q='Which of Tara Strong major voice role in animated series is an America'
+  gold='Teen Titans Go!'  pred='Teen Titans'  金标槽=[1, 4, 7, 10]
+  槽1(2块/53tok,含答案): 选中=['[T', 'ara', 'Strong', ']', 'Draw', 'and', '"', 'Together']
+      整词=['[Tara', 'Strong', ']', '"Drawn', 'and', '"', 'Together']  命中 碎片=False 整词=False
+  槽4(1块/13tok,含答案): 选中=['[', 'Teen', 'Titans', 'Go']
+      整词=['[Teen', 'Titans', 'Go']  命中 碎片=True 整词=True
+  槽7(1块/13tok,含答案): 选中=['[List', 'of', 'Teen', 'Titans']
+  槽10(1块/13tok,含答案): 选中=['[List', 'of', 'Teen', 'Titans']
+  α=0.264 res/lex=0.515 |E|=0.79 |Wlast|=13.29
+
+[30] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous p'
+  gold='Apalachees'  pred='The provided facts do not contain sufficient information to '  金标槽=[0, 1, 5]
+  槽0(1块/31tok,不含答案): 选中=['[', 'Al', 'var', 'o']
+      整词=['[Alvaro']  命中 碎片=False 整词=False
+  槽1(2块/39tok,不含答案): 选中=['[', 'Al', 'var', 'o', '.', 'area', 'Can', 'eral']
+      整词=['[Alvaro', '.', 'area', 'Canaveral']  命中 碎片=False 整词=False
+  槽5(2块/59tok,含答案): 选中=['[', 'Ind', 'igenous', 'peoples', 'and', '1', '.', '']
+      整词=['[Indigenous', 'peoples', 'and', '18th', '.']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.438 |E|=0.90 |Wlast|=13.29
+
+[31] ✗ q='What is the county seat of the county where East Lempster, New Hampshi'
+  gold='Newport'  pred='The county seat of Rockingham County, where East Lempster, N'  金标槽=[2, 3]
+  槽2(1块/13tok,含答案): 选中=['[S', 'ullivan', ',', 'County']
+      整词=['[Sullivan', ',', 'County']  命中 碎片=False 整词=False
+  槽3(2块/37tok,不含答案): 选中=['[', 'East', 'L', 'emp', '.', ',', 'States', 'United']
+      整词=['[East', 'Lempster', '.', ',', 'States', 'United']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.419 |E|=0.93 |Wlast|=13.29
+
+[32] ✗ q='Handi-Snacks are a snack food product line sold by what American multi'
+  gold='Mondelez International, Inc.'  pred='Mondelez International'  金标槽=[0, 2]
+  槽0(1块/25tok,不含答案): 选中=['[', 'Hand', 'i', '-S']
+      整词=['[Handi', '-Snacks']  命中 碎片=False 整词=False
+  槽2(2块/52tok,含答案): 选中=['[', 'Mon', 'de', 'lez', '0', 'in', '7', 'world']
+      整词=['[Mondelez', ',000', 'in', '107', 'world']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.465 |E|=0.86 |Wlast|=13.29
+
+[33] ✗ q='What was the name of a woman from the book titled "Their Lives: The Wo'
+  gold='Monica Lewinsky'  pred='The name of the woman from the book "Their Lives: The Women '  金标槽=[0, 1, 2]
+  槽0(1块/25tok,不含答案): 选中=['[', 'Their', 'Lives', ']']
+      整词=['[Their', 'Lives', ']']  命中 碎片=False 整词=False
+  槽1(3块/67tok,含答案): 选中=['[', 'Their', 'Lives', ']', 'and', 'Gr', 'addr', 'Jones', '.', 'Per', 'due']
+      整词=['[Their', 'Lives', ']', 'and', 'Gracen', 'Broaddrick', 'Jones', '.', 'Perdue']  命中 碎片=False 整词=False
+  槽2(2块/41tok,不含答案): 选中=['[', 'Mon', 'ica', 'Lew', '.', 'former', 'and', 'designer']
+      整词=['[Monica', 'Lewinsky', '.', 'former', 'and', 'designer']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.426 |E|=0.92 |Wlast|=13.29
+
+[34] ✗ q="How many copies of Roald Dahl's variation on a popular anecdote sold?"
+  gold='250 million'  pred="I cannot determine the number of copies sold for Roald Dahl'"  金标槽=[1, 3]
+  槽1(1块/19tok,含答案): 选中=['[', 'Ro', 'ald', 'Dahl']
+      整词=['[Roald', 'Dahl']  命中 碎片=False 整词=False
+  槽3(2块/53tok,不含答案): 选中=['[M', 'rs', '.', 'B', 'affair', 'm', 'had', '9']
+      整词=['[Mrs', '.', 'Bixby', 'affair', 'mink', 'had', '9']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.446 |E|=0.89 |Wlast|=13.29
+
+[35] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrati'
+  gold='Beijing'  pred='The ambassador of the Rabat-Salé-Kénitra administrative regi'  金标槽=[0, 1, 2]
+  槽0(3块/74tok,不含答案): 选中=['[R', 'ab', 'at', ']', '0', 'of', 'capital', 'city', '.', 'over', 'metropolitan']
+      整词=['[Rabat', ']', ',000', 'of', 'capital', 'city', '.', 'over', '.2', 'metropolitan']  命中 碎片=False 整词=False
+  槽1(1块/23tok,不含答案): 选中=['[R', 'ab', 'at', ']']
+      整词=['[Rabat', ']']  命中 碎片=False 整词=False
+  槽2(2块/33tok,含答案): 选中=['[M', 'or', 'occan', 'Ambassador', '.']
+      整词=['[Moroccan', 'Ambassador', '.']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.767 |E|=0.65 |Wlast|=13.29
+
+[36] ✗ q='Where did the descendants of the group of black Indians associated wit'
+  gold='Coahuila, Mexico'  pred='Florida'  金标槽=[0, 2]
+  槽0(2块/33tok,含答案): 选中=['[M', 'asc', ']', 'og', '.']
+      整词=['[Mascogos', ']', '.']  命中 碎片=False 整词=False
+  槽2(1块/26tok,不含答案): 选中=['[', 'Black', 'Sem', 'ino']
+      整词=['[Black', 'Seminoles']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.538 |E|=0.77 |Wlast|=13.29
+
+[37] ✗ q='David Huntsinger has worked with this gospel singer born in the month '
+  gold='Larnelle Harris'  pred='Cashon'  金标槽=[4, 11]
+  槽4(2块/48tok,含答案): 选中=['[', 'David', 'Hunts', 'inger', 'and', '.', 'Cash', 'on']
+      整词=['[David', 'Huntsinger', 'and', '.', 'Cash', 'Parton']  命中 碎片=False 整词=False
+  槽11(1块/31tok,不含答案): 选中=['[L', 'arn', 'elle', 'Harris']
+      整词=['[Larnelle', 'Harris']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.488 |E|=0.83 |Wlast|=13.29
+
+[38] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets footbal'
+  gold='North Avenue at Techwood Drive'  pred='Atlanta, Georgia'  金标槽=[1, 3]
+  槽1(2块/41tok,不含答案): 选中=['[', '9', '6', '1', '.', 'in', 'Field', 'at']
+      整词=['[1964', '.', 'in', 'Field', 'at']  命中 碎片=True 整词=True
+  槽3(2块/39tok,含答案): 选中=['[B', 'obby', 'Dodd', 'Stadium', '.', 'in', 'of', 'Technology']
+      整词=['[Bobby', 'Dodd', 'Stadium', '.', 'in', 'of', 'Technology']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.443 |E|=0.90 |Wlast|=13.29
+
+[39] ✗ q='Which American film actor and dancer starred in the 1945 film Johnny A'
+  gold='George Raft'  pred='James Cagney'  金标槽=[1, 2]
+  槽1(1块/26tok,含答案): 选中=['[', 'Johnny', 'Angel', ']']
+      整词=['[Johnny', 'Angel', ']']  命中 碎片=False 整词=False
+  槽2(3块/71tok,含答案): 选中=['[', 'George', 'Ra', 'ft', ')', 'in', 'of', 'actor', '.', '9', '0', 's']
+      整词=['[George', 'Raft', ')', 'in', 'of', 'actor', '.', '1940s']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.420 |E|=0.92 |Wlast|=13.29
+
+[40] ✗ q='When was the  former Indian cricketer who made his ODI debuts during t'
+  gold='7 October 1978'  pred='1980'  金标槽=[0, 5]
+  槽0(2块/53tok,含答案): 选中=['[Z', 'a', 'er', 'he', '', 'till', 'team', 'of']
+      整词=['[Zaheer', '2014', 'till', 'team', 'of']  命中 碎片=False 整词=False
+  槽5(2块/34tok,不含答案): 选中=['[', '0', '2', 'competition', '.']
+      整词=['[2000', 'competition', '.']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.493 |E|=0.85 |Wlast|=13.29
+
+[41] ✗ q='Which airplane was this Major test-flying after whom the base, that 51'
+  gold='B-17 Flying Fortress bomber'  pred='The 514th Flight Test Squadron is named after Major James H.'  金标槽=[1, 4]
+  槽1(2块/40tok,不含答案): 选中=['[', '1', 'th', '5', 'Base', '.', ',', 'Hill']
+      整词=['[514th', 'Base', '.', ',', 'Hill']  命中 碎片=False 整词=False
+  槽4(2块/45tok,含答案): 选中=['[H', 'ill', 'Air', 'Force', '.', 'of', 'Fortress', 'lying']
+      整词=['[Hill', 'Air', 'Force', '.', 'of', 'Fortress', 'lying']  命中 碎片=True 整词=True
+  α=0.264 res/lex=0.434 |E|=0.92 |Wlast|=13.29
+
+[42] ✗ q='The Argentine PGA Championship record holder has won how many tourname'
+  gold='230'  pred='0'  金标槽=[2, 4]
+  槽2(2块/41tok,不含答案): 选中=['[', 'Arg', 'entine', 'PGA', 'and', '.', '1', '5']
+      整词=['[Argentine', 'PGA', 'and', '.', '1985']  命中 碎片=False 整词=False
+  槽4(2块/39tok,含答案): 选中=['[', 'Rob', 'erto', 'De', '.', '7', 'Championship', 'Open']
+      整词=['[Roberto', 'De', '.', '1967', 'Championship', 'Open']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.450 |E|=0.88 |Wlast|=13.29
+
+[43] ✗ q="Suicide's 1977 released album features a song based on what brand's co"
+  gold='Marvel'  pred="Suicide's 1977 released album features a song based on what"  金标槽=[0, 1, 2, 3]
+  槽0(1块/26tok,不含答案): 选中=['[', 'Ghost', 'Rider', '(']
+      整词=['[Ghost', 'Rider', '(Suicide']  命中 碎片=False 整词=False
+  槽1(1块/18tok,含答案): 选中=['[', 'Ghost', 'Rider', '(']
+      整词=['[Ghost', 'Rider', '(Suicide']  命中 碎片=False 整词=False
+  槽2(1块/22tok,不含答案): 选中=['[', 'Su', 'icide', '(']
+      整词=['[Suicide', '(1977']  命中 碎片=False 整词=False
+  槽3(2块/33tok,不含答案): 选中=['[', 'Su', 'icide', '(', '.']
+      整词=['[Suicide', '(1977', '.']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.732 |E|=0.67 |Wlast|=13.29
+
+[44] ✗ q='What other political position did the person who introduced the DISCLO'
+  gold='United States Senator'  pred='Senator'  金标槽=[0, 1]
+  槽0(4块/110tok,不含答案): 选中=['[', 'DIS', 'CLOSE', 'Act', 'was', '(', '8', 'Representatives', '9', '', 'ary', 'Schumer', '.', '1', ')']
+      整词=['[DISCLOSE', 'Act', 'was', '(S', '.3628', 'Representatives', '29', '2010', '-Maryland', 'Schumer', '.', '21', ')']  命中 碎片=False 整词=False
+  槽1(2块/46tok,含答案): 选中=['[', 'Chris', 'Van', 'Holl', '.', ',', '2', '7']
+      整词=['[Chris', 'Van', 'Hollen', '.', ',', '2017']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.436 |E|=0.89 |Wlast|=13.29
+
+[45] ✗ q='In which role did Caroline Carver played in a 1999 Hallmark Entertainm'
+  gold='Princess Jessica'  pred='Caroline Carver played the role of "Leprechaun" in'  金标槽=[0, 4]
+  槽0(2块/38tok,不含答案): 选中=['[', 'The', 'Magical', 'Legend', '.', '-for', 'movie', 'made']
+      整词=['[The', 'Magical', 'Legend', '.', '-for', 'movie', 'made']  命中 碎片=False 整词=False
+  槽4(3块/89tok,含答案): 选中=['[', 'Car', 'oline', 'such', 'L', 'ep', '(', '2', 'and']
+      整词=['[Caroline', 'Carver', 'such', 'Leprechauns', '(1999', '(2006', '(2004', 'and']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.411 |E|=0.94 |Wlast|=13.29
+
+[46] ✗ q='Mummulgum is a stop on the Bruxner Highway before reaching the town on'
+  gold='Richmond'  pred='Mummulgum is a stop on the Bruxner Highway before reaching'  金标槽=[1, 3]
+  槽1(2块/35tok,含答案): 选中=['[C', 'as', 'ino', ',', 'Way', '.', 'land']
+      整词=['[Casino', ',', 'Way', '.', 'land']  命中 碎片=False 整词=False
+  槽3(2块/34tok,不含答案): 选中=['[M', 'um', 'mul', 'g', '4', ').']
+      整词=['[Mummulgum', '4', ').']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.627 |E|=0.72 |Wlast|=13.29
+
+[47] ✗ q='Which American audio engineer and clandestine chemist, who was a key f'
+  gold='Owsley Stanley'  pred='The question contains no valid or coherent information to id'  金标槽=[1, 4, 5]
+  槽1(2块/57tok,含答案): 选中=['[', 'Old', 'and', 'in', '.', '(', 'micro', 'onto']
+      整词=['[Old', 'and', 'in', '.', '(four', 'microphones', 'onto']  命中 碎片=False 整词=False
+  槽4(2块/53tok,含答案): 选中=['[', 'O', 'ws', 'ley', '2', '', '.', 'engineer']
+      整词=['[Owsley', '2011', '.', 'engineer']  命中 碎片=False 整词=True
+  槽5(2块/47tok,不含答案): 选中=['[', 'O', 'ws', 'ley', '.', 'of', '0', 's']
+      整词=['[Owsley', '.', 'of', '1960s']  命中 碎片=False 整词=True
+  α=0.264 res/lex=0.400 |E|=0.96 |Wlast|=13.29
+
+[48] ✗ q='When was the palace founded at which Columba de Dunbar died in 1435?'
+  gold='the late 12th Century'  pred='The palace where Columba de Dunbar died in 1435 is'  金标槽=[0, 2]
+  槽0(2块/58tok,不含答案): 选中=['[C', 'olum', 'ba', 'de', 'before', '.', 'yn', 'gin']
+      整词=['[Columba', 'de', 'before', '.', 'Spynie', 'Elgin']  命中 碎片=False 整词=False
+  槽2(1块/22tok,含答案): 选中=['[', 'Sp', 'yn', 'ie']
+      整词=['[Spynie']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.520 |E|=0.79 |Wlast|=13.29
+
+[49] ✗ q='At what venue was the January 2, 2012 game featured the University of '
+  gold='Mercedes-Benz Superdome'  pred='The venue for the January 2, 2012 game featuring the'  金标槽=[0, 5]
+  槽0(2块/51tok,含答案): 选中=['[', '0', '2', '1', '.', 'in', 'd', 'ome']
+      整词=['[2013', '.', 'in', 'Superdome']  命中 碎片=False 整词=True
+  槽5(2块/40tok,不含答案): 选中=['[', '0', '2', '1', '.', 'I', 'BS', 'F']
+      整词=['[2012', '.', 'I', 'FBS']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.417 |E|=0.93 |Wlast|=13.29
+
+[50] ✗ q="Which film was Oscar nominated, LaLee's Kin: The Legacy of Cotton or G"
+  gold="LaLee's Kin: The Legacy of Cotton"  pred='Gimme Shelter'  金标槽=[0, 1, 4]
+  槽0(2块/46tok,含答案): 选中=['[', 'La', 'Lee', "'s", 'and', '.', 'öm', 'les']
+      整词=['[LaLee', "'s", 'and', '.', 'Frömke', 'Maysles']  命中 碎片=True 整词=True
+  槽1(1块/27tok,不含答案): 选中=['[', 'La', 'Lee', "'s"]
+      整词=['[LaLee', "'s"]  命中 碎片=True 整词=True
+  槽4(2块/35tok,不含答案): 选中=['[G', 'im', 'me', 'Shelter', '.', 'main', 'competition']
+      整词=['[Gimme', 'Shelter', '.', 'main', 'competition']  命中 碎片=False 整词=False
+  α=0.264 res/lex=0.487 |E|=0.85 |Wlast|=13.29
+
+======================================================================
+答错题 50 条（扫了 59 条）；其中**含答案**的金标槽 58 个（多块槽 43 个）
+命中率（碎片口径）= 29.3%   （整词口径）= 36.2%   整词能多救 = 6.9 个点
+α 均值 = 0.2640667259693146  res/lex 均值 = 0.47404889893289265
+读法：
+  碎片命中率低 + 整词命中率高 -> 病在**选词粒度**（argmax 落在子词上），改整词即可
+  两者都低                     -> 答案实体没进潜层（查容量/选词目标/压缩）
+[out] -> /data/zhangjiayang/yyz3/results/diag_symbol_fidelity.json
+[diag 2026-11-04 13:18:08] 结束 rc=0 -> /data/zhangjiayang/yyz3/results/diag_symbol_fidelity.json
+[diag 2026-11-04 13:18:08] oracle_embed 开始
+[diag 2026-11-04 13:20:41] oracle_embed 结束 rc=0  -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_embed.json
+[diag 2026-11-04 13:20:41] 全部完成：/data/zhangjiayang/yyz3/results/diag_readout_200

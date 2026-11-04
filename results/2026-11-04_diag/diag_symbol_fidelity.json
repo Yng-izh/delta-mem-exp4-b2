@@ -1,0 +1,4087 @@
+{
+ "n_items": 50,
+ "n_scanned": 59,
+ "n_answer_slots": 58,
+ "n_answer_slots_multi_chunk": 43,
+ "piece_hit_rate": 0.29310344827586204,
+ "whole_word_hit_rate": 0.3620689655172414,
+ "whole_word_gain": 0.06896551724137934,
+ "alpha_mean": 0.2640667259693146,
+ "res_ratio_mean": 0.47404889893289265,
+ "rows": [
+  {
+   "idx": 0,
+   "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+   "gold_ans": "Chief of Protocol",
+   "pred": "The woman who portrayed Corliss Archer in the film *Kiss and Tell",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 3,
+     "n_tokens": 72,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Sh",
+      "ir",
+      "ley",
+      "and",
+      "was",
+      "as",
+      "actress",
+      "to",
+      "",
+      ".",
+      "8"
+     ],
+     "whole_words": [
+      "[Shirley",
+      "and",
+      "was",
+      "as",
+      "actress",
+      "to",
+      "1938",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Shirley Temple Black (April 23, 1928 – February 10, 2014) was an American actress, singer, dancer, businesswoman, and diplomat who was Hollywood's number one box-office draw as a child actress from 19"
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 36,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Sh",
+      "ir",
+      "ley",
+      "the",
+      ".",
+      "United",
+      "States"
+     ],
+     "whole_words": [
+      "[Shirley",
+      "the",
+      ".",
+      "United",
+      "States"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "As an adult, she was named United States ambassador to Ghana and to Czechoslovakia and also served as Chief of Protocol of the United States."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": false,
+     "pieces": [
+      "[K",
+      "iss",
+      "and",
+      "Tell",
+      "as",
+      ".",
+      "l",
+      "Temple"
+     ],
+     "whole_words": [
+      "[Kiss",
+      "and",
+      "Tell",
+      "as",
+      ".",
+      "Corliss",
+      "Temple"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Kiss and Tell is a 1945 American comedy film starring then 17-year-old Shirley Temple as Corliss Archer."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.9029057025909424,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.39792031340398265,
+    "e_norm": 0.9712924957275391,
+    "net_out_norm": 912.7005615234375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 1,
+   "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+   "gold_ans": "Animorphs",
+   "pred": "The series you're referring to is **\"The Chronicles of Narnia\"",
+   "ok": false,
+   "n_gold": 5,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "The",
+      "H",
+      "ork",
+      ".",
+      "App",
+      "legate"
+     ],
+     "whole_words": [
+      "[The",
+      "Hork",
+      ".",
+      "Applegate"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Hork-Bajir Chronicles is the second companion book to the \"Animorphs\" series, written by K. A. Applegate."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 58,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "The",
+      "H",
+      "ork",
+      "im",
+      "of",
+      "in",
+      "and"
+     ],
+     "whole_words": [
+      "[The",
+      "Hork",
+      "Ellimist",
+      "of",
+      "in",
+      "and"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "With respect to continuity within the series, it takes place before book #23, \"The Pretender\", although the events told in the story occur between the time of \"The Ellimist Chronicles\" and \"The Andali"
+    },
+    {
+     "slot": 2,
+     "n_chunks": 3,
+     "n_tokens": 89,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "The",
+      "H",
+      "ork",
+      "ks",
+      "how",
+      "ite",
+      "from",
+      "aj",
+      "invasion"
+     ],
+     "whole_words": [
+      "[The",
+      "Hork",
+      "Yeerks",
+      "how",
+      "Andalite",
+      "from",
+      "-Bajir",
+      "invasion"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The book is introduced by Tobias, who flies to the valley of the free Hork-Bajir, where Jara Hamee tells him the story of how the Yeerks enslaved the Hork-Bajir, and how Aldrea, an Andalite, and her c"
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 47,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Anim",
+      "orph",
+      "s",
+      ".",
+      ",",
+      "astic"
+     ],
+     "whole_words": [
+      "[Animorphs",
+      ".",
+      ",",
+      "Scholastic"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Animorphs is a science fantasy series of young adult books written by Katherine Applegate and her husband Michael Grant, writing together under the name K. A. Applegate, and published by Scholastic."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 1,
+     "n_tokens": 28,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Anim",
+      "orph",
+      "s"
+     ],
+     "whole_words": [
+      "[Animorphs"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "It is told in first person, with all six main characters taking turns narrating the books through their own perspectives."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.6830400228500366,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5260080055779,
+    "e_norm": 0.7862601280212402,
+    "net_out_norm": 740.3873291015625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 2,
+   "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
+   "gold_ans": "no",
+   "pred": "Yes",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 50,
+     "ans_in_slot": false,
+     "pieces": [
+      "[L",
+      "ale",
+      "li",
+      "Mosque",
+      ".",
+      "Turkey",
+      "-century",
+      "ih"
+     ],
+     "whole_words": [
+      "[Laleli",
+      "Mosque",
+      ".",
+      "Turkey",
+      "-century",
+      "Fatih"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Laleli Mosque (Turkish: \"Laleli Camii, or Tulip Mosque\" ) is an 18th-century Ottoman imperial mosque located in Laleli, Fatih, Istanbul, Turkey."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 3,
+     "n_tokens": 73,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Es",
+      "ma",
+      "Sultan",
+      "of",
+      "is",
+      "ö",
+      ".",
+      "after",
+      "ed",
+      "develop"
+     ],
+     "whole_words": [
+      "[Esma",
+      "Sultan",
+      "of",
+      "is",
+      "Ortaköy",
+      ".",
+      "after",
+      "redeveloped"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Esma Sultan Mansion (Turkish: \"Esma Sultan Yalısı\" ), a historical yalı (English: waterside mansion ) located at Bosphorus in Ortaköy neighborhood of Istanbul, Turkey and named after its original "
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.910551905632019,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.3945788460020295,
+    "e_norm": 0.9834982752799988,
+    "net_out_norm": 804.2067260742188,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 3,
+   "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
+   "gold_ans": "Greenwich Village, New York City",
+   "pred": "The film \"Big Stone Gap\" is not a romantic comedy, and there is",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Ad",
+      "ri",
+      "ana",
+      ".",
+      "in",
+      "City",
+      ","
+     ],
+     "whole_words": [
+      "[Adriana",
+      ".",
+      "in",
+      "City",
+      ","
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Adriana Trigiani is an Italian American best-selling author of sixteen books, television writer, film director, and entrepreneur based in Greenwich Village, New York City."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 50,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Big",
+      "Stone",
+      "Gap",
+      ".",
+      "of",
+      "for",
+      "otti"
+     ],
+     "whole_words": [
+      "[Big",
+      "Stone",
+      "Gap",
+      ".",
+      "of",
+      "for",
+      "Gigliotti"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Big Stone Gap is a 2014 American drama romantic comedy film written and directed by Adriana Trigiani and produced by Donna Gigliotti for Altar Identity Studios, a subsidiary of Media Society."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7840621471405029,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.45823474766579647,
+    "e_norm": 0.8673673272132874,
+    "net_out_norm": 855.333740234375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 4,
+   "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
+   "gold_ans": "YG Entertainment",
+   "pred": "SM Entertainment",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 26,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "0",
+      "S",
+      "2"
+     ],
+     "whole_words": [
+      "[2014",
+      "S"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "2014 S/S is the debut album of South Korean group WINNER."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 46,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Winner",
+      "(",
+      "band",
+      ".",
+      "in",
+      "4",
+      "Entertainment"
+     ],
+     "whole_words": [
+      "[Winner",
+      "(band",
+      ".",
+      "in",
+      "2014",
+      "Entertainment"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Winner (Hangul: 위너), often stylized as WINNER, is a South Korean boy group formed in 2013 by YG Entertainment and debuted in 2014."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8565253615379333,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4194674627078385,
+    "e_norm": 0.927692174911499,
+    "net_out_norm": 702.37451171875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 6,
+   "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
+   "gold_ans": "Kansas Song",
+   "pred": "\"The Lawrence Fight Song\"",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 22,
+     "ans_in_slot": true,
+     "pieces": [
+      "[K",
+      "ansas",
+      "Song",
+      "]"
+     ],
+     "whole_words": [
+      "[Kansas",
+      "Song",
+      "]"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Kansas Song (We’re From Kansas) is a fight song of the University of Kansas."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 32,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "University",
+      "of",
+      "Kansas"
+     ],
+     "whole_words": [
+      "[University",
+      "of",
+      "Kansas"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "The main campus in Lawrence, one of the largest college towns in Kansas, is on Mount Oread, the highest elevation in Lawrence."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 36,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "University",
+      "of",
+      "Kansas",
+      "in",
+      ".",
+      "City"
+     ],
+     "whole_words": [
+      "[University",
+      "of",
+      "Kansas",
+      "in",
+      ".",
+      "City"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Two branch campuses are in the Kansas City metropolitan area: the Edwards Campus in Overland Park, and the university's medical school and hospital in Kansas City."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8364182710647583,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4295512575207888,
+    "e_norm": 0.9134840369224548,
+    "net_out_norm": 679.76220703125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 7,
+   "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
+   "gold_ans": "1999",
+   "pred": "1989",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 3,
+     "n_tokens": 77,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "End",
+      "of",
+      "Days",
+      "religious",
+      "un",
+      "and",
+      "rne",
+      ".",
+      "evil",
+      "by",
+      "rist"
+     ],
+     "whole_words": [
+      "[End",
+      "of",
+      "Days",
+      "religious",
+      "(Tunney",
+      "and",
+      "(Byrne",
+      ".",
+      "evil",
+      "by",
+      "Antichrist"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The film follows former New York Police Department detective Jericho Cane (Schwarzenegger) after he saves a banker (Byrne) from an assassin, finds himself embroiled in a religious conflict, and must p"
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 43,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Oh",
+      "My",
+      "God",
+      "to",
+      "of",
+      "\".",
+      "Days"
+     ],
+     "whole_words": [
+      "[Oh",
+      "My",
+      "God",
+      "to",
+      "of",
+      "\".",
+      "Days"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "\"Oh My God\" is a song by Guns N' Roses released in 1999 on the soundtrack to the film \"End of Days\"."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 37,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Oh",
+      "My",
+      "God",
+      ".",
+      "the",
+      "soundtrack",
+      "band"
+     ],
+     "whole_words": [
+      "[Oh",
+      "My",
+      "God",
+      ".",
+      "the",
+      "soundtrack",
+      "band"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The song was sent out to radio stations in November 1999 as a promo for the soundtrack and the band."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8435457944869995,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.42592177270912607,
+    "e_norm": 0.9238287210464478,
+    "net_out_norm": 789.5145874023438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 8,
+   "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
+   "gold_ans": "from 1986 to 2013",
+   "pred": "1992–1997",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 61,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "9",
+      "5",
+      "1",
+      "and",
+      "of",
+      "els",
+      "Hughes"
+     ],
+     "whole_words": [
+      "[1995–96",
+      "and",
+      "of",
+      "Kanchelskis",
+      "Hughes"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Their triumph was made all the more remarkable by the fact that Alex Ferguson had sold experienced players Paul Ince, Mark Hughes and Andrei Kanchelskis before the start of the season, and not made an"
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 43,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "9",
+      "5",
+      "1",
+      ".",
+      "and",
+      "les"
+     ],
+     "whole_words": [
+      "[1995–96",
+      ".",
+      "and",
+      "Scholes"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Instead, he had drafted in young players like Nicky Butt, David Beckham, Paul Scholes and the Neville brothers, Gary and Phil."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 48,
+     "ans_in_slot": true,
+     "pieces": [
+      "[A",
+      "lex",
+      "Ferguson",
+      "]",
+      "",
+      "to",
+      "from",
+      "United"
+     ],
+     "whole_words": [
+      "[Alex",
+      "Ferguson",
+      "]",
+      "2013",
+      "to",
+      "from",
+      "United"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Sir Alexander Chapman Ferguson, CBE (born 31 December 1941) is a Scottish former football manager and player who managed Manchester United from 1986 to 2013."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.816032350063324,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4402822021962126,
+    "e_norm": 0.894418478012085,
+    "net_out_norm": 696.12841796875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 9,
+   "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
+   "gold_ans": "9,984",
+   "pred": "I cannot determine the population of the country where Brown State Fishing Lake is located based",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 37,
+     "ans_in_slot": false,
+     "pieces": [
+      "[B",
+      "rown",
+      "State",
+      "Fishing",
+      ".",
+      "in",
+      "United",
+      "the"
+     ],
+     "whole_words": [
+      "[Brown",
+      "State",
+      "Fishing",
+      ".",
+      "in",
+      "United",
+      "the"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Brown State Fishing Lake (sometimes also known as Brown State Fishing Lake And Wildlife Area) is a protected area in Brown County, Kansas in the United States."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 1,
+     "n_tokens": 27,
+     "ans_in_slot": true,
+     "pieces": [
+      "[B",
+      "rown",
+      ",",
+      "County"
+     ],
+     "whole_words": [
+      "[Brown",
+      ",",
+      "County"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "As of the 2010 census, the county population was 9,984."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.9306948184967041,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.3860390248326104,
+    "e_norm": 0.9976376891136169,
+    "net_out_norm": 739.3292236328125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 11,
+   "question": "This singer of A Rather Blustery Day also voiced what hedgehog?",
+   "gold_ans": "Sonic",
+   "pred": "The singer of \"A Rather Blustery Day\" is Pete Seeger.",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Jim",
+      "Cummings",
+      "]",
+      ".",
+      "Pete"
+     ],
+     "whole_words": [
+      "[Jim",
+      "Cummings",
+      "]",
+      ".",
+      "Pete"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He is known for voicing the title character from \"Darkwing Duck\", Dr. Robotnik from \"Sonic the Hedgehog\", and Pete."
+    },
+    {
+     "slot": 6,
+     "n_chunks": 1,
+     "n_tokens": 25,
+     "ans_in_slot": false,
+     "pieces": [
+      "[A",
+      "Rather",
+      "Bl",
+      "ust"
+     ],
+     "whole_words": [
+      "[A",
+      "Rather",
+      "Blustery"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It was written by Robert & Richard Sherman and sung by Jim Cummings as \"Pooh\"."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.680952250957489,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5276207247190091,
+    "e_norm": 0.7954186797142029,
+    "net_out_norm": 740.0604858398438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 12,
+   "question": "Aside from the Apple Remote, what other device can control the program Apple Remote was originally designed to interact with?",
+   "gold_ans": "keyboard function keys",
+   "pred": "The Apple Remote was originally designed to interact with the **iPod**. \n\n",
+   "ok": false,
+   "n_gold": 4,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Apple",
+      "Remote",
+      "]",
+      ".",
+      "its",
+      "which",
+      "infrared"
+     ],
+     "whole_words": [
+      "[Apple",
+      "Remote",
+      "]",
+      ".",
+      "its",
+      "which",
+      "infrared"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Apple Remote is a remote control device released in or after October 2005 by Apple Inc. for use with a number of its products which use infrared capabilities."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Apple",
+      "Remote",
+      "]",
+      "and",
+      ".",
+      "Mac",
+      "computers"
+     ],
+     "whole_words": [
+      "[Apple",
+      "Remote",
+      "]",
+      "and",
+      ".",
+      "Macintosh",
+      "computers"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The device was originally designed to interact with the Front Row media program on the iSight iMac G5 and is compatible with some later desktop and portable Macintosh computers."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 2,
+     "n_tokens": 63,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Front",
+      "(",
+      "Row",
+      ").",
+      "and",
+      "Kodi"
+     ],
+     "whole_words": [
+      "[Front",
+      "(software",
+      "Row",
+      ").",
+      "and",
+      "Kodi"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Front Row is a discontinued media center software application for Apple's Macintosh computers and Apple TV for navigating and viewing video, photos, podcasts, and music from a computer, optical disc, "
+    },
+    {
+     "slot": 6,
+     "n_chunks": 1,
+     "n_tokens": 27,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Front",
+      "(",
+      "Row"
+     ],
+     "whole_words": [
+      "[Front",
+      "(software",
+      "Row"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The software relies on iTunes and iPhoto and is controlled by an Apple Remote or the keyboard function keys."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8582466244697571,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.41862619660310874,
+    "e_norm": 0.9428213834762573,
+    "net_out_norm": 743.2593994140625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 13,
+   "question": "What was the father of Kasper Schmeichel voted to be by the IFFHS in 1992?",
+   "gold_ans": "World's Best Goalkeeper",
+   "pred": "Peter Schmeichel",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 3,
+     "n_tokens": 67,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Peter",
+      "Sch",
+      "me",
+      "and",
+      "HS",
+      "9",
+      "as",
+      "3",
+      "."
+     ],
+     "whole_words": [
+      "[Peter",
+      "Schmeichel",
+      "and",
+      "IFFHS",
+      "19",
+      "as",
+      "93",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Peter Bolesław Schmeichel MBE (] ; born 18 November 1963) is a Danish former professional footballer who played as a goalkeeper, and was voted the IFFHS World's Best Goalkeeper in 1992 and 1993."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 48,
+     "ans_in_slot": false,
+     "pieces": [
+      "[K",
+      "asper",
+      "",
+      "Sch",
+      ".",
+      "the",
+      "City",
+      "a"
+     ],
+     "whole_words": [
+      "[Kasper",
+      "1986",
+      "Schmeichel",
+      ".",
+      "the",
+      "City",
+      "a"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Kasper Peter Schmeichel (] ; born 5 November 1986) is a Danish professional footballer who plays as a goalkeeper for Premier League club Leicester City and the Denmark national team."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 1,
+     "n_tokens": 23,
+     "ans_in_slot": false,
+     "pieces": [
+      "[K",
+      "asper",
+      "Sch",
+      "me"
+     ],
+     "whole_words": [
+      "[Kasper",
+      "Schmeichel"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He is the son of former Manchester United and Danish international goalkeeper Peter Schmeichel."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7356786727905273,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.48837153153620294,
+    "e_norm": 0.8451604843139648,
+    "net_out_norm": 743.0094604492188,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 14,
+   "question": "Who was the writer of These Boots Are Made for Walkin' and who died in 2007?",
+   "gold_ans": "Barton Lee Hazlewood",
+   "pred": "Lee Hazlewood",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "These",
+      "Boots",
+      "Are",
+      ".",
+      "Sinatra"
+     ],
+     "whole_words": [
+      "[These",
+      "Boots",
+      "Are",
+      ".",
+      "Sinatra"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "\"These Boots Are Made for Walkin' is a hit song written by Lee Hazlewood and recorded by Nancy Sinatra."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 3,
+     "n_tokens": 80,
+     "ans_in_slot": true,
+     "pieces": [
+      "[L",
+      "ee",
+      "2",
+      "Haz",
+      "was",
+      "and",
+      "late",
+      "ddy",
+      ".",
+      "in",
+      "1",
+      "Sinatra"
+     ],
+     "whole_words": [
+      "[Lee",
+      "2007",
+      "Hazlewood",
+      "was",
+      "and",
+      "late",
+      "Eddy",
+      ".",
+      "in",
+      "1960s",
+      "Sinatra"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Barton Lee Hazlewood (July 9, 1929 – August 4, 2007) was an American country and pop singer, songwriter, and record producer, most widely known for his work with guitarist Duane Eddy during the late 1"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.9442386627197266,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.38050180990722204,
+    "e_norm": 1.0063716173171997,
+    "net_out_norm": 660.7171630859375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 15,
+   "question": "The 2011–12 VCU Rams men's basketball team, led by third year head coach Shaka Smart, represented Virginia Commonwealth University which was founded in what year?",
+   "gold_ans": "1838",
+   "pred": "1969",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 40,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Virginia",
+      "Commonwealth",
+      "University",
+      ".",
+      "in",
+      "4"
+     ],
+     "whole_words": [
+      "[Virginia",
+      "Commonwealth",
+      "University",
+      ".",
+      "in",
+      "1854",
+      "Virginia"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "VCU was founded in 1838 as the medical department of Hampden–Sydney College, becoming the Medical College of Virginia in 1854."
+    },
+    {
+     "slot": 7,
+     "n_chunks": 2,
+     "n_tokens": 42,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "0",
+      "2",
+      "1",
+      "to",
+      "marked",
+      "by",
+      "Four"
+     ],
+     "whole_words": [
+      "[2011–12",
+      "to",
+      "marked",
+      "by",
+      "Four"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Led by third-year head coach Shaka Smart, the Rams were coming off a season marked by a run to the Final Four."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7973158955574036,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4506175308320614,
+    "e_norm": 0.8833917379379272,
+    "net_out_norm": 605.9996948242188,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 18,
+   "question": "When was Poison's album \"Shut Up, Make Love\" released?",
+   "gold_ans": "2000",
+   "pred": "Poison did not release an album titled \"Shut Up, Make Love.\"",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 37,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Po",
+      "ison",
+      "(",
+      ".",
+      "9",
+      "0",
+      "s"
+     ],
+     "whole_words": [
+      "[Poison",
+      "(American",
+      ".",
+      "990s"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Poison is an American rock band that achieved great commercial success in the mid-1980s to the mid-1990s."
+    },
+    {
+     "slot": 6,
+     "n_chunks": 2,
+     "n_tokens": 58,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Sh",
+      "ut",
+      "Up",
+      "ack",
+      "a",
+      "single",
+      "from"
+     ],
+     "whole_words": [
+      "[Shut",
+      "Up",
+      "\"Crack",
+      "a",
+      "single",
+      "from"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "\"Shut Up, Make Love\" is a song by American rock band Poison; released in 2000, it was the first single presented to radio stations from their 2000 \"Crack a Smile...and More!"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8742451071739197,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.41096543429411037,
+    "e_norm": 0.9481875896453857,
+    "net_out_norm": 639.0677490234375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 20,
+   "question": "Ralph Hefferline was a psychology professor at a university that is located in what city?",
+   "gold_ans": "New York City",
+   "pred": "Ralph Hefferline was a psychology professor at the University of Illinois at Urb",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 45,
+     "ans_in_slot": false,
+     "pieces": [
+      "[R",
+      "alph",
+      "1",
+      "He",
+      "at",
+      ".",
+      "University"
+     ],
+     "whole_words": [
+      "[Ralph",
+      "1910",
+      "Hefferline",
+      "at",
+      ".",
+      "1974",
+      "University"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Ralph Franklin Hefferline (15 February 1910 in Muncie, Indiana – 16 March 1974) was a psychology professor at Columbia University."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 55,
+     "ans_in_slot": true,
+     "pieces": [
+      "[C",
+      "olumbia",
+      "University",
+      "]",
+      "one",
+      "of",
+      "League",
+      "most"
+     ],
+     "whole_words": [
+      "[Columbia",
+      "University",
+      "]",
+      "one",
+      "of",
+      "League",
+      "most"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Columbia University (Columbia; officially Columbia University in the City of New York), established in 1754, is a private Ivy League research university in Upper Manhattan, New York City, often cited "
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8380671739578247,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4287061124855748,
+    "e_norm": 0.9233566522598267,
+    "net_out_norm": 761.1892700195312,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 21,
+   "question": "The battle in which Giuseppe Arimondi lost his life secured what for Ethiopia?",
+   "gold_ans": "sovereignty",
+   "pred": "The battle in which Giuseppe Arimondi lost his life was the Battle",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 32,
+     "ans_in_slot": true,
+     "pieces": [
+      "[B",
+      "attle",
+      "of",
+      "Ad"
+     ],
+     "whole_words": [
+      "[Battle",
+      "of",
+      "Adwa"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "This climactic battle of the First Italo-Ethiopian War, was a decisive defeat for Italy and secured Ethiopian sovereignty."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 38,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Gi",
+      "useppe",
+      "Ar",
+      "of",
+      ".",
+      "Gold",
+      "Valor"
+     ],
+     "whole_words": [
+      "[Giuseppe",
+      "Arimondi",
+      "of",
+      ".",
+      "Gold",
+      "Valor"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "After a long and successfull colonial service, he died in combat at Adwa, and was posthumously awarded the Gold Medal of Military Valor."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8087317943572998,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.44425670247669047,
+    "e_norm": 0.8940397500991821,
+    "net_out_norm": 691.064697265625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 22,
+   "question": "Alfred Balk served as the secretary of the Committee on the Employment of Minority Groups in the News Media under which United States Vice President?",
+   "gold_ans": "Nelson Rockefeller",
+   "pred": "Alfred Balk served as the secretary of the Committee on the Employment of Minority Groups",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 37,
+     "ans_in_slot": false,
+     "pieces": [
+      "[N",
+      "elson",
+      "Rockefeller",
+      "]",
+      "politician",
+      ".",
+      "and",
+      "businessman"
+     ],
+     "whole_words": [
+      "[Nelson",
+      "Rockefeller",
+      "]",
+      "politician",
+      ".",
+      "and",
+      "businessman"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Nelson Aldrich Rockefeller (July 8, 1908 – January 26, 1979) was an American businessman and politician."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 60,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Al",
+      "1",
+      "fred",
+      "editor",
+      ".",
+      "and",
+      "non"
+     ],
+     "whole_words": [
+      "[Alfred",
+      "1930",
+      "editor",
+      ".",
+      "and",
+      "nonfiction"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Alfred Balk (July 24, 1930 – November 25, 2010) was an American reporter, nonfiction author and magazine editor who wrote groundbreaking articles about housing segregation, the Nation of Islam, the en"
+    },
+    {
+     "slot": 6,
+     "n_chunks": 3,
+     "n_tokens": 84,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Al",
+      "fred",
+      "Balk",
+      "and",
+      "foundations",
+      "of",
+      "Rockefeller",
+      "k",
+      "the",
+      ":",
+      "ite"
+     ],
+     "whole_words": [
+      "[Alfred",
+      "Balk",
+      "and",
+      "foundations",
+      "of",
+      "Rockefeller",
+      "Cronkite",
+      "the",
+      ":"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "During a career-long emphasis on media improvement, he served on the Twentieth Century Fund's task force that established a National News Council, consulted for several foundations, served as secretar"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.871720016002655,
+    "res_norm": 0.35928457975387573,
+    "res_ratio": 0.4121559367208352,
+    "e_norm": 0.9513548612594604,
+    "net_out_norm": 559.1132202148438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 24,
+   "question": "In what city did the \"Prince of tenors\" star in a film based on an opera by Giacomo Puccini?",
+   "gold_ans": "Rome",
+   "pred": "New York",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 32,
+     "ans_in_slot": false,
+     "pieces": [
+      "[F",
+      "ran",
+      "co",
+      "Core"
+     ],
+     "whole_words": [
+      "[Franco",
+      "Corelli"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Dubbed the \"Prince of tenors\", Corelli possessed handsome features and a charismatic stage presence which endeared him to audiences."
+    },
+    {
+     "slot": 7,
+     "n_chunks": 1,
+     "n_tokens": 22,
+     "ans_in_slot": true,
+     "pieces": [
+      "[T",
+      "os",
+      "ca",
+      "("
+     ],
+     "whole_words": [
+      "[Tosca",
+      "(1956"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It was made at Cinecittà in Rome."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7247990369796753,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.49570225927232564,
+    "e_norm": 0.8221625089645386,
+    "net_out_norm": 739.4517822265625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 25,
+   "question": "Ellie Goulding worked with what other writers on her third studio album, Delirium?",
+   "gold_ans": "Max Martin, Savan Kotecha and Ilya Salmanzadeh",
+   "pred": "MNEK, Dan Wilson, and Jules Shear",
+   "ok": false,
+   "n_gold": 4,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "On",
+      "My",
+      "Mind",
+      "(",
+      ").",
+      "ir",
+      "ium"
+     ],
+     "whole_words": [
+      "[On",
+      "My",
+      "Mind",
+      "(2015",
+      ").",
+      "irium"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "\"On My Mind\" is a song by English singer Ellie Goulding from her third studio album \"Delirium\" (2015)."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "On",
+      "My",
+      "Mind",
+      "h",
+      "."
+     ],
+     "whole_words": [
+      "[On",
+      "My",
+      "Mind",
+      "h",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It was written by Goulding, Max Martin, Savan Kotecha and Ilya Salmanzadeh."
+    },
+    {
+     "slot": 6,
+     "n_chunks": 2,
+     "n_tokens": 44,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Del",
+      "ir",
+      "ium",
+      "November",
+      ".",
+      "d",
+      "or"
+     ],
+     "whole_words": [
+      "[Delirium",
+      "November",
+      ".",
+      "Polydor"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Delirium is the third studio album by English singer and songwriter Ellie Goulding, released on 6 November 2015 by Polydor Records."
+    },
+    {
+     "slot": 9,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Del",
+      "ir",
+      "ium",
+      "Move",
+      "\"."
+     ],
+     "whole_words": [
+      "[Delirium",
+      "Move",
+      "\"."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The album spawned three singles: \"On My Mind\", \"Army\" and \"Something in the Way You Move\"."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.5807712078094482,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.6186334916711516,
+    "e_norm": 0.7321681976318359,
+    "net_out_norm": 1052.735595703125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 26,
+   "question": "D1NZ is a series based on what oversteering technique?",
+   "gold_ans": "Drifting",
+   "pred": "D1NZ is not a known series based on an oversteering technique.",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 48,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Dr",
+      "ifting",
+      "(",
+      ".",
+      "of",
+      "corner",
+      "entirety"
+     ],
+     "whole_words": [
+      "[Drifting",
+      "(motorsport",
+      ".",
+      "of",
+      "corner",
+      "entirety"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Drifting is a driving technique where the driver intentionally oversteers, with loss of traction in the rear wheels or all tires, while maintaining control and driving the car through the entirety of "
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 17,
+     "ans_in_slot": true,
+     "pieces": [
+      "[D",
+      "1",
+      "NZ",
+      "]"
+     ],
+     "whole_words": [
+      "[D1NZ",
+      "]"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "D1NZ is a production car drifting series in New Zealand."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.6870713829994202,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.522921677483887,
+    "e_norm": 0.7862098217010498,
+    "net_out_norm": 741.5306396484375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 27,
+   "question": "According to the 2001 census, what was the population of the city in which Kirton End is located?",
+   "gold_ans": "35,124",
+   "pred": "The population of Kirton End in the 2001 census was not",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 57,
+     "ans_in_slot": true,
+     "pieces": [
+      "[B",
+      "oston",
+      ",",
+      "Lincoln",
+      ".",
+      "0",
+      "at",
+      "census"
+     ],
+     "whole_words": [
+      "[Boston",
+      ",",
+      "Lincolnshire",
+      ".",
+      "2001",
+      "at",
+      "census"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The borough had a total population of 66,900, at the ONS mid 2015 estimates, while the town itself had a population of 35,124 at the 2001 census."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 1,
+     "n_tokens": 29,
+     "ans_in_slot": false,
+     "pieces": [
+      "[K",
+      "ir",
+      "ton",
+      "End"
+     ],
+     "whole_words": [
+      "[Kirton",
+      "End"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Kirton End is a hamlet in the civil parish of Kirton in the Boston district of Lincolnshire, England."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7133948802947998,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5036264347744716,
+    "e_norm": 0.8137773275375366,
+    "net_out_norm": 741.5242309570312,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 28,
+   "question": "Who was born earlier, Emma Bull or Virginia Woolf?",
+   "gold_ans": "Adeline Virginia Woolf",
+   "pred": "Emma Bull was born earlier than Virginia Woolf.",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 28,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Emma",
+      "Bull",
+      "]"
+     ],
+     "whole_words": [
+      "[Emma",
+      "Bull",
+      "]"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Emma Bull (born December 13, 1954) is an American science fiction and fantasy author."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 3,
+     "n_tokens": 67,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Virginia",
+      "Wool",
+      "f",
+      "of",
+      "who",
+      "writer",
+      "device",
+      ".",
+      "narrative"
+     ],
+     "whole_words": [
+      "[Virginia",
+      "Woolf",
+      "of",
+      "who",
+      "writer",
+      "device",
+      ".",
+      "narrative"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Adeline Virginia Woolf (née Stephen; 25 January 1882 – 28 March 1941) was an English writer who is considered one of the foremost modernists of the twentieth century, and a pioneer in the use of strea"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.786858081817627,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.45660650688023774,
+    "e_norm": 0.876296877861023,
+    "net_out_norm": 868.6578979492188,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 29,
+   "question": "Scott Parkin has been a vocal critic of Exxonmobil and another corporation that has operations in how many countries ?",
+   "gold_ans": "more than 70 countries",
+   "pred": "30",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 31,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Scott",
+      "Park",
+      "in"
+     ],
+     "whole_words": [
+      "[Scott",
+      "Parkin"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He has been a vocal critic of the American invasion of Iraq, and of corporations such as Exxonmobil and Halliburton."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 1,
+     "n_tokens": 27,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Hall",
+      "ibur",
+      "ton"
+     ],
+     "whole_words": [
+      "[Halliburton"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "One of the world's largest oil field service companies, it has operations in more than 70 countries."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7224187850952148,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4973355172400137,
+    "e_norm": 0.8214024305343628,
+    "net_out_norm": 740.7664794921875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 30,
+   "question": "What WB supernatrual drama series was Jawbreaker star Rose Mcgowan best known for being in?",
+   "gold_ans": "Charmed",
+   "pred": "The WB supernatural drama series that Rose McGowan was best known for being in,",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 40,
+     "ans_in_slot": true,
+     "pieces": [
+      "[R",
+      "ose",
+      "McG",
+      "owan",
+      "to",
+      "",
+      ".",
+      "6"
+     ],
+     "whole_words": [
+      "[Rose",
+      "McGowan",
+      "to",
+      "2006",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "She is best known to television audiences for having played Paige Matthews in The WB supernatural drama series \"Charmed\" from 2001 to 2006."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 26,
+     "ans_in_slot": false,
+     "pieces": [
+      "[J",
+      "aw",
+      "breaker",
+      "("
+     ],
+     "whole_words": [
+      "[Jawbreaker",
+      "(film"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Jawbreaker is a 1999 American black comedy film written and directed by Darren Stein."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 1,
+     "n_tokens": 31,
+     "ans_in_slot": false,
+     "pieces": [
+      "[J",
+      "aw",
+      "breaker",
+      "("
+     ],
+     "whole_words": [
+      "[Jawbreaker",
+      "(film"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The film stars Rose McGowan, Rebecca Gayheart, and Julie Benz as girls in an exclusive clique in their high school."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.6587525606155396,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5454013261269374,
+    "e_norm": 0.7744306325912476,
+    "net_out_norm": 740.6463623046875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 31,
+   "question": "What is the name of the singer who's song was released as the lead single from the album \"Confessions\", and that had popular song stuck behind for eight consecutive weeks?",
+   "gold_ans": "Usher",
+   "pred": "TLC",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 47,
+     "ans_in_slot": true,
+     "pieces": [
+      "[I",
+      "Don",
+      "'t",
+      "Wanna",
+      ".",
+      "and",
+      "\"",
+      "sher"
+     ],
+     "whole_words": [
+      "[I",
+      "Don",
+      "'t",
+      "Wanna",
+      ".",
+      "and",
+      "\"",
+      "Usher"
+     ],
+     "piece_hit": false,
+     "whole_hit": true,
+     "unit": "It reached number 1 in the United Kingdom and in Netherlands, and number 2 in the United States, stuck for eight consecutive weeks behind the Usher singles \"Yeah\" and \"Burn\", respectively."
+    },
+    {
+     "slot": 8,
+     "n_chunks": 3,
+     "n_tokens": 69,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Yeah",
+      "!",
+      "(",
+      ",",
+      "7",
+      "the",
+      "ista",
+      ".",
+      "album",
+      "for"
+     ],
+     "whole_words": [
+      "[Yeah",
+      "!",
+      "(Usher",
+      ",",
+      "27",
+      "the",
+      "Arista",
+      ".",
+      "album",
+      "for"
+     ],
+     "piece_hit": false,
+     "whole_hit": true,
+     "unit": "The song was released as the lead single from Usher's fourth studio album \"Confessions\" (2004) on January 27, 2004, after Usher was told by Arista Records, his label at the time, to record more tracks"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.9043726921081543,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.3972748439713657,
+    "e_norm": 0.9689068794250488,
+    "net_out_norm": 747.9601440429688,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 32,
+   "question": "who is the younger brother of The episode guest stars of The Hard Easy",
+   "gold_ans": "Bill Murray",
+   "pred": "The query is unclear and contains fragmented or incorrect information. Based on the provided facts",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 58,
+     "ans_in_slot": true,
+     "pieces": [
+      "[B",
+      "rian",
+      "Doyle",
+      "-M",
+      "\".",
+      "and",
+      "II",
+      "ack"
+     ],
+     "whole_words": [
+      "[Brian",
+      "Doyle",
+      "-Murray",
+      "\".",
+      "and",
+      "II",
+      "shack"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He is the older brother of actor/comedian Bill Murray, and the two have acted together in several films, including \"Caddyshack\", \"Scrooged\", \"Ghostbusters II\", \"The Razor's Edge\", and \"Groundhog Day\"."
+    },
+    {
+     "slot": 7,
+     "n_chunks": 1,
+     "n_tokens": 29,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "The",
+      "Hard",
+      "Easy"
+     ],
+     "whole_words": [
+      "[The",
+      "Hard",
+      "Easy"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The episode guest stars Brian Doyle-Murray as Prince Huge and Jonathan Katz as the Mudscamp elder."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.5861992835998535,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.6129050822833874,
+    "e_norm": 0.7083525657653809,
+    "net_out_norm": 738.3717041015625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 33,
+   "question": "The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?",
+   "gold_ans": "Carabao Cup",
+   "pred": "EFL Cup",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "0",
+      "2",
+      "1",
+      "and",
+      ".",
+      ",",
+      "Cup"
+     ],
+     "whole_words": [
+      "[2017–18",
+      "and",
+      ".",
+      ",",
+      "Cup"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Along with competing in the league, the club will also participate in the FA Cup, EFL Cup and EFL Trophy."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 50,
+     "ans_in_slot": true,
+     "pieces": [
+      "[E",
+      "FL",
+      "Cup",
+      "]",
+      ".",
+      "in",
+      "'s"
+     ],
+     "whole_words": [
+      "[EFL",
+      "Cup",
+      "]",
+      ".",
+      "in",
+      "'s"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "The EFL Cup (referred to historically, and colloquially, as simply the League Cup), currently known as the Carabao Cup for sponsorship reasons, is an annual knockout football competition in men's dome"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8151167035102844,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.44077678521612806,
+    "e_norm": 0.9020112752914429,
+    "net_out_norm": 812.687744140625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 34,
+   "question": "Which of Tara Strong major voice role in animated series is an American animated television series based on the DC Comics fictional superhero team, the \"Teen Titans\"?",
+   "gold_ans": "Teen Titans Go!",
+   "pred": "Teen Titans",
+   "ok": false,
+   "n_gold": 4,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 53,
+     "ans_in_slot": true,
+     "pieces": [
+      "[T",
+      "ara",
+      "Strong",
+      "]",
+      "Draw",
+      "and",
+      "\"",
+      "Together"
+     ],
+     "whole_words": [
+      "[Tara",
+      "Strong",
+      "]",
+      "\"Drawn",
+      "and",
+      "\"",
+      "Together"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Many of her major voice roles include animated series such as \"Rugrats\", \"The Powerpuff Girls\", \"The Fairly OddParents\", \"Drawn Together\", \"Teen Titans\" and the spin-off series \"Teen Titans Go!"
+    },
+    {
+     "slot": 4,
+     "n_chunks": 1,
+     "n_tokens": 13,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Teen",
+      "Titans",
+      "Go"
+     ],
+     "whole_words": [
+      "[Teen",
+      "Titans",
+      "Go"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Teen Titans Go!"
+    },
+    {
+     "slot": 7,
+     "n_chunks": 1,
+     "n_tokens": 13,
+     "ans_in_slot": true,
+     "pieces": [
+      "[List",
+      "of",
+      "Teen",
+      "Titans"
+     ],
+     "whole_words": [
+      "[List",
+      "of",
+      "Teen",
+      "Titans"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "\"Teen Titans Go!"
+    },
+    {
+     "slot": 10,
+     "n_chunks": 1,
+     "n_tokens": 13,
+     "ans_in_slot": true,
+     "pieces": [
+      "[List",
+      "of",
+      "Teen",
+      "Titans"
+     ],
+     "whole_words": [
+      "[List",
+      "of",
+      "Teen",
+      "Titans"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "\"Teen Titans Go!\""
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.6973539590835571,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5152111283936676,
+    "e_norm": 0.7917947769165039,
+    "net_out_norm": 740.5471801757812,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 35,
+   "question": "Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?",
+   "gold_ans": "Apalachees",
+   "pred": "The provided facts do not contain sufficient information to determine which tribe of indigenous people Al",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 31,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Al",
+      "var",
+      "o"
+     ],
+     "whole_words": [
+      "[Alvaro"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Alvaro Mexia was a 17th-century Spanish explorer and cartographer of the east coast of Florida."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Al",
+      "var",
+      "o",
+      ".",
+      "area",
+      "Can",
+      "eral"
+     ],
+     "whole_words": [
+      "[Alvaro",
+      ".",
+      "area",
+      "Canaveral"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Mexia was stationed in St Augustine and was given a diplomatic mission to the native populations living south of St. Augustine and in the Cape Canaveral area."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 2,
+     "n_tokens": 59,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Ind",
+      "igenous",
+      "peoples",
+      "and",
+      "1",
+      ".",
+      ""
+     ],
+     "whole_words": [
+      "[Indigenous",
+      "peoples",
+      "and",
+      "18th",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Some Apalachees migrated to Louisiana, where their descendants now live, some were taken to Cuba and Mexico by the Spanish in the 18th century, and a few may have been absorbed into the Seminole and M"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8209011554718018,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.43767086664987953,
+    "e_norm": 0.896318256855011,
+    "net_out_norm": 633.5807495117188,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 36,
+   "question": "What is the county seat of the county where East Lempster, New Hampshire is located?",
+   "gold_ans": "Newport",
+   "pred": "The county seat of Rockingham County, where East Lempster, New Hampshire",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 13,
+     "ans_in_slot": true,
+     "pieces": [
+      "[S",
+      "ullivan",
+      ",",
+      "County"
+     ],
+     "whole_words": [
+      "[Sullivan",
+      ",",
+      "County"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Its county seat is Newport."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 37,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "East",
+      "L",
+      "emp",
+      ".",
+      ",",
+      "States",
+      "United"
+     ],
+     "whole_words": [
+      "[East",
+      "Lempster",
+      ".",
+      ",",
+      "States",
+      "United"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "East Lempster is an unincorporated community in the town of Lempster in Sullivan County, New Hampshire, United States."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8572788834571838,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.41909876363725357,
+    "e_norm": 0.9324582815170288,
+    "net_out_norm": 1077.5604248046875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 37,
+   "question": "Handi-Snacks are a snack food product line sold by what American multinational confectionery, food, and beverage company that is based in Illinois?",
+   "gold_ans": "Mondelez International, Inc.",
+   "pred": "Mondelez International",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 25,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Hand",
+      "i",
+      "-S"
+     ],
+     "whole_words": [
+      "[Handi",
+      "-Snacks"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Handi-Snacks are a snack food product line sold by Mondelez International."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 52,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Mon",
+      "de",
+      "lez",
+      "0",
+      "in",
+      "7",
+      "world"
+     ],
+     "whole_words": [
+      "[Mondelez",
+      ",000",
+      "in",
+      "107",
+      "world"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Mondelez International, Inc., styled Mondelēz ( ), is an American multinational confectionery, food, and beverage company based in Illinois which employs about 107,000 people around the world."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7726322412490845,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.46501362610546726,
+    "e_norm": 0.8579806685447693,
+    "net_out_norm": 815.086181640625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 38,
+   "question": "What was the name of a woman from the book titled \"Their Lives: The Women Targeted by the Clinton Machine \" and was also a former white house intern?",
+   "gold_ans": "Monica Lewinsky",
+   "pred": "The name of the woman from the book \"Their Lives: The Women Targeted",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 25,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Their",
+      "Lives",
+      "]"
+     ],
+     "whole_words": [
+      "[Their",
+      "Lives",
+      "]"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Their Lives: The Women Targeted by the Clinton Machine is a book by Candice E. Jackson."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 3,
+     "n_tokens": 67,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Their",
+      "Lives",
+      "]",
+      "and",
+      "Gr",
+      "addr",
+      "Jones",
+      ".",
+      "Per",
+      "due"
+     ],
+     "whole_words": [
+      "[Their",
+      "Lives",
+      "]",
+      "and",
+      "Gracen",
+      "Broaddrick",
+      "Jones",
+      ".",
+      "Perdue"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Published by conservative publisher World Ahead Publishing on May 31, 2005, it recounts the stories of seven women who crossed paths with Bill Clinton: Monica Lewinsky, Paula Jones, Gennifer Flowers, "
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Mon",
+      "ica",
+      "Lew",
+      ".",
+      "former",
+      "and",
+      "designer"
+     ],
+     "whole_words": [
+      "[Monica",
+      "Lewinsky",
+      ".",
+      "former",
+      "and",
+      "designer"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Monica Samille Lewinsky (born July 23, 1973) is an American activist, television personality, fashion designer, and former White House intern."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8442167639732361,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4255832571462905,
+    "e_norm": 0.9226322770118713,
+    "net_out_norm": 833.18701171875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 39,
+   "question": "How many copies of Roald Dahl's variation on a popular anecdote sold?",
+   "gold_ans": "250 million",
+   "pred": "I cannot determine the number of copies sold for Roald Dahl's variation on a",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 19,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Ro",
+      "ald",
+      "Dahl"
+     ],
+     "whole_words": [
+      "[Roald",
+      "Dahl"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "His books have sold more than 250 million copies worldwide."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 53,
+     "ans_in_slot": false,
+     "pieces": [
+      "[M",
+      "rs",
+      ".",
+      "B",
+      "affair",
+      "m",
+      "had",
+      "9"
+     ],
+     "whole_words": [
+      "[Mrs",
+      ".",
+      "Bixby",
+      "affair",
+      "mink",
+      "had",
+      "9"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The story is Dahl's variation on a popular anecdote dating back at least to 1939: a married woman receives a glamorous mink coat from a man with whom she had an affair."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8064025044441223,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4455399359119013,
+    "e_norm": 0.8874403238296509,
+    "net_out_norm": 728.96533203125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 41,
+   "question": "In which city is the ambassador of the Rabat-Salé-Kénitra administrative region to China based?",
+   "gold_ans": "Beijing",
+   "pred": "The ambassador of the Rabat-Salé-Kénitra administrative region to China",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 3,
+     "n_tokens": 74,
+     "ans_in_slot": false,
+     "pieces": [
+      "[R",
+      "ab",
+      "at",
+      "]",
+      "0",
+      "of",
+      "capital",
+      "city",
+      ".",
+      "over",
+      "metropolitan"
+     ],
+     "whole_words": [
+      "[Rabat",
+      "]",
+      ",000",
+      "of",
+      "capital",
+      "city",
+      ".",
+      "over",
+      ".2",
+      "metropolitan"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Rabat (Berber: , Arabic: الرِّبَاط‎ ‎ , Moroccan Arabic: رّباط‎ ‎ ) is the capital city of Morocco and its second largest city with an urban population of approximately 580,000 (2014) and a metropolit"
+    },
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 23,
+     "ans_in_slot": false,
+     "pieces": [
+      "[R",
+      "ab",
+      "at",
+      "]"
+     ],
+     "whole_words": [
+      "[Rabat",
+      "]"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It is also the capital city of the Rabat-Salé-Kénitra administrative region."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 33,
+     "ans_in_slot": true,
+     "pieces": [
+      "[M",
+      "or",
+      "occan",
+      "Ambassador",
+      "."
+     ],
+     "whole_words": [
+      "[Moroccan",
+      "Ambassador",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Moroccan ambassador in Beijing is the official representative of the Government in Rabat to the Government of the People's Republic of China."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.46856433153152466,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.766777357924135,
+    "e_norm": 0.6490174531936646,
+    "net_out_norm": 1164.5740966796875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 42,
+   "question": "Where did the descendants of the group of black Indians associated with the Seminole people settle?",
+   "gold_ans": "Coahuila, Mexico",
+   "pred": "Florida",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 33,
+     "ans_in_slot": true,
+     "pieces": [
+      "[M",
+      "asc",
+      "]",
+      "og",
+      "."
+     ],
+     "whole_words": [
+      "[Mascogos",
+      "]",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Mascogos (also known as \"negros mascagos\") are an afrodescendant group in Coahuila, Mexico."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 26,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Black",
+      "Sem",
+      "ino"
+     ],
+     "whole_words": [
+      "[Black",
+      "Seminoles"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Black Seminoles are black Indians associated with the Seminole people in Florida and Oklahoma."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.667774498462677,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5380327056159842,
+    "e_norm": 0.7720506191253662,
+    "net_out_norm": 738.878173828125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 43,
+   "question": "David Huntsinger has worked with this gospel singer born in the month of July?",
+   "gold_ans": "Larnelle Harris",
+   "pred": "Cashon",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 48,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "David",
+      "Hunts",
+      "inger",
+      "and",
+      ".",
+      "Cash",
+      "on"
+     ],
+     "whole_words": [
+      "[David",
+      "Huntsinger",
+      "and",
+      ".",
+      "Cash",
+      "Parton"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He has worked with many artists, such as Sandi Patti, Steve Green, Kathy Troccoli, Michael Crawford, Glen Campbell, Carman, Larnelle Harris, Johnny Cash and Dolly Parton."
+    },
+    {
+     "slot": 11,
+     "n_chunks": 1,
+     "n_tokens": 31,
+     "ans_in_slot": false,
+     "pieces": [
+      "[L",
+      "arn",
+      "elle",
+      "Harris"
+     ],
+     "whole_words": [
+      "[Larnelle",
+      "Harris"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "Larnelle Steward Harris (born July 6, 1947) is an American gospel singer and songwriter."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7365330457687378,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.48780502411027166,
+    "e_norm": 0.8320388793945312,
+    "net_out_norm": 742.5682373046875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 44,
+   "question": "Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?",
+   "gold_ans": "North Avenue at Techwood Drive",
+   "pred": "Atlanta, Georgia",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "9",
+      "6",
+      "1",
+      ".",
+      "in",
+      "Field",
+      "at"
+     ],
+     "whole_words": [
+      "[1964",
+      ".",
+      "in",
+      "Field",
+      "at"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "The Yellow Jackets were led by 20th-year head coach Bobby Dodd, and played their home games at Grant Field in Atlanta, Georgia."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": true,
+     "pieces": [
+      "[B",
+      "obby",
+      "Dodd",
+      "Stadium",
+      ".",
+      "in",
+      "of",
+      "Technology"
+     ],
+     "whole_words": [
+      "[Bobby",
+      "Dodd",
+      "Stadium",
+      ".",
+      "in",
+      "of",
+      "Technology"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Bobby Dodd Stadium at Historic Grant Field is the football stadium located at the corner of North Avenue at Techwood Drive on the campus of the Georgia Institute of Technology in Atlanta."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8111090064048767,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4429546673901546,
+    "e_norm": 0.8974746465682983,
+    "net_out_norm": 830.8300170898438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 45,
+   "question": "Which American film actor and dancer starred in the 1945 film Johnny Angel?",
+   "gold_ans": "George Raft",
+   "pred": "James Cagney",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 26,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Johnny",
+      "Angel",
+      "]"
+     ],
+     "whole_words": [
+      "[Johnny",
+      "Angel",
+      "]"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The movie stars George Raft, Claire Trevor and Signe Hasso, and features Hoagy Carmichael."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 3,
+     "n_tokens": 71,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "George",
+      "Ra",
+      "ft",
+      ")",
+      "in",
+      "of",
+      "actor",
+      ".",
+      "9",
+      "0",
+      "s"
+     ],
+     "whole_words": [
+      "[George",
+      "Raft",
+      ")",
+      "in",
+      "of",
+      "actor",
+      ".",
+      "1940s"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "George Raft (born George Ranft; September 26, 1901 – November 24, 1980) was an American film actor and dancer identified with portrayals of gangsters in crime melodramas of the 1930s and 1940s."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8564426302909851,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4195079827205243,
+    "e_norm": 0.9218718409538269,
+    "net_out_norm": 673.3626708984375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 46,
+   "question": "When was the  former Indian cricketer who made his ODI debuts during the 2000 ICC KnockOut Trophy born?",
+   "gold_ans": "7 October 1978",
+   "pred": "1980",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 53,
+     "ans_in_slot": true,
+     "pieces": [
+      "[Z",
+      "a",
+      "er",
+      "he",
+      "",
+      "till",
+      "team",
+      "of"
+     ],
+     "whole_words": [
+      "[Zaheer",
+      "2014",
+      "till",
+      "team",
+      "of"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Zaheer Khan (born 7 October 1978) is a former Indian cricketer who played all forms of the game for Indian national cricket team from 2000 till 2014."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "0",
+      "2",
+      "competition",
+      "."
+     ],
+     "whole_words": [
+      "[2000",
+      "competition",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Zaheer Khan, Yuvraj Singh and Marlon Samuels made their ODI debuts during the competition."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7283062934875488,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.49331513864691506,
+    "e_norm": 0.8480989336967468,
+    "net_out_norm": 1092.220947265625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 47,
+   "question": "Which airplane was this Major test-flying after whom the base, that 514th Flight Test Squadron is stated at, is named?",
+   "gold_ans": "B-17 Flying Fortress bomber",
+   "pred": "The 514th Flight Test Squadron is named after Major James H.",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 40,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "1",
+      "th",
+      "5",
+      "Base",
+      ".",
+      ",",
+      "Hill"
+     ],
+     "whole_words": [
+      "[514th",
+      "Base",
+      ".",
+      ",",
+      "Hill"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It is assigned to the Ogden Air Logistics Center (OO-ALC), Air Force Materiel Command, stationed at Hill Air Force Base, Utah."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 45,
+     "ans_in_slot": true,
+     "pieces": [
+      "[H",
+      "ill",
+      "Air",
+      "Force",
+      ".",
+      "of",
+      "Fortress",
+      "lying"
+     ],
+     "whole_words": [
+      "[Hill",
+      "Air",
+      "Force",
+      ".",
+      "of",
+      "Fortress",
+      "lying"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "The base was named in honor of Major Ployer Peter Hill of the U.S. Army Air Corps, who died test-flying a prototype of the B-17 Flying Fortress bomber."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8281422257423401,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4338439811195126,
+    "e_norm": 0.9173555374145508,
+    "net_out_norm": 718.574951171875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 48,
+   "question": "The Argentine PGA Championship record holder has won how many tournaments worldwide?",
+   "gold_ans": "230",
+   "pred": "0",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 2,
+     "n_chunks": 2,
+     "n_tokens": 41,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Arg",
+      "entine",
+      "PGA",
+      "and",
+      ".",
+      "1",
+      "5"
+     ],
+     "whole_words": [
+      "[Argentine",
+      "PGA",
+      "and",
+      ".",
+      "1985"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "However, the record holder is former British Open champion Roberto De Vicenzo, who recorded 16 victories between 1944 and 1985."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 39,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Rob",
+      "erto",
+      "De",
+      ".",
+      "7",
+      "Championship",
+      "Open"
+     ],
+     "whole_words": [
+      "[Roberto",
+      "De",
+      ".",
+      "1967",
+      "Championship",
+      "Open"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "He won more than 230 tournaments worldwide in his career including eight on the PGA Tour and most famously the 1967 Open Championship."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.797938346862793,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.45026601561612956,
+    "e_norm": 0.8815159797668457,
+    "net_out_norm": 787.584228515625,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 49,
+   "question": "Suicide's 1977 released album features a song based on what brand's comic character?",
+   "gold_ans": "Marvel",
+   "pred": "Suicide's 1977 released album features a song based on what",
+   "ok": false,
+   "n_gold": 4,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 1,
+     "n_tokens": 26,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Ghost",
+      "Rider",
+      "("
+     ],
+     "whole_words": [
+      "[Ghost",
+      "Rider",
+      "(Suicide"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Ghost Rider is a song by the protopunk band Suicide appearing on their debut album."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 18,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Ghost",
+      "Rider",
+      "("
+     ],
+     "whole_words": [
+      "[Ghost",
+      "Rider",
+      "(Suicide"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The song is based on the Marvel Comics character."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 22,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Su",
+      "icide",
+      "("
+     ],
+     "whole_words": [
+      "[Suicide",
+      "(1977"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Suicide is the debut album from the American rock band Suicide."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 33,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "Su",
+      "icide",
+      "(",
+      "."
+     ],
+     "whole_words": [
+      "[Suicide",
+      "(1977",
+      "."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It was released in 1977 on Red Star Records and produced by Craig Leon and Marty Thau."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.49050426483154297,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.7324799107967437,
+    "e_norm": 0.6685071587562561,
+    "net_out_norm": 1169.2596435546875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 50,
+   "question": "What other political position did the person who introduced the DISCLOSE Act hold?",
+   "gold_ans": "United States Senator",
+   "pred": "Senator",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 4,
+     "n_tokens": 110,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "DIS",
+      "CLOSE",
+      "Act",
+      "was",
+      "(",
+      "8",
+      "Representatives",
+      "9",
+      "",
+      "ary",
+      "Schumer",
+      ".",
+      "1",
+      ")"
+     ],
+     "whole_words": [
+      "[DISCLOSE",
+      "Act",
+      "was",
+      "(S",
+      ".3628",
+      "Representatives",
+      "29",
+      "2010",
+      "-Maryland",
+      "Schumer",
+      ".",
+      "21",
+      ")"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Democracy Is Strengthened by Casting Light On Spending in Elections Act, commonly known as the DISCLOSE Act and also known as H.R. 5175 (S.3628-Senate), was a bill introduced in the U.S. House of "
+    },
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 46,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Chris",
+      "Van",
+      "Holl",
+      ".",
+      ",",
+      "2",
+      "7"
+     ],
+     "whole_words": [
+      "[Chris",
+      "Van",
+      "Hollen",
+      ".",
+      ",",
+      "2017"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Christopher Van Hollen Jr. (born January 10, 1959) is the junior United States Senator from Maryland, serving since January 3, 2017."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8235368728637695,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.43627010761504087,
+    "e_norm": 0.8911886215209961,
+    "net_out_norm": 746.7295532226562,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 53,
+   "question": "In which role did Caroline Carver played in a 1999 Hallmark Entertainment made-for-TV fantasy movie?",
+   "gold_ans": "Princess Jessica",
+   "pred": "Caroline Carver played the role of \"Leprechaun\" in",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 38,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "The",
+      "Magical",
+      "Legend",
+      ".",
+      "-for",
+      "movie",
+      "made"
+     ],
+     "whole_words": [
+      "[The",
+      "Magical",
+      "Legend",
+      ".",
+      "-for",
+      "movie",
+      "made"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The Magical Legend of the Leprechauns is a 1999 Hallmark Entertainment made-for-TV fantasy movie."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 3,
+     "n_tokens": 89,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Car",
+      "oline",
+      "such",
+      "L",
+      "ep",
+      "(",
+      "2",
+      "and"
+     ],
+     "whole_words": [
+      "[Caroline",
+      "Carver",
+      "such",
+      "Leprechauns",
+      "(1999",
+      "(2006",
+      "(2004",
+      "and"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Caroline Carver (born 1976) is an English actress, screenwriter, and producer best known for roles such as Princess Jessica in the TV film \"The Magical Legend of the Leprechauns\" (1999), Ingrid in \"Th"
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.873647153377533,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4112467130010458,
+    "e_norm": 0.9427437782287598,
+    "net_out_norm": 567.1688842773438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 54,
+   "question": "Mummulgum is a stop on the Bruxner Highway before reaching the town on the banks of which river?",
+   "gold_ans": "Richmond",
+   "pred": "Mummulgum is a stop on the Bruxner Highway before reaching",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 35,
+     "ans_in_slot": true,
+     "pieces": [
+      "[C",
+      "as",
+      "ino",
+      ",",
+      "Way",
+      ".",
+      "land"
+     ],
+     "whole_words": [
+      "[Casino",
+      ",",
+      "Way",
+      ".",
+      "land"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It lies on the banks of the Richmond River and is situated at the junction of the Bruxner Highway and the Summerland Way."
+    },
+    {
+     "slot": 3,
+     "n_chunks": 2,
+     "n_tokens": 34,
+     "ans_in_slot": false,
+     "pieces": [
+      "[M",
+      "um",
+      "mul",
+      "g",
+      "4",
+      ")."
+     ],
+     "whole_words": [
+      "[Mummulgum",
+      "4",
+      ")."
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Mummulgum is located on Shannon Brook between Tenterfield and Casino on the Bruxner Highway (Highway 44)."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.5733743906021118,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.6266141739814001,
+    "e_norm": 0.7208336591720581,
+    "net_out_norm": 886.5468139648438,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 55,
+   "question": "Which American audio engineer and clandestine chemist, who was a key figure in the San Francisco Bay Area hippie movement during the 1960s recorded the album \"Old and in the Way?\"",
+   "gold_ans": "Owsley Stanley",
+   "pred": "The question contains no valid or coherent information to identify an American audio engineer and clandest",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 1,
+     "n_chunks": 2,
+     "n_tokens": 57,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Old",
+      "and",
+      "in",
+      ".",
+      "(",
+      "micro",
+      "onto"
+     ],
+     "whole_words": [
+      "[Old",
+      "and",
+      "in",
+      ".",
+      "(four",
+      "microphones",
+      "onto"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "It was recorded 8 October 1973 at the Boarding House in San Francisco by Owsley Stanley and Vickie Babcock utilizing eight microphones (four per channel) mixed live onto a stereo Nagra tape recorder."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 53,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "O",
+      "ws",
+      "ley",
+      "2",
+      "",
+      ".",
+      "engineer"
+     ],
+     "whole_words": [
+      "[Owsley",
+      "2011",
+      ".",
+      "engineer"
+     ],
+     "piece_hit": false,
+     "whole_hit": true,
+     "unit": "Owsley Stanley (born Augustus Owsley Stanley III, January 19, 1935 – March 12, 2011) was an American audio engineer and clandestine chemist."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 2,
+     "n_tokens": 47,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "O",
+      "ws",
+      "ley",
+      ".",
+      "of",
+      "0",
+      "s"
+     ],
+     "whole_words": [
+      "[Owsley",
+      ".",
+      "of",
+      "1960s"
+     ],
+     "piece_hit": false,
+     "whole_hit": true,
+     "unit": "He was a key figure in the San Francisco Bay Area hippie movement during the 1960s and played a pivotal role in the counterculture of the 1960s."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.897777795791626,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4001931456017217,
+    "e_norm": 0.9641107320785522,
+    "net_out_norm": 631.553955078125,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 56,
+   "question": "When was the palace founded at which Columba de Dunbar died in 1435?",
+   "gold_ans": "the late 12th Century",
+   "pred": "The palace where Columba de Dunbar died in 1435 is",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 58,
+     "ans_in_slot": false,
+     "pieces": [
+      "[C",
+      "olum",
+      "ba",
+      "de",
+      "before",
+      ".",
+      "yn",
+      "gin"
+     ],
+     "whole_words": [
+      "[Columba",
+      "de",
+      "before",
+      ".",
+      "Spynie",
+      "Elgin"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "Columba de Dunbar ( 1386 – 1435) was Bishop of Moray from 1422 until his death at Spynie Palace near Elgin sometime before 7 November 1435."
+    },
+    {
+     "slot": 2,
+     "n_chunks": 1,
+     "n_tokens": 22,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "Sp",
+      "yn",
+      "ie"
+     ],
+     "whole_words": [
+      "[Spynie"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The founding of the palace dates back to the late 12th Century."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.6911095380783081,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.5198662445728266,
+    "e_norm": 0.7945102453231812,
+    "net_out_norm": 738.6282958984375,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 57,
+   "question": "At what venue was the January 2, 2012 game featured the University of Louisville team?",
+   "gold_ans": "Mercedes-Benz Superdome",
+   "pred": "The venue for the January 2, 2012 game featuring the",
+   "ok": false,
+   "n_gold": 2,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 51,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "0",
+      "2",
+      "1",
+      ".",
+      "in",
+      "d",
+      "ome"
+     ],
+     "whole_words": [
+      "[2013",
+      ".",
+      "in",
+      "Superdome"
+     ],
+     "piece_hit": false,
+     "whole_hit": true,
+     "unit": "The 2013 Allstate Sugar Bowl was a postseason college football bowl game on Wednesday, January 2, 2013, at the Mercedes-Benz Superdome in New Orleans, Louisiana."
+    },
+    {
+     "slot": 5,
+     "n_chunks": 2,
+     "n_tokens": 40,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "0",
+      "2",
+      "1",
+      ".",
+      "I",
+      "BS",
+      "F"
+     ],
+     "whole_words": [
+      "[2012",
+      ".",
+      "I",
+      "FBS"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The 2012 Louisville Cardinals football team represented the University of Louisville in the 2012 NCAA Division I FBS football season."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.8612208962440491,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.41718044896047024,
+    "e_norm": 0.9298267364501953,
+    "net_out_norm": 919.4031982421875,
+    "w_last": 13.292008399963379
+   }
+  },
+  {
+   "idx": 58,
+   "question": "Which film was Oscar nominated, LaLee's Kin: The Legacy of Cotton or Gimme Shelter, the 1970 Rolling Stones documentary?",
+   "gold_ans": "LaLee's Kin: The Legacy of Cotton",
+   "pred": "Gimme Shelter",
+   "ok": false,
+   "n_gold": 3,
+   "slots": [
+    {
+     "slot": 0,
+     "n_chunks": 2,
+     "n_tokens": 46,
+     "ans_in_slot": true,
+     "pieces": [
+      "[",
+      "La",
+      "Lee",
+      "'s",
+      "and",
+      ".",
+      "öm",
+      "les"
+     ],
+     "whole_words": [
+      "[LaLee",
+      "'s",
+      "and",
+      ".",
+      "Frömke",
+      "Maysles"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "LaLee's Kin: The Legacy of Cotton is a 2001 American documentary film directed by Deborah Dickson, Susan Frömke and Albert Maysles."
+    },
+    {
+     "slot": 1,
+     "n_chunks": 1,
+     "n_tokens": 27,
+     "ans_in_slot": false,
+     "pieces": [
+      "[",
+      "La",
+      "Lee",
+      "'s"
+     ],
+     "whole_words": [
+      "[LaLee",
+      "'s"
+     ],
+     "piece_hit": true,
+     "whole_hit": true,
+     "unit": "It was nominated for Best Documentary Feature at the 74th Academy Awards."
+    },
+    {
+     "slot": 4,
+     "n_chunks": 2,
+     "n_tokens": 35,
+     "ans_in_slot": false,
+     "pieces": [
+      "[G",
+      "im",
+      "me",
+      "Shelter",
+      ".",
+      "main",
+      "competition"
+     ],
+     "whole_words": [
+      "[Gimme",
+      "Shelter",
+      ".",
+      "main",
+      "competition"
+     ],
+     "piece_hit": false,
+     "whole_hit": false,
+     "unit": "The film was screened at the 1971 Cannes Film Festival, but was not entered into the main competition."
+    }
+   ],
+   "bridge": {
+    "alpha": 0.2640667259693146,
+    "scale": 1.3605823516845703,
+    "lex_norm": 0.7378047704696655,
+    "res_norm": 0.35928452014923096,
+    "res_ratio": 0.4869642140162914,
+    "e_norm": 0.8451391458511353,
+    "net_out_norm": 785.2305908203125,
+    "w_last": 13.292008399963379
+   }
+  }
+ ]
+}

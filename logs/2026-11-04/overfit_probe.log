@@ -1,0 +1,40 @@
+[diag 2026-11-04 13:02:14] 过拟合探针开始
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 38.0G
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards:  33%|███▎      | 1/3 [00:01<00:02,  1.25s/it]Loading checkpoint shards:  67%|██████▋   | 2/3 [00:02<00:01,  1.26s/it]Loading checkpoint shards: 100%|██████████| 3/3 [00:02<00:00,  1.18it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[compat] transformers 无 smollm3 子包，已注入占位模块（deltamem.core 顶层 import 需要；本实验只用 Qwen3，不涉及 SmolLM3）
+[adapter] 校验通过：324/324 个张量与模型参数一一对应
+
+===== arm=qa_kl =====
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+/data/zhangjiayang/yyz3/delta-mem-exp4/tools/overfit_probe.py:154: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  f"qa={float(loss_qa):.4f} "
+[qa_kl] step=100 trainEM=0.2969 qa=0.0043 kl=0.0042 rec=n/a α=0.265 (144s)
+[qa_kl] step=200 trainEM=0.3125 qa=0.1396 kl=0.1396 rec=n/a α=0.267 (283s)
+[qa_kl] 训练集 oracle_latent EM = 0.3125 （64 题，200 步）
+
+===== arm=recon_old =====
+[recon_old] step=100 trainEM=0.2969 qa=0.0051 kl=0.0051 rec=6.2312 α=0.265 (185s)
+[recon_old] step=200 trainEM=0.3125 qa=0.0359 kl=0.0359 rec=9.9873 α=0.267 (369s)
+[recon_old] 训练集 oracle_latent EM = 0.3125 （64 题，200 步）
+
+===== arm=recon_qa =====
+[recon_qa] step=100 trainEM=0.3125 qa=0.0054 kl=0.0054 rec=7.0463 α=0.265 (189s)
+[recon_qa] step=200 trainEM=0.3281 qa=0.3574 kl=0.3574 rec=11.7261 α=0.266 (373s)
+[recon_qa] 训练集 oracle_latent EM = 0.3281 （64 题，200 步）
+
+======================================================================
+| arm | 训练集 oracle_latent EM | 说明 |
+|---|---|---|
+| qa_kl | 0.3125 | 不加重建（干净对照） |
+| recon_old | 0.3125 | 重建走 bridge(z_sem)（与 QA 目标不一致） |
+| recon_qa | 0.3281 | 重建走 bridge(z_sem, z_lex)（与 QA 同路径） |
+[out] -> /data/zhangjiayang/yyz3/results/overfit_probe.json
+[diag 2026-11-04 13:22:54] 结束 rc=0 -> /data/zhangjiayang/yyz3/results/overfit_probe.json
