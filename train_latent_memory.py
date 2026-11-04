@@ -1634,12 +1634,20 @@ def _load_backbone(args, dev=None):
     return model, tokenizer, dev, LM._model_hidden_size(model)
 
 
-def _train_state(opt, step, epoch, pos):
-    """打包"能接着训"所需的最小状态（权重由 save_latent_checkpoint 负责）。"""
-    return {"optimizer": opt.state_dict() if opt is not None else None,
-            "step": int(step), "epoch": int(epoch), "pos": int(pos),
-            "rng_py": random.getstate(),
-            "rng_torch": torch.get_rng_state()}
+def _train_state(opt, step, epoch, pos, extra_rng=None):
+    """打包"能接着训"所需的最小状态（权重由 save_latent_checkpoint 负责）。
+
+    `extra_rng`：训练循环里**独立**的 random.Random 流（rng_slots / rng_recon）。
+    只存全局 `random` 是不够的 —— 这两个流各管一条采样（变槽数、重建取单元），
+    不恢复它们，续训后的采样序列与不中断那次不同，等于换了一条轨迹。
+    """
+    st = {"optimizer": opt.state_dict() if opt is not None else None,
+          "step": int(step), "epoch": int(epoch), "pos": int(pos),
+          "rng_py": random.getstate(),
+          "rng_torch": torch.get_rng_state()}
+    if extra_rng:
+        st["rng_extra"] = dict(extra_rng)
+    return st
 
 
 def train(args):
@@ -1793,6 +1801,9 @@ def train(args):
     opt_params = list(comp.parameters()) + list(bridge.parameters()) + \
         (list(router.parameters()) if router is not None else [])
     opt = torch.optim.AdamW([p for p in opt_params if p.requires_grad], lr=args.lr)
+    # 两条**独立**随机流必须在 resume 之前就建好：断点续训要恢复它们的状态。
+    rng_slots = random.Random(args.seed + 777)      # 变槽数采样 / 读出模式抽签
+    rng_recon = random.Random(args.seed + 31337)    # recon 取单元
     # ---- 断点续训 ----
     # 只存权重不够：AdamW 的一阶/二阶动量、全局 step、epoch 内位置、数据打乱用的
     # python RNG 必须一起恢复，否则"接着训"实际跑的是另一条轨迹。
@@ -1813,8 +1824,23 @@ def train(args):
             random.setstate(_ts["rng_py"])
         if _ts.get("rng_torch") is not None:
             torch.set_rng_state(_ts["rng_torch"])
+        _xr = _ts.get("rng_extra") or {}
+        if _xr.get("rng_slots") is not None:
+            rng_slots.setstate(_xr["rng_slots"])
+        if _xr.get("rng_recon") is not None:
+            rng_recon.setstate(_xr["rng_recon"])
+        # L_cov 开关必须跟着 ckpt 走：续训时命令行忘了带 --cov-weight，
+        # 损失会**静默**少一项，跑完才发现两组实验其实都没开 L_cov。
+        _ck_cov = (_rb.get("config") or {}).get("cov_weight")
+        _cli_cov = float(getattr(args, "cov_weight", 0.0) or 0.0)
+        if _ck_cov is not None and abs(float(_ck_cov) - _cli_cov) > 1e-12:
+            print(f"[resume][warn] ckpt 记录的 cov_weight={float(_ck_cov)} 与命令行 "
+                  f"{_cli_cov} 不一致；续训按 **ckpt** 的值继续"
+                  f"（续训就是接着同一次运行，要换配置请另起新 run）", flush=True)
+            args.cov_weight = float(_ck_cov)
         print(f"[resume] {args.resume} -> step={_resumed_step} epoch={_start_epoch} "
-              f"pos={_start_pos}", flush=True)
+              f"pos={_start_pos} rng_extra={'yes' if _xr else 'no(旧 ckpt)'}",
+              flush=True)
     # C：单元编码本来就是批量的（encode_latent_units 一次前向跑一批），但默认
     # batch_size=8，23 条单元要切 3 批；提到 --enc-batch 后通常一批跑完。
     encoder = LM.LatentEncoder(model, tokenizer, comp, layer=args.layer,
@@ -1822,8 +1848,6 @@ def train(args):
                                batch_size=args.enc_batch)
     system_prompt = args.system_prompt
     reader_like = (comp, bridge) if router is None else (comp, bridge, router)
-    rng_slots = random.Random(args.seed + 777)      # 变槽数采样的独立随机流
-    rng_recon = random.Random(args.seed + 31337)    # recon 取单元用的独立随机流
     # 读出分布记账（router 自选 vs 金标）：全程累计，最终写进 ckpt 的 meta。
     # 不记账的话"训练到底有没有见过 router 的输入分布"只能靠读代码猜 ——
     # 而本仓库已经因为"静默走另一条路"丢过三次运行。
@@ -2304,17 +2328,6 @@ def train(args):
                         grad_seen["compressor_input_proj"] = \
                             comp.input_proj.weight.grad is not None
                     grad_seen["bridge_last_linear"] = bridge.net[3].weight.grad is not None
-                if args.save_every > 0 and step % args.save_every == 0 and not args.dry_run:
-                    # 长跑（数小时）必须周期落盘：只在最后保存的话，中途崩掉全丢。
-                    # 直接覆盖同一个文件，不做 step 编号副本，避免 ckpt 目录膨胀。
-                    LM.save_latent_checkpoint(
-                        args.out, comp, bridge, _cfg(step),
-                        {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                         "git": _git_commit(), "partial": True, "step": step,
-                         "n_train": len(train_data),
-                         "train_state": _train_state(opt, step, epoch, _pos)},
-                        router=router)
-                    print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
                 _clip_coef = float("nan")
                 if args.grad_clip > 0:
                     clip_params = list(comp.parameters()) + list(bridge.parameters()) + \
@@ -2358,6 +2371,27 @@ def train(args):
                 opt.zero_grad(set_to_none=True)
                 step += 1
                 _last_epoch, _last_pos = epoch, _pos
+                if (args.save_every > 0 and step % args.save_every == 0
+                        and not args.dry_run):
+                    # 长跑（数小时）必须周期落盘：只在最后保存的话，中途崩掉全丢。
+                    # 直接覆盖同一个文件，不做 step 编号副本，避免 ckpt 目录膨胀。
+                    #
+                    # **必须在 opt.step() 之后保存**（2026-11-04 修）：旧写法在
+                    # opt.step() 之前落盘，记录的 (step, pos) 是"已完成 step 步、
+                    # 但当前样本的梯度还没施加"。续训时按 pos 跳过当前样本，
+                    # 那一步梯度就被丢掉，续训轨迹与不中断那次错开一个样本。
+                    # 现在 (step, _last_pos) 与权重/动量严格对应，续训从 pos+1 开始。
+                    LM.save_latent_checkpoint(
+                        args.out, comp, bridge, _cfg(step),
+                        {"trained_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                         "git": _git_commit(), "partial": True, "step": step,
+                         "n_train": len(train_data),
+                         "train_state": _train_state(
+                             opt, step, _last_epoch, _last_pos,
+                             extra_rng={"rng_slots": rng_slots.getstate(),
+                                        "rng_recon": rng_recon.getstate()})},
+                        router=router)
+                    print(f"[ckpt] step {step} 已保存 -> {args.out}", flush=True)
                 qa_avg = sum(x[0] for x in acc_items) / len(acc_items)
                 kls = [x[1] for x in acc_items if x[1] is not None]
                 kl_avg = sum(kls) / len(kls) if kls else None
@@ -2559,7 +2593,10 @@ def train(args):
               flush=True)
         meta["recon"] = rec
 
-    meta["train_state"] = _train_state(opt, step, _last_epoch, _last_pos)
+    meta["train_state"] = _train_state(
+        opt, step, _last_epoch, _last_pos,
+        extra_rng={"rng_slots": rng_slots.getstate(),
+                   "rng_recon": rng_recon.getstate()})
     out = LM.save_latent_checkpoint(args.out, comp, bridge, cfg, meta, router=router)
     print(f"[save] {out} config={json.dumps(cfg, ensure_ascii=False)}", flush=True)
     return 0

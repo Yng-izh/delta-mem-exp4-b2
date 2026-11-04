@@ -786,7 +786,32 @@ def test_cov_plumbing():
        float(wgt[1, 0]) == 0.5 and float(wgt[1, 2]) == 2.0, extra=str(wgt.tolist()))
 
 
+def test_resume_state():
+    """断点续训必须把**两条独立随机流**也存下来，否则续训跑的是另一条轨迹。"""
+    rng_slots = random.Random(11)
+    rng_recon = random.Random(22)
+    for _ in range(3):
+        rng_slots.random()
+        rng_recon.random()
+    st = T._train_state(None, 17, 2, 41,
+                        extra_rng={"rng_slots": rng_slots.getstate(),
+                                   "rng_recon": rng_recon.getstate()})
+    ok("K27 train_state 记录 step/epoch/pos", (st["step"], st["epoch"], st["pos"])
+       == (17, 2, 41), extra=f"{st['step']}/{st['epoch']}/{st['pos']}")
+    ok("K28 train_state 带两条独立随机流", set((st.get("rng_extra") or {}).keys())
+       == {"rng_slots", "rng_recon"}, extra=str(list(st.keys())))
+    # 恢复后必须与"不中断"的抽样序列逐位一致
+    want = [rng_slots.random() for _ in range(4)]
+    r2 = random.Random(999)
+    r2.setstate(st["rng_extra"]["rng_slots"])
+    ok("K29 恢复 rng_slots 后续抽样与不中断那次完全相同",
+       [r2.random() for _ in range(4)] == want)
+    ok("K30 不传 extra_rng 时兼容旧签名（不写 rng_extra 键）",
+       "rng_extra" not in T._train_state(None, 0, 0, -1))
+
+
 def main():
+    test_resume_state()
     test_cov_plumbing()
     test_cov_gradient_path()
     test_cov_capacity_and_dedup()
