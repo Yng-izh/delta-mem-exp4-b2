@@ -438,6 +438,12 @@ _QF_CACHE: Dict[Any, Dict[str, torch.Tensor]] = {}
 _ARGS_REF: List[Any] = [None]
 
 
+def _inject_mode(args=None) -> str:
+    """当前生效的软 token 注入位置（训练与评测必须用同一个值）。"""
+    a = args if args is not None else (_ARGS_REF[0] if _ARGS_REF else None)
+    return str(getattr(a, "inject_mode", LM.LATENT_INJECT_MODE) or LM.LATENT_INJECT_MODE)
+
+
 def query_feature_ex_cached(model, tokenizer, question, system_prompt, layer, device):
     """问题特征缓存（含**token 级** h0）：HybridLatentRouter 的 MaxSim 要用 token 轴。
 
@@ -461,27 +467,49 @@ def query_feature_cached(model, tokenizer, question, system_prompt, layer, devic
                                    layer, device)["pooled"]
 
 
-def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer):
-    """student：system(正常 token) + soft tokens + user/assistant 骨架 + answer token。
+def build_student_inputs(model, tokenizer, soft, system_prompt, question, answer,
+                         inject_mode: Optional[str] = None,
+                         header: Optional[str] = None):
+    """student：chat 骨架 + soft tokens + answer token。
+
+    注入位置必须与 `LM._emit_latent` **逐位同构**（inject_mode 相同）：
+    训练时插在消息之间、评测时插进 user 消息体内，等于模型学的和考的不是同一件事。
+    布局由 `LM._chat_parts_with_soft_slot` 统一构造，这里不再自己拼 prompt。
 
     返回 (embeds [1,L,d], labels [1,L], n_ans)。labels 只有答案 token 非 -100。
     """
     dev = LM._model_device(model)
     emb_layer = model.get_input_embeddings()
-    full, n_sys_chars = LM.build_chat_parts(tokenizer, system_prompt, question)
-    ids_full = tokenizer(full, return_tensors="pt",
-                         add_special_tokens=False)["input_ids"].to(dev)
-    n_sys = 0
-    if n_sys_chars:
-        ids_pre = tokenizer(full[:n_sys_chars], return_tensors="pt",
-                            add_special_tokens=False)["input_ids"].to(dev)
-        n_sys = int(ids_pre.shape[1])
-        if ids_full[0, :n_sys].tolist() != ids_pre[0].tolist():
-            raise RuntimeError("system 段分词边界不一致，无法确定 soft token 插入点")
+    mode, _style = LM._check_inject_cfg(inject_mode, None)
+    hdr = LM.LATENT_EVIDENCE_HEADER if header is None else str(header)
+    has_soft = bool(soft is not None and int(soft.numel()) > 0)
+    if not has_soft:
+        mode = "between"
+    if mode == "between":
+        # 旧布局（消息之间）：保留给 A/B 对照与无软 token 的情形
+        full, n_sys_chars = LM.build_chat_parts(tokenizer, system_prompt, question)
+        ids_full = tokenizer(full, return_tensors="pt",
+                             add_special_tokens=False)["input_ids"].to(dev)
+        n_pre = 0
+        if n_sys_chars:
+            ids_pre = tokenizer(full[:n_sys_chars], return_tensors="pt",
+                                add_special_tokens=False)["input_ids"].to(dev)
+            n_pre = int(ids_pre.shape[1])
+            if ids_full[0, :n_pre].tolist() != ids_pre[0].tolist():
+                raise RuntimeError("system 段分词边界不一致，无法确定 soft token 插入点")
+        ids_pre_t = ids_full[:, :n_pre]
+        ids_post_t = ids_full[:, n_pre:]
+    else:
+        pre_text, post_text = LM._chat_parts_with_soft_slot(
+            tokenizer, system_prompt, question, mode, hdr)
+        ids_pre_t = tokenizer(pre_text, return_tensors="pt",
+                              add_special_tokens=False)["input_ids"].to(dev)
+        ids_post_t = tokenizer(post_text, return_tensors="pt",
+                               add_special_tokens=False)["input_ids"].to(dev)
     ans_ids = tokenizer(str(answer), return_tensors="pt",
                         add_special_tokens=False)["input_ids"].to(dev)
-    pre = emb_layer(ids_full[:, :n_sys])
-    post = emb_layer(ids_full[:, n_sys:])
+    pre = emb_layer(ids_pre_t)
+    post = emb_layer(ids_post_t)
     ans_emb = emb_layer(ans_ids)
     # 答案末尾必须监督 EOS：否则模型从没被教过"答完就停"，推理时贪心解码会继续编
     # （实测失败模式：Velcor->Velcora、Kestmor->Kestmorville、Elian->Elian Cantonendon...，
@@ -1063,7 +1091,7 @@ def evidence_chain_indices(units, evidence):
 def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
                      system_prompt, dev, gold_idx=None, ent_weight=5.0,
                      stop_weight=0.2, corrupt_p=0.5, lex_payloads=None,
-                     use_lex=True):
+                     use_lex=True, inject_mode=None):
     """逐单元重建：**用某个单元自己的载荷**去重建**它自己的原文**。
 
     旧实现（必须记住这个错误，它不会报错、只会让指标停在噪声水平）：
@@ -1128,7 +1156,8 @@ def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
         soft_u = soft_u.reshape(1, -1, soft_u.shape[-1])
         r_embeds, r_labels, _n = build_student_inputs(
             model, tokenizer, soft_u, system_prompt,
-            "Repeat the memory verbatim.", str(units[i]))
+            "Repeat the memory verbatim.", str(units[i]),
+            inject_mode=inject_mode)
         # 前缀随机遮盖：以 corrupt_p 概率把答案段**输入侧**的 token 换成随机词表
         # token。不这么做时，Teacher Forcing 下模型可以只靠真实前缀自回归地猜出
         # 下一个词（语法层面的捷径），重建任务退化成语言模型练习，对"压缩器有没有
@@ -1357,7 +1386,8 @@ def evaluate_recon(reader_like, model, tokenizer, data, system_prompt, limit=8,
             with torch.no_grad():
                 embeds, labels, n_ans = build_student_inputs(
                     model, tokenizer, soft, system_prompt,
-                    "Repeat the memory verbatim.", str(units[i]))
+                    "Repeat the memory verbatim.", str(units[i]),
+                    inject_mode=_inject_mode())
                 with LM.delta_write_disabled(model):
                     logits = model(inputs_embeds=embeds,
                                    attention_mask=torch.ones(embeds.shape[:2],
@@ -2060,7 +2090,8 @@ def train(args):
                 soft = bridge(z)
             # ③ student 前向：**不加 no_grad**（冻结的是权重，不是梯度）
             embeds, labels, n_ans = build_student_inputs(
-                model, tokenizer, soft, system_prompt, item["question"], item["answer"])
+                model, tokenizer, soft, system_prompt, item["question"], item["answer"],
+                inject_mode=args.inject_mode)
             if qa_gate == 0.0:
                 # 命中门控生效：抹掉答案标签，本样本对 QA 交叉熵无贡献。
                 # 用抹标签而不是乘 0 系数：--pack 会把多条样本并成一个 batch 只算一次
@@ -2130,6 +2161,7 @@ def train(args):
                         gold_idx=evidence_slot_indices(_units_now, item.get("evidence")),
                         ent_weight=args.ent_weight, stop_weight=args.stop_weight,
                         corrupt_p=args.recon_corrupt,
+                        inject_mode=args.inject_mode,
                         # 与 QA 同一条 bridge 输入（z_sem + z_lex）；--recon-lex 0 复现旧行为
                         lex_payloads=_lex_all,
                         use_lex=bool(getattr(args, "recon_lex", 1)))
@@ -2139,7 +2171,8 @@ def train(args):
                     r_embeds, r_labels, _rn = build_student_inputs(
                         model, tokenizer, soft, system_prompt,
                         "Repeat the memory verbatim.",
-                        " ".join(item_units(item)[:max(1, args.recon_units)]))
+                        " ".join(item_units(item)[:max(1, args.recon_units)]),
+                        inject_mode=args.inject_mode)
                     with LM.delta_write_disabled(model):
                         r_logits = model(inputs_embeds=r_embeds,
                                          attention_mask=torch.ones(r_embeds.shape[:2],
@@ -2907,7 +2940,8 @@ def train_fst(args):
             soft = LM.compose_routed_soft(model, tokenizer, bridge,
                                           out["z_reads"], dev=dev)
             embeds, labels, n_ans = build_student_inputs(
-                model, tokenizer, soft, system_prompt, item["question"], item["answer"])
+                model, tokenizer, soft, system_prompt, item["question"], item["answer"],
+                inject_mode=_inject_mode(args))
             with LM.delta_write_disabled(model):
                 s_logits = model(inputs_embeds=embeds,
                                  attention_mask=torch.ones(embeds.shape[:2],

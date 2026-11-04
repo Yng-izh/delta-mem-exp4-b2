@@ -326,8 +326,11 @@ class LatentCompressor(nn.Module):
         self.norm = nn.LayerNorm(self.hidden_size)
 
     def forward(self, h0: torch.Tensor, h18: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        z_sem, _lex, _info = self.forward_split(h0, h18, attention_mask)
+                attention_mask: Optional[torch.Tensor] = None,
+                word_ids: Optional[torch.Tensor] = None,
+                word_penalty: Optional[torch.Tensor] = None) -> torch.Tensor:
+        z_sem, _lex, _info = self.forward_split(
+            h0, h18, attention_mask, word_ids=word_ids, word_penalty=word_penalty)
         return z_sem
 
     def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
@@ -394,9 +397,7 @@ class LatentCompressor(nn.Module):
             z = z.masked_fill(empty.view(B, 1, 1), 0.0)
 
         z_lex: Optional[torch.Tensor] = None
-        lex_pick: Optional[List[List[int]]] = None
         lex_word_pick: Optional[List[List[int]]] = None
-        lex_granularity = "token"
         n_words = 0
         if self.lex_skip:
             if w is None:
@@ -418,42 +419,18 @@ class LatentCompressor(nn.Module):
             # 现在对同一份 logits 施极低温度 τ_lex≈0.05，并**逐行互斥**：
             # 第 r 行挑走一个 token 后，后面的行不能再选它 —— m 个槽分别锚到
             # m 个不同的高显著 token（实体/数字），这正是冻结模型能直接读懂的东西。
+            if word_ids is None:
+                # 没有词边界就不做选词：旧实现会静默退回 token 级，于是"整词化到底有没有
+                # 生效"只能靠指标猜。这里直接报错，调用方必须传 chunk_word_ids。
+                raise ValueError(
+                    "lex_skip=True 时必须提供 word_ids（词级选词）；"
+                    "请用 LatentEncoder.encode_full 传入 chunk_word_ids，"
+                    "或显式构造 word_ids/word_penalty。")
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
-            logits = torch.log(w.clamp_min(1e-9))
-            logits = logits.masked_fill(~safe_mask.unsqueeze(1), -1e4)
-            if word_ids is not None:
-                # ---- v6：按**整词**选，不再按子词 ----
-                # 旧写法在 token 级 argmax，一个词被切成 2~4 个 token 时只抓到一片
-                # （实测选中 `Mer` / `cedes` / `-`），碎片向量在词表里不对应任何词。
-                z_lex, pick, n_words = self._lex_by_word(
-                    h0, w, safe_mask, word_ids, word_penalty)
-                lex_granularity = "word"
-                if pick is not None:
-                    lex_word_pick = pick.tolist()
-                    # 兼容旧字段：给出每个被选词的首个 token 列号（诊断脚本仍在用）
-                    lex_pick = self._first_token_of_words(
-                        word_ids, safe_mask, pick).tolist()
-            else:
-                taken = torch.zeros((B, L), dtype=torch.bool, device=logits.device)
-                rows = []
-                picked_cols = []
-                for _r in range(self.n_slots):
-                    row = logits[:, _r, :].masked_fill(taken, -1e4)
-                    p_r = torch.softmax(row / max(1e-3, float(self.lex_tau)), dim=-1)
-                    rows.append(p_r)
-                    pick = p_r.argmax(dim=-1, keepdim=True)          # [B,1]
-                    picked_cols.append(pick.squeeze(1))
-                    taken = taken.scatter(1, pick, True)
-                # 选出的是哪几个 token（列号）：符号保真诊断必须能打印"压缩器锚在哪个词上"，
-                # 否则"实体有没有进潜层"只能靠猜（见 tools/diag_symbol_fidelity.py）。
-                lex_pick = torch.stack(picked_cols, dim=1).tolist()   # [B,m] 列号
-                w = torch.stack(rows, dim=1)                          # [B,m,L]
-                w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
-                wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
-                z_lex = torch.einsum("bml,bld->bmd",
-                                     w.to(dtype=wd),
-                                     h0.to(device=w.device, dtype=wd))
-                z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
+            z_lex, pick, n_words = self._lex_by_word(
+                h0, w, safe_mask, word_ids, word_penalty)
+            if pick is not None:
+                lex_word_pick = pick.tolist()
             if bool(empty.any()):
                 z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
 
@@ -461,9 +438,7 @@ class LatentCompressor(nn.Module):
                 "n_tokens": [int(v) for v in mask.sum(dim=1).tolist()],
                 "n_empty_rows": int(empty.sum().item()),
                 "lex_skip": bool(self.lex_skip),
-                "lex_pick": lex_pick,
                 "lex_word_pick": lex_word_pick,
-                "lex_granularity": lex_granularity,
                 "n_words": int(n_words)}
         return z, z_lex, info
 
@@ -475,81 +450,101 @@ class LatentCompressor(nn.Module):
 
         输入：
             h0        [B,L,d]  第 0 层隐藏（原生词嵌入空间）
-            w         [B,m,L]  交叉注意力权重（已是 float32、padding 已清零）
+            w         [B,m,L]  交叉注意力权重（float32、padding 已清零）
             safe_mask [B,L]    有效 token
             word_ids  [B,L]    token -> 词编号（-1 = 特殊/padding）
             word_penalty [B,W] 词级降权（标点 0.1 / 停用词 0.35 / 其余 1.0）
         返回 (z_lex [B,m,d], pick [B,m] 词编号, n_words)。
 
-        为什么用"注意力质量取行最大"当词分：同一个词可能被多个槽位注意到，
-        取最大等价于"只要有一个槽位看重这个词就算数"，不会因为别的槽位分散而漏掉。
-        选择本身是**硬 argmax**（逐行互斥），没有 STE —— 与旧实现一致：
-        `nn.MultiheadAttention(need_weights=True)` 返回的权重本来就不带梯度，
-        这里再加 STE 只会凭空引入一条没有依据的梯度。
+        设备：**以 `w.device` 为准**。编码器为了省显存把 h0 留在 CPU，而 w / safe_mask
+        在 Compressor 所在的 GPU 上；混用会在 mask 构造处直接报 "Expected all tensors to
+        be on the same device"。h0 只在最后的聚合一步搬到 w 的设备。
+
+        选词：**每个槽位各自排名**（`mass[:, r, :]`），再排除之前已选过的词。
+        旧写法先 `mass.max(dim=1)` 把 4 个槽的偏好合并成一个全局分数，等价于 4 个槽
+        只是取全局 Top-4 —— 槽位之间不再有分工，这是整词化之后才暴露出来的退化。
         """
         B, L, d = int(h0.shape[0]), int(h0.shape[1]), int(h0.shape[2])
-        dev = h0.device
+        dev = w.device
         wid = word_ids.to(device=dev).long()
+        smask = safe_mask.to(device=dev)
         valid = wid >= 0
         n_words = int(wid.max().item()) + 1 if bool(valid.any()) else 0
         if n_words <= 0:
             return torch.zeros((B, self.n_slots, d), dtype=h0.dtype, device=dev), None, 0
         ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
-        # [B,W,L]：每个词包含哪些 token（并保证只含有效 token）
-        mask_w = (wid.unsqueeze(1) == ar) & safe_mask.unsqueeze(1)
-        mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())   # [B,m,W]
-        score = mass.max(dim=1).values                                   # [B,W]
+        mask_w = (wid.unsqueeze(1) == ar) & smask.unsqueeze(1)          # [B,W,L]
+        mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())  # [B,m,W]
         if word_penalty is not None:
-            pen = word_penalty.to(device=dev, dtype=score.dtype)
-            if int(pen.shape[1]) < n_words:                              # 词数超出（理论不会）
+            pen = word_penalty.to(device=dev, dtype=torch.float32)
+            if int(pen.shape[1]) < n_words:
                 pen = torch.cat([pen, torch.ones((B, n_words - int(pen.shape[1])),
                                                  dtype=pen.dtype, device=dev)], dim=1)
-            score = score * pen[:, :n_words]
-        exists = mask_w.any(dim=-1)                                      # [B,W]
-        score = score.masked_fill(~exists, float("-inf"))
-
+            mass = mass * pen[:, :n_words].unsqueeze(1)                 # 每个槽各自降权
+        exists = mask_w.any(dim=-1)                                     # [B,W]
         taken = torch.zeros((B, n_words), dtype=torch.bool, device=dev)
         picks: List[torch.Tensor] = []
-        for _r in range(self.n_slots):
-            s_r = score.masked_fill(taken, float("-inf"))
-            pw = s_r.argmax(dim=-1)                                      # [B]
+        for r in range(self.n_slots):
+            s_r = mass[:, r, :].masked_fill(~exists | taken, float("-inf"))
+            pw = s_r.argmax(dim=-1)                                     # [B]
             cur = s_r.gather(1, pw.unsqueeze(1)).squeeze(1)
             if picks:
                 # 词数少于 m（极短单元）时复用上一个词，保持 [B,m] 形状稳定
                 pw = torch.where(torch.isfinite(cur), pw, picks[-1])
             taken = taken.scatter(1, pw.unsqueeze(1), True)
             picks.append(pw)
-        pick = torch.stack(picks, dim=1)                                 # [B,m]
+        pick = torch.stack(picks, dim=1)                                # [B,m]
 
         sel = mask_w.gather(1, pick.unsqueeze(-1).expand(-1, -1, L)).float()
         denom = sel.sum(dim=-1, keepdim=True).clamp_min(1.0)
-        wd = h0.dtype if h0.dtype.is_floating_point else torch.float32
-        z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd),
-                             h0.to(device=dev, dtype=wd))
+        h0d = h0.to(device=dev)                                         # 只在聚合时搬
+        wd = h0d.dtype if h0d.dtype.is_floating_point else torch.float32
+        z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd), h0d.to(dtype=wd))
         z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
         return z_lex, pick, n_words
 
-    @staticmethod
-    def _first_token_of_words(word_ids: torch.Tensor, safe_mask: torch.Tensor,
-                              pick: torch.Tensor) -> torch.Tensor:
-        """被选中的每个词在块内的**首个 token 列号**（兼容旧的 lex_pick 字段）。"""
-        B, L = int(word_ids.shape[0]), int(word_ids.shape[1])
-        dev = word_ids.device
-        n_words = int(pick.max().item()) + 1
-        ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
-        mask_w = (word_ids.to(device=dev).long().unsqueeze(1) == ar) & \
-            safe_mask.to(device=dev).unsqueeze(1)
-        first = mask_w.float().argmax(dim=-1)                            # [B,W]
-        return first.gather(1, pick.to(device=dev).long())
-
-
-# 词级选词用的停用词表（只用于**降权**，不参与语义；故意保持小而常见，
-# 免得把"not/no"这类对答案有影响的否定词也压掉）。
+# 词级选词用的停用词表（只用于**降权**）。
+# 注意**不能**把否定/时间/比较词算进来：`not`/`no` 决定答案对错，`before`/`after`
+# 决定时序，`than` 决定比较方向 —— 降权它们等于教模型忽略题目的关键约束。
 _LATENT_STOPWORDS = frozenset(
     "a an the of in on at to and or is was were be been being for by with as that "
-    "this these those from it its his her their they he she them we you i not no "
+    "this these those from it its his her their they he she them we you i "
     "do does did has have had will would can could may might there which who whom "
-    "also into over after before during between about while than then so such".split())
+    "also into over during between about while then so such".split())
+
+
+def _group_word_ids(items):
+    """逐 token 分组成词，返回词编号（-1 = 特殊/padding）。
+
+    items: [(starts_ws, text, is_special)]，starts_ws 表示"这个 token 前面有空白"。
+    规则：
+        - 前面有空白 / 偏移跳跃 -> 新词；
+        - 以标点开头（`'`/`’`/`-` 除外）-> 单独成词；上一个 token 是标点也起新词；
+        - **数字链**：`9` `,` `984`（或 `3` `.` `14`）之间没有空白时属于同一个词。
+          没有这条，`9,984` 会被拆成三个"词"，数字完整性指标直接失真。
+    """
+    out = []
+    wid = -1
+    prev_punct = False
+    prev_chain = False
+    for starts_ws, txt, is_special in items:
+        if is_special:
+            out.append(-1)
+            prev_punct = False
+            prev_chain = False
+            continue
+        t = str(txt).strip()
+        punct = bool(t) and (not t[:1].isalnum()) and t[:1] not in "'\u2019-"
+        digits = bool(t) and any(ch.isdigit() for ch in t) and \
+            all(ch.isdigit() or ch in ",." for ch in t)
+        sep = t in (",", ".")
+        in_number = (not starts_ws) and prev_chain and (digits or sep)
+        if (not in_number) and (wid < 0 or starts_ws or punct or prev_punct):
+            wid += 1
+        out.append(wid)
+        prev_punct = punct and not in_number
+        prev_chain = digits or (sep and prev_chain)
+    return out
 
 
 def _word_ids_from_offsets(offsets, token_texts):
@@ -557,36 +552,21 @@ def _word_ids_from_offsets(offsets, token_texts):
 
     为什么用偏移而不是 Ġ/▁ 前缀：前缀标记只是字节级 BPE 的约定，换一个分词器
     （SentencePiece、或带特殊前处理的模型）就失效，而字符偏移是 tokenizer 直接给的。
-    词边界规则：
-        - 偏移之间有间隔（跳过了空白）-> 新词；
-        - 该 token 以标点开头（`'`/`’`/`-` 除外，它们常在词内）-> 单独成词；
-        - 上一个 token 是标点 -> 当前 token 也起新词（`Rome."` 里的引号不会吃掉下一个词）。
-    偏移全 0（特殊 token / padding）的 token 记 -1，不参与选词。
+    字节级 BPE 的偏移**包含词前的空格**（" was" 的 span 起点等于上一个 token 的终点），
+    所以"偏移是否跳跃"要和"解码文本是否以空白开头"一起看，见 `_group_word_ids`。
     """
-    out = []
-    wid = -1
+    items = []
     prev_end = None
-    prev_punct = False
     for (s, e), txt in zip(offsets, token_texts):
         s, e = int(s), int(e)
-        if e <= s:
-            out.append(-1)
-            prev_punct = False
+        if e <= s:                      # 特殊 token / padding
+            items.append((False, "", True))
+            prev_end = None
             continue
-        t = str(txt).strip()
-        # 字节级 BPE 的偏移**包含词前的空格**（" was" 的 span 起点正好等于上一个
-        # token 的终点），所以只看 s > prev_end 会把整句并成一个词。必须再看
-        # "解码后的文本是否以空白开头"——这是文本层面的判断，不是 Ġ/▁ 约定。
-        starts_ws = str(txt)[:1].isspace()
-        punct = bool(t) and (not t[:1].isalnum()) and t[:1] not in "'\u2019-"
-        start_new = ((prev_end is None) or (s > prev_end) or starts_ws
-                     or punct or prev_punct)
-        if start_new:
-            wid += 1
-        out.append(wid)
+        starts_ws = str(txt)[:1].isspace() or (prev_end is not None and s > prev_end)
+        items.append((starts_ws, str(txt), False))
         prev_end = e
-        prev_punct = punct
-    return out
+    return _group_word_ids(items)
 
 
 def _word_ids_from_texts(token_texts):
@@ -595,23 +575,15 @@ def _word_ids_from_texts(token_texts):
     这是**降级路径**，只在 tokenizer 不支持 `return_offsets_mapping` 时使用，
     并且会把 `word_boundary_source` 记成 "prefix"，绝不假装与偏移路径等价。
     """
-    out = []
-    wid = -1
-    prev_punct = False
+    items = []
     for txt in token_texts:
         t = str(txt)
-        stripped = t.strip()
-        if not stripped:
-            out.append(-1)
-            prev_punct = False
+        if not t.strip():
+            items.append((False, "", True))
             continue
         starts_space = t[:1].isspace() or t.startswith(("\u0120", "\u2581"))
-        punct = (not stripped[:1].isalnum()) and stripped[:1] not in "'\u2019-"
-        if wid < 0 or starts_space or punct or prev_punct:
-            wid += 1
-        out.append(wid)
-        prev_punct = punct
-    return out
+        items.append((starts_space, t, False))
+    return _group_word_ids(items)
 
 
 def _word_penalty_for(tok, ids, word_ids):
@@ -2959,9 +2931,7 @@ class LatentEncoder:
                 "n_slots": int(z.shape[1]), "dim": int(z.shape[-1]),
                 "n_empty_rows": int(cinfo.get("n_empty_rows", 0)),
                 "lex_skip": bool(z_lex is not None),
-                # 选词粒度与词边界来源必须随 info 走：改了粒度而日志里看不出来，
-                # 就只能靠"指标怎么变了"反推，那是本仓库反复踩过的坑。
-                "lex_granularity": str(cinfo.get("lex_granularity", "token")),
+                # 词边界来源必须随 info 走：拿不到偏移而静默降级，指标变化就归因不了。
                 "n_words": int(cinfo.get("n_words", 0)),
                 "word_boundary_source": str(feats.get("word_boundary_source", "none"))}
         kfeat = None

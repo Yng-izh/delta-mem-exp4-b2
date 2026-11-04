@@ -167,9 +167,13 @@ def main(argv=None):
     ap.add_argument("--data", required=True)
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--limit", type=int, default=50,
-                    help="最多分析多少条**答错**的题（先跑生成筛出错的）")
+                    help="分析多少条样本。默认取**固定的前 N 条**（含答对与答错），"
+                         "这样改代码前后可以用同一批样本对比")
     ap.add_argument("--scan", type=int, default=200,
-                    help="最多扫多少条样本以凑够 --limit 条答错题")
+                    help="仅在 --only-wrong 时生效：最多扫多少条以凑够 --limit 条答错题")
+    ap.add_argument("--only-wrong", action="store_true",
+                    help="只分析答错的题（旧行为）。注意它会让样本集随模型变化，"
+                         "不能用于改代码前后的对比")
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--gpu", default="0")
     ap.add_argument("--base", default=T.BASE)
@@ -237,8 +241,11 @@ def main(argv=None):
         if isinstance(gold, (list, tuple)):
             gold = " ".join(str(x) for x in gold)
         ok = T._norm_ans(pred) == T._norm_ans(gold)
-        if ok and not a.show_ok:
+        # 默认**固定取前 N 条**（答对答错都要），否则改代码前后比较的不是同一批样本。
+        if a.only_wrong and ok:
             continue
+        if (not a.only_wrong) and ok and not a.show_ok:
+            pass                     # 默认统计全部，但仍只在 --show-ok 时打印明细
         st = dict(bridge.last_stats or {})
         per_slot = []
         for j in idx:
@@ -278,6 +285,8 @@ def main(argv=None):
             "slots": per_slot, "bridge": st,
         }
         rows.append(row)
+        if not a.show_ok and ok:
+            continue                     # 统计包含答对题，但明细只在 --show-ok 时打印
         print(f"\n[{len(rows)}] {'✓' if ok else '✗'} q={item['question'][:70]!r}")
         print(f"  gold={str(gold)!r}  pred={str(pred)[:60]!r}  金标槽={idx}")
         for rec in per_slot:
@@ -306,6 +315,9 @@ def main(argv=None):
             gran_counts[s["granularity"]] = gran_counts.get(s["granularity"], 0) + 1
     summary = {
         "n_items": n, "n_scanned": n_scanned, "n_answer_slots": n_slots,
+        "n_ok": sum(int(r["ok"]) for r in rows),
+        "n_wrong": sum(int(not r["ok"]) for r in rows),
+        "sample_mode": ("only_wrong" if a.only_wrong else "first_n"),
         "granularity": gran_counts,
         "hit_rate": _rate("hit"),
         "full_answer_rate": _rate("full_answer"),
@@ -318,8 +330,9 @@ def main(argv=None):
         "rows": rows,
     }
     print("\n" + "=" * 70)
-    print(f"答错题 {n} 条（扫了 {n_scanned} 条）；含答案的金标槽 {n_slots} 个；"
-          f"选词粒度 {gran_counts}")
+    print(f"样本 {n} 条（扫了 {n_scanned} 条；答对 {summary['n_ok']} / "
+          f"答错 {summary['n_wrong']}；取样={summary['sample_mode']}）；"
+          f"含答案的金标槽 {n_slots} 个；选词粒度 {gran_counts}")
     if n_slots:
         _nr = summary["number_rate"]
         _nr_s = "n/a" if _nr is None else f"{100 * _nr:.1f}%"

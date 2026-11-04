@@ -287,12 +287,6 @@ def test_slot_words():
     ok("G1 词级还原出整词（不是子词）",
        words == ["Mercedes", "head"] and gran == "word", extra=f"{words}/{gran}")
 
-    # token 级（旧 ckpt）也要按词边界扩成整词
-    words2, gran2 = S._slot_words(
-        tok, feats, {"lex_word_pick": None, "lex_pick": [[1, 3]]})
-    ok("G2 token 级降级时仍按词边界合并",
-       words2 == ["Mercedes", "head"] and gran2 == "token", extra=f"{words2}/{gran2}")
-
     ok("G3 命中判定用内容词（子词拼回整词后命中）",
        S._hit(["Mercedes"], "Mercedes-AMG") is True)
     ok("G4 停用词不算命中", S._hit(["is"], "Mercedes-AMG") is False)
@@ -412,19 +406,17 @@ def test_word_level_selection():
     z, zlex, info = comp.forward_split(h0, h18, mask, word_ids=wid, word_penalty=pen)
     ok("I8 词级选择仍是 m=4 个向量", tuple(zlex.shape) == (B, 4, d),
        extra=str(tuple(zlex.shape)))
-    ok("I9 info 标注词级粒度", info["lex_granularity"] == "word" and info["n_words"] == 7,
-       extra=f"{info['lex_granularity']}/{info['n_words']}")
+    ok("I9 info 记录词数与选中的词", info["n_words"] == 7
+       and len(info["lex_word_pick"][0]) == 4,
+       extra=f"{info.get('n_words')}/{info.get('lex_word_pick')}")
     ok("I10 每次选的是**不同的词**（不重复占槽）",
        all(len(set(row)) == len(row) for row in info["lex_word_pick"]),
        extra=str(info["lex_word_pick"]))
     ok("I11 被降权的词不会优先被选", all(row[0] != 0 for row in info["lex_word_pick"]),
        extra=str(info["lex_word_pick"]))
-    ok("I12 lex_pick 给出的是被选词的首个 token 列号",
-       all(len(row) == 4 for row in info["lex_pick"]), extra=str(info["lex_pick"]))
-    # 不传词边界 -> 退回 token 级，并在 info 里标注
-    _z, _zl, info2 = comp.forward_split(h0, h18, mask)
-    ok("I13 无词边界时退回 token 级并记账",
-       info2["lex_granularity"] == "token" and info2["lex_word_pick"] is None)
+    # 不传词边界 -> 直接报错（不再静默退回 token 级）
+    ok("I13 缺 word_ids 时直接报错（不允许静默降级）",
+       _raises(lambda: comp.forward_split(h0, h18, mask)))
 
 
 def test_coverage_metrics():
@@ -446,7 +438,68 @@ def test_coverage_metrics():
        S._numbers_covered(["Rome"], "in Rome") is None)
 
 
+def test_numeric_and_stopwords():
+    # 数字链：9 , 984 / 3 . 14 必须合成一个词
+    texts = ["9", ",", "984"]
+    offs = [(0, 1), (1, 2), (2, 5)]
+    ok("I20 千分位数字合成一个词",
+       LM._word_ids_from_offsets(offs, texts) == [0, 0, 0],
+       extra=str(LM._word_ids_from_offsets(offs, texts)))
+    texts2 = ["3", ".", "14"]
+    offs2 = [(0, 1), (1, 2), (2, 4)]
+    ok("I21 小数合成一个词",
+       LM._word_ids_from_offsets(offs2, texts2) == [0, 0, 0])
+    # 句末句点仍要单独成词
+    texts3 = ["Rome", "."]
+    offs3 = [(0, 4), (4, 5)]
+    ok("I22 句末句点不并入前一个词",
+       LM._word_ids_from_offsets(offs3, texts3) == [0, 1])
+    # 否定/时间/比较词不能被当停用词降权
+    bad = [w for w in ("not", "no", "before", "after", "than")
+           if w in LM._LATENT_STOPWORDS]
+    ok("I23 not/no/before/after/than 不在停用词表", not bad, extra=str(bad))
+
+
+def test_per_slot_ranking():
+    """每个槽用自己的注意力偏好选词，而不是四槽共用一份全局排名。
+
+    构造：槽 0 偏好词 0（0.5）胜过词 1（0.4）；槽 1 偏好词 1（0.9）远胜词 0（0.1）。
+    逐槽选 -> [0, 1, ...]；旧写法 `mass.max(dim=1)` 合并后词 1（0.9）会排第一，
+    于是槽 0 也被迫先选词 1 -> [1, 0, ...]。两者结果不同，因此这条能钉住语义。
+    """
+    comp = LM.LatentCompressor(16, n_slots=4, inner_dim=16, num_heads=2, lex_skip=True)
+    B, L, d = 1, 6, 16
+    h0 = torch.randn(B, L, d)
+    mask = torch.ones(B, L, dtype=torch.long)
+    wid = torch.tensor([[0, 0, 1, 1, 2, 3]])
+    w = torch.zeros(B, 4, L)
+    w[0, 0] = torch.tensor([0.5, 0.5, 0.4, 0.4, 0.0, 0.0])
+    w[0, 1] = torch.tensor([0.1, 0.1, 0.9, 0.9, 0.0, 0.0])
+    _z, pick, n_words = comp._lex_by_word(h0, w, mask, wid, None)
+    ok("I24 每槽按自己的偏好选词（不是全局 Top-k）",
+       pick[0].tolist()[:2] == [0, 1] and n_words == 4,
+       extra=str(pick[0].tolist()))
+
+
+def test_student_inputs_inject_mode():
+    """训练前向必须和评测走同一个注入位置。"""
+    model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
+    tok = T.StubTok(vocab_size=256)
+    soft = torch.zeros(1, 3, 32)
+    e_u, l_u, n_u = T.build_student_inputs(
+        model, tok, soft, "sys", "Q?", "A", inject_mode="user")
+    e_b, l_b, n_b = T.build_student_inputs(
+        model, tok, soft, "sys", "Q?", "A", inject_mode="between")
+    ok("I25 user 与 between 两种布局长度不同（确实换了位置）",
+       e_u.shape[1] != e_b.shape[1], extra=f"{e_u.shape} vs {e_b.shape}")
+    ok("I26 两种布局的答案标签一致（只换注入位置，不换监督）",
+       n_u == n_b and torch.equal(l_u[0, -n_u:], l_b[0, -n_b:]))
+
+
 def main():
+    test_numeric_and_stopwords()
+    test_per_slot_ranking()
+    test_student_inputs_inject_mode()
     test_word_grouping()
     test_word_level_selection()
     test_coverage_metrics()

@@ -45,7 +45,9 @@ def test_compressor_split_and_lex():
     h0, h18 = _t(B, L, H, seed=1), _t(B, L, H, seed=2)
     mask = torch.ones(B, L, dtype=torch.long)
     mask[1, 6:] = 0
-    z, z_lex, info = comp.forward_split(h0, h18, mask)
+    # 词级选词需要词边界：这里每个 token 各自成词（够用即可，词表语义由 I 系列覆盖）
+    wid = torch.arange(L).unsqueeze(0).expand(B, L).contiguous()
+    z, z_lex, info = comp.forward_split(h0, h18, mask, word_ids=wid)
     assert z.shape == (B, m, H), z.shape          # 语义载荷回到 hidden 维（inner_dim 只是内部宽度）
     assert z_lex is not None and z_lex.shape == (B, m, H), z_lex.shape
     assert int(info["n_empty_rows"]) == 0

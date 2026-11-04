@@ -119,7 +119,8 @@ def train_arm(arm, reader, model, tok, items, args, dev, pad):
             # 测出来的曲线不能代表正式读出）
             isolate=True, fence_style=str(getattr(args, "fence_style", "") or None))
         embeds, labels, n_ans = T.build_student_inputs(
-            model, tok, soft, sysp, item["question"], item["answer"])
+            model, tok, soft, sysp, item["question"], item["answer"],
+            inject_mode=str(getattr(args, "inject_mode", "") or None))
         with LM.delta_write_disabled(model):
             s_logits = model(inputs_embeds=embeds,
                              attention_mask=torch.ones(embeds.shape[:2],
