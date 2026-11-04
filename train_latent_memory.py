@@ -344,28 +344,48 @@ def encode_item_slots_full(encoder, item, tag="fact", grad=False, cache=None):
     units = item_units(item)
     texts = [unit_encode_text(item, i) for i in range(len(units))]
     if cache is not None and not grad:
-        payloads, lex_list, hits = [], [], 0
+        payloads, lex_list, kf_list, hits = [], [], [], 0
         want_lex = bool(getattr(encoder.compressor, "lex_skip", False))
         for k, t in enumerate(texts):
             key = (str(t), int(getattr(encoder, "layer", -1)), str(tag))
             hit = cache.get(key)
             if hit is None:
-                p, lx, _kf, _i = encoder.encode_full(
+                p, lx, kf, _i = encoder.encode_full(
                     [t], parent_ids=[f"{tag}:{k}"], grad=False)
+                # 逐槽冻结特征也要缓存：**只要传了 cache（哪怕空的 dict）就走这条分支**，
+                # 旧实现在这里固定返回 kfeat=None，于是评测里 HybridLatentRouter 全程
+                # 退回"潜载荷键"、MaxSim 与新信息抑制都不生效 —— 实测同一份 router
+                # 在阶段一（cache=None）召回 52%，端到端评测（cache={}）只剩 7.7%。
+                kf_slice = None
+                if kf is not None:
+                    kf_slice = {kk: (vv[0].detach() if torch.is_tensor(vv) and vv.dim() >= 1
+                                     else vv) for kk, vv in kf.items()}
                 hit = (p[0].detach(),
-                       (lx[0].detach() if lx is not None else None))
+                       (lx[0].detach() if lx is not None else None),
+                       kf_slice)
                 cache[key] = hit
             else:
                 hits += 1
             payloads.append(hit[0])
             lex_list.append(hit[1])
+            kf_list.append(hit[2] if len(hit) > 2 else None)
         if not payloads:
             raise RuntimeError("encode 未返回任何 payload")
         z = torch.cat(payloads, dim=0) if len(payloads) > 1 else payloads[0]
         # 直通载荷随缓存一起复用：FST 评估里同一段上下文被上百个问题共享，
         # 每条事实重算一次直通投影就是白烧 GPU（正是 11s/题的来源之一）。
         lex_out = lex_list if (want_lex and any(x is not None for x in lex_list)) else None
-        return payloads, z, {"cache_hits": hits, "cache_n": len(texts)}, None, lex_out
+        # 把逐槽特征按 payload 顺序堆回 [K, cap, d]，与无缓存路径的形状完全一致
+        kfeat_out = None
+        if kf_list and all(x is not None for x in kf_list):
+            kfeat_out = {}
+            for kk in kf_list[0]:
+                vals = [x[kk] for x in kf_list]
+                if all(torch.is_tensor(v) for v in vals):
+                    kfeat_out[kk] = torch.stack(vals, dim=0)
+                else:
+                    kfeat_out[kk] = vals[0]
+        return payloads, z, {"cache_hits": hits, "cache_n": len(texts)}, kfeat_out, lex_out
     payloads, lex_payloads, kfeat, info = encoder.encode_full(
         texts, parent_ids=[f"{tag}:{k}" for k in range(len(texts))], grad=grad)
     if not payloads:
