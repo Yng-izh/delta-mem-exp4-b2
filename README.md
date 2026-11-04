@@ -33,6 +33,10 @@
 
 正式数字要等一轮完整阶段二（`runs/run_stage2_bridge.sh`，约 5 小时 × 2 臂）。
 
+**下一步不是直接重训，而是先做读出结构的四个递进实验**（E1 梯度解耦 → E2 原生 BPE →
+E3 分开注入 → E4 隐状态蒸馏），协议、判据与"什么条件下才做下一个"写在
+[`EXPERIMENTS.md`](EXPERIMENTS.md)。代码已全部落地并有单测，实验本身**尚未运行**。
+
 ## 历史数字（HotpotQA val500，n=500）
 
 | 方法 | 读出名额 | acc% | EM% | 完整证据召回% |
@@ -91,8 +95,13 @@
 | `tools/prep_hotpotqa.py` / `tools/prep_mab.py` | 数据转换（**不按答案挑候选**） |
 | `runs/run_stage1_router.sh` / `runs/run_stage2_bridge.sh` / `runs/eval_stage2.sh` | 三段流程的启动脚本 |
 | `runs/diag_*.sh` / `runs/overfit_probe.sh` | 上面四个诊断实验的启动脚本（不训练主模型） |
+| `runs/exp_e1_lexhead.sh` / `exp_e3_split.sh` / `exp_e4_hid.sh` | 读出结构实验的三个训练臂（各 1000 步，一次只动一个变量） |
+| `runs/exp_e2_lex_tokens.sh` | E2：**零训练**的词形编码对照（子词均值 vs 完整 BPE 直通） |
+| `tools/cmp_readout.py` | 两份 eval 产出逐题配对比较（McNemar 精确二项，不能拿两个百分比相减） |
+| `EXPERIMENTS.md` | 读出结构实验的执行手册：协议、判据、否决过的做法 |
 | `tests/test_v4_refactor.py` | 8 组 CPU 自检（压缩/直通/Bridge/Router/beam/掩码/银行/数据） |
-| `tests/test_diag_contracts.py` | 29 项回归：Bridge 梯度量级、α 上限/死锁、重建与 QA 同路径、teacher scope、重建口径 |
+| `tests/test_diag_contracts.py` | 118 项回归：Bridge 梯度量级、α 上限/死锁、重建与 QA 同路径、teacher scope、重建口径、L_cov 标签与容量 |
+| `tests/test_readout_experiments.py` | 63 项：E1 零初始化等价 + 梯度隔离、E2 整词 BPE 不截断、E3 范数按整向量 L2、E4 蒸馏位置/余弦、ckpt 往返 |
 | `SETUP.md` | 从零重建：依赖、权重、数据、训练、评测 |
 | `DATASETS.md` | 数据集字段、规模与已知性质 |
 | `KNOWN_ISSUES.md` | 当前仍未解决的风险 |

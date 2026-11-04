@@ -125,6 +125,11 @@ def _slot_words(tok, feats, cinfo):
     if word_pick is None:
         raise RuntimeError("压缩器没有返回 lex_word_pick：ckpt 不是词级选词版本，"
                            "或 forward_split 没有收到 word_ids")
+    # bpe 模式下"选中的词"和"真正铺进载荷的词"不是一回事（整词放不下会被跳过）。
+    # 统计必须用后者，否则 E2 会把"跳过的词"算成已覆盖。
+    packed = cinfo.get("lex_words_packed")
+    if packed is not None:
+        word_pick = packed
     words = []
     for k, cols in enumerate(word_pick):
         if k >= len(wids_all) or k >= len(cids_all):
@@ -166,6 +171,12 @@ def main(argv=None):
     ap.add_argument("--show-ok", action="store_true",
                     help="答对的题也打印（默认只看答错的）")
     ap.add_argument("--save-json", default="")
+    ap.add_argument("--lex-token-mode", choices=("ckpt",) + tuple(LM._LEX_TOKEN_MODES),
+                    default="ckpt",
+                    help="E2：词形载荷口径。mean=词内子词均值；bpe=完整 BPE 向量直通。"
+                         "ckpt=跟随 checkpoint")
+    ap.add_argument("--split-inject", type=int, default=-1, choices=(-1, 0, 1),
+                    help="E3：1=词形与语义分开注入；-1=跟随 ckpt")
     a = ap.parse_args(argv)
 
     _argv = ["--gpu", str(a.gpu), "--base", a.base, "--adapter", a.adapter]
@@ -178,6 +189,14 @@ def main(argv=None):
     model, tok, dev, hidden = T._load_backbone(args, dev)
     T.freeze_model(model)
     reader = LM.load_latent_reader(a.ckpt, model, tok, device=dev)
+    # E2/E3 的评测期口径覆盖（只影响载荷怎么拼，不改权重）
+    if str(a.lex_token_mode) != "ckpt":
+        reader.compressor.lex_token_mode = str(a.lex_token_mode)
+    if int(a.split_inject) in (0, 1):
+        reader.bridge.split_inject = bool(int(a.split_inject))
+    print(f"[lex] token_mode={reader.compressor.lex_token_mode} "
+          f"split_inject={bool(getattr(reader.bridge, 'split_inject', False))} "
+          f"lex_head={getattr(reader.compressor, 'lex_scorer', None) is not None}", flush=True)
     comp, bridge, enc = reader.compressor, reader.bridge, reader.encoder
     bridge.collect_stats = True
     pad = getattr(tok, "eos_token_id", None) or getattr(tok, "pad_token_id", None) or 0

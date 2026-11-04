@@ -108,6 +108,11 @@ GPU=0 bash runs/run_stage2_bridge.sh
 | `--topk-per-hop 4` | 2 跳 Top-4 beam → 最多 8 槽读出 |
 | `--router-kind {latent,hybrid}` | hybrid = 冻结 h0/h18 注意力池化 + Token-MaxSim 兜底 |
 | `--slot-isolation` | 槽位块对角掩码（**仅 eager 后端生效**，SDPA 会静默丢弃 4D 掩码） |
+| `--lex-head {0,1}` | E1：1=独立词形选择头（L_cov 的梯度只进这个头，语义注意力不再被覆盖目标拉扯）。零初始化，第 0 步选择与旧实现逐位相同 |
+| `--lex-token-mode {mean,bpe,ckpt}` | E2：词形载荷口径。`mean`=词内子词均值（默认）；`bpe`=完整 BPE 向量直通（整词放不下就跳过，不截断）。这是**评测期**开关，换口径不需要重训 |
+| `--split-inject {0,1} --split-n-lex 3` | E3：1=词形与语义**分开注入**（`[lex...]+[sem]`，总预算不变）；0=残差叠加 |
+| `--hid-weight 0.1 --hid-layer last` | E4：隐状态蒸馏权重。答案首 token 前一位、只取最后一层、纯余弦 |
+| `--bpe-backfill {0,1}` | bpe 模式下是否用后续候选词补空位（默认 0：保持"同一套选词、只换编码"的对照口径） |
 
 产物：`$B/ckpt/hotpot_router_10k_v6.pt`；`save_latent_checkpoint` 会写入
 `lex_skip / router_kind / inner_dim` 等构建参数，加载时按 ckpt 重建结构，**不要手动对齐超参**。

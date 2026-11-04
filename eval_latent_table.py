@@ -693,6 +693,21 @@ def main(argv=None):
                     help="oracle_embed* 三条基线把原生词嵌入放在哪：user=消息体内（默认）、"
                          "between=消息之间（旧软 token 插入点）。同一 arm 跑两遍即可量化"
                          "\"位置不当\"造成的损失")
+    # ---- E2/E3：读出结构的评测期开关（默认跟随 ckpt，显式给了才覆盖）----
+    ap.add_argument("--lex-token-mode", choices=("ckpt",) + tuple(LM._LEX_TOKEN_MODES),
+                    default="ckpt",
+                    help="E2：词形载荷口径。mean=词内子词均值（ckpt 训练时的默认）；"
+                         "bpe=按原文顺序复制完整 BPE 向量（整词放不下就跳过，不截断）。"
+                         "这是**零训练**对照：同一份权重换一种词形编码")
+    ap.add_argument("--bpe-backfill", type=int, default=-1,
+                    help="bpe 模式下是否用后续候选词补空位（-1=跟随 ckpt，默认不补）")
+    ap.add_argument("--split-inject", type=int, default=-1, choices=(-1, 0, 1),
+                    help="E3：1=词形与语义分开注入（[lex...]+[sem]）；0=残差叠加；"
+                         "-1=跟随 ckpt。用残差模式训出来的权重直接开 1 只是个 sanity "
+                         "check（Bridge 末层是零初始化，方向会退回池化后的语义向量），"
+                         "真正的 E3 结论必须用独立训过的权重")
+    ap.add_argument("--split-n-lex", type=int, default=-1,
+                    help="E3：每块留给词形的 token 数（-1=跟随 ckpt）")
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
                     help="1=尝试槽位块对角隔离（仅 eager 后端生效，否则降级并记账）")
     ap.add_argument("--train-max-slots", type=int, default=0,
@@ -789,6 +804,26 @@ def main(argv=None):
         if args.method in ("oracle_lex", "oracle_sem") and not getattr(
                 reader.bridge, "lex_skip", False):
             raise SystemExit(f"--method {args.method} 需要 ckpt 打开 lex_skip")
+        # E2/E3：把命令行覆盖应用到已加载的 reader 上（只影响"载荷怎么拼"，
+        # 不影响权重）。默认值 ckpt / -1 表示完全沿用 ckpt 里记录的口径。
+        _ck_tok = str(reader.config.get("lex_token_mode", "mean"))
+        if str(args.lex_token_mode) != "ckpt":
+            reader.compressor.lex_token_mode = str(args.lex_token_mode)
+            print(f"[lex] 词形载荷口径 {_ck_tok} -> {args.lex_token_mode}", flush=True)
+        else:
+            print(f"[lex] 词形载荷口径 = ckpt 记录的 {_ck_tok}", flush=True)
+        if int(args.bpe_backfill) >= 0:
+            reader.compressor.bpe_backfill = int(args.bpe_backfill)
+        _ck_split = bool(reader.config.get("split_inject", False))
+        if int(args.split_inject) in (0, 1):
+            reader.bridge.split_inject = bool(int(args.split_inject))
+            print(f"[split] 分注入 {_ck_split} -> {bool(int(args.split_inject))}", flush=True)
+        else:
+            print(f"[split] 分注入 = ckpt 记录的 {_ck_split}", flush=True)
+        if int(args.split_n_lex) > 0:
+            reader.bridge.n_lex = int(args.split_n_lex)
+        print(f"[lex] lex_head={'on' if getattr(reader.compressor, 'lex_scorer', None) is not None else 'off'}"
+              f" split_n_lex={int(getattr(reader.bridge, 'n_lex', 0))}", flush=True)
         if args.method in ("router", "fst"):
             got = reader.router if args.method == "router" else reader.fst_router
             if got is None:

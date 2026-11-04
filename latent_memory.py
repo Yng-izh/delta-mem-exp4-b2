@@ -165,8 +165,44 @@ LATENT_COV_EPS         = _env_float("LATENT_COV_EPS", 1e-6)
 # 设得比槽数大就是"要求覆盖超过容量的词"，损失会有一个下不去的常数底。
 LATENT_COV_TARGETS     = _env_int("LATENT_COV_TARGETS", 0)
 
+# ---- E1（2026-11-05）：**独立词形选择头**，把 L_cov 的梯度关在选词分支里 ----
+# 1000 步探针的读出分解（results/2026-11-04_readout_probe/）实测：共享注意力下
+# `--cov-weight 0.1` 把 oracle_sem 从 14.0% 打到 7.0%（配对 McNemar p=0.0013），
+# 而 oracle_lex 基本不动。原因不是"覆盖率指标没用"，而是 L_cov 的梯度沿着
+# `mass` 直接更新了**语义**注意力（queries / attn / output_proj）—— 覆盖目标要求
+# "把注意力分给显眼的实体和数字"，语义瓶颈于是被压成关键词袋。
+# 本开关把选词分数拆成 `mass.detach() + lex_scorer(w_sem.detach(), x.detach())`：
+#   - 零初始化 => 第 0 步选择与旧实现逐位相同（可对照、不回退）；
+#   - L_cov 只作用在 lex_scorer 上 => 语义分支不再被覆盖目标拖走。
+# 取值：0（默认，旧行为 A/B 对照）/ 1（独立词形头）
+LATENT_LEX_HEAD        = _env_int("LATENT_LEX_HEAD", 0)
+# 词形头的隐层宽度；0 = 自动取 max(32, inner_dim // 4)
+LATENT_LEX_HEAD_HIDDEN = _env_int("LATENT_LEX_HEAD_HIDDEN", 0)
+
+# ---- E2：词形载荷的 token 化口径（**评测期开关，不需重训**）----
+#   mean（默认，现行为）：每个选中词的全部子词 h0 取平均 -> 1 个向量
+#   bpe             ：按原文顺序复制**完整** BPE 向量，每块最多 n_slots 个 token，
+#                     整词放不下就跳过（不截断单词），有效词数因此可能变少
+# 为什么值得测：子词均值是一个词表里**不存在**的向量，`1838` 被切成 `18`+`38` 后
+# 均值就不再是任何一个年份。但"模型可能同时看到了多个年份也能答对"，所以这条必须
+# 用同一份权重的直接对照来判，不能靠案例推断。
+LATENT_LEX_TOKEN_MODE  = _env_str("LATENT_LEX_TOKEN_MODE", "mean").lower()
+# bpe 模式下放不下的词是否回退填后面的候选词（0=不回退，与实验设计一致）
+LATENT_BPE_BACKFILL    = _env_int("LATENT_BPE_BACKFILL", 0)
+
+# ---- E3：词形与语义**分开注入**（3 词形 + 1 语义，总预算仍 = n_slots）----
+# 残差叠加 `E = z_lex + tanh(α)·Bridge(z_sem)` 把两种信息压在**同一个位置**上，
+# 语义残差只能以很小的 α≈0.12 存在（再大就偏离词表流形）。改成序列拼接后，
+# 语义 token 可以独立占据一个位置、用自己的范数（整向量 L2 对齐到 target_norm）。
+#   0（默认）= 残差叠加，旧行为
+#   1        = 分开注入：[lex_1..lex_k] + [sem]，k = LATENT_SPLIT_N_LEX
+LATENT_SPLIT_INJECT    = _env_int("LATENT_SPLIT_INJECT", 0)
+# 每块留给词形的 token 数（总预算仍是 n_slots，剩下的给语义）
+LATENT_SPLIT_N_LEX     = _env_int("LATENT_SPLIT_N_LEX", 3)
+
 _INJECT_MODES = ("user", "system", "between")
 _FENCE_STYLES = ("bracket", "verbose")
+_LEX_TOKEN_MODES = ("mean", "bpe")
 
 
 def _check_inject_cfg(inject_mode: Any = None, fence_style: Any = None) -> Tuple[str, str]:
@@ -215,6 +251,10 @@ def latent_config() -> Dict[str, Any]:
         "slot_isolation": int(LATENT_SLOT_ISOLATION),
         "inject_mode": str(LATENT_INJECT_MODE),
         "fence_style": str(LATENT_FENCE_STYLE),
+        "lex_head": int(LATENT_LEX_HEAD),
+        "lex_token_mode": str(LATENT_LEX_TOKEN_MODE),
+        "split_inject": int(LATENT_SPLIT_INJECT),
+        "split_n_lex": int(LATENT_SPLIT_N_LEX),
     }
 
 
@@ -308,6 +348,56 @@ def _safe_torch_load(path: str) -> Any:
 
 
 # ----------------------------- 1) 压缩器 -----------------------------
+class LexWordScorer(nn.Module):
+    """独立词形选择头（E1）：只吃 **detach 过的** 特征，输出逐（槽, 词）的加分。
+
+    输入：
+        x_w   [B,W,inner]  词级语义特征（该词全部 token 的 x 取均值）
+        mass  [B,m,W]      该槽的注意力质量（已乘词级降权）—— 只当**特征**喂进来，
+                           不参与反传。这是把 L_cov 关在选词分支里的关键：
+                           若 mass 带梯度，L_cov 会顺手更新 queries/attn/output_proj，
+                           那就是 E1 要隔离的那种干扰本身（共享注意力下 cov=0.1
+                           把 oracle_sem 从 14.0% 打到 7.0%，p=0.0013）。
+    输出：
+        delta [B,m,W]      叠加到 mass 上的加分
+
+    零初始化：最后一层权重/偏置全零 => delta ≡ 0 => 第 0 步的 argmax 与"共享注意力"
+    的旧实现**逐位相同**。于是新实验组与已有两组（cov=0 / cov=0.1 共享注意力）
+    可以直接比，不会混进"换了个随机初始化"这个变量。
+    """
+
+    def __init__(self, inner_dim: int, n_slots: int, hidden: int = 0):
+        super().__init__()
+        inner_dim, n_slots = int(inner_dim), int(n_slots)
+        if inner_dim <= 0 or n_slots <= 0:
+            raise ValueError(f"LexWordScorer 维度非法：inner_dim={inner_dim} n_slots={n_slots}")
+        hidden = int(hidden) if int(hidden) > 0 else max(32, inner_dim // 4)
+        self.inner_dim = inner_dim
+        self.n_slots = n_slots
+        self.hidden = hidden
+        # 特征 = [词特征(inner) | 该词在 m 个槽上的质量(m) | 质量均值(1) | log1p(总量)(1)]
+        self.net = nn.Sequential(
+            nn.Linear(inner_dim + n_slots + 2, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, n_slots),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, x_w: torch.Tensor, mass: torch.Tensor) -> torch.Tensor:
+        if x_w.dim() != 3:
+            raise ValueError(f"x_w 必须是 [B,W,inner]，得到 {tuple(x_w.shape)}")
+        p = next(self.parameters())
+        m = int(self.n_slots)
+        mm = mass[:, :m, :].to(device=x_w.device, dtype=torch.float32)   # [B,m,W]
+        scal = mm.transpose(1, 2)                                        # [B,W,m]
+        extra = torch.stack([scal.mean(dim=-1),
+                             torch.log1p(scal.clamp_min(0.0).sum(dim=-1))], dim=-1)
+        feat = torch.cat([x_w.to(device=p.device, dtype=p.dtype),
+                          scal.to(dtype=p.dtype), extra.to(dtype=p.dtype)], dim=-1)
+        return self.net(feat).transpose(1, 2)                            # [B,m,W]
+
+
 class LatentCompressor(nn.Module):
     """把历史文本压成 m 个潜向量：Z ∈ R^{B×m×d}。
 
@@ -325,7 +415,11 @@ class LatentCompressor(nn.Module):
     def __init__(self, hidden_size: int, n_slots: int = LATENT_M,
                  inner_dim: int = LATENT_INNER_DIM, num_heads: int = LATENT_N_HEADS,
                  lex_skip: bool = bool(LATENT_LEX_SKIP),
-                 lex_tau: float = LATENT_LEX_TAU):
+                 lex_tau: float = LATENT_LEX_TAU,
+                 lex_head: bool = bool(LATENT_LEX_HEAD),
+                 lex_head_hidden: int = LATENT_LEX_HEAD_HIDDEN,
+                 lex_token_mode: str = LATENT_LEX_TOKEN_MODE,
+                 bpe_backfill: int = LATENT_BPE_BACKFILL):
         super().__init__()
         if int(hidden_size) <= 0:
             raise ValueError(f"hidden_size 必须为正，得到 {hidden_size}")
@@ -350,6 +444,17 @@ class LatentCompressor(nn.Module):
                                           batch_first=True)
         self.output_proj = nn.Linear(self.inner_dim, self.hidden_size)
         self.norm = nn.LayerNorm(self.hidden_size)
+        # ---- E1：独立词形选择头 ----
+        # 只有直通分支存在（lex_skip=True）时才注册：没有 h0 直通就没有"选词"这回事，
+        # 无条件注册会让旧 ckpt 的 strict load 直接报 Missing key。
+        self.lex_token_mode = str(lex_token_mode or "mean").lower()
+        if self.lex_token_mode not in _LEX_TOKEN_MODES:
+            raise ValueError(f"lex_token_mode={lex_token_mode!r} 非法；可选 {_LEX_TOKEN_MODES}")
+        self.bpe_backfill = int(bpe_backfill)
+        self.lex_scorer: Optional[LexWordScorer] = None
+        if bool(lex_head) and self.lex_skip:
+            self.lex_scorer = LexWordScorer(self.inner_dim, self.n_slots,
+                                            hidden=int(lex_head_hidden))
 
     def forward(self, h0: torch.Tensor, h18: torch.Tensor,
                 attention_mask: Optional[torch.Tensor] = None,
@@ -438,6 +543,10 @@ class LatentCompressor(nn.Module):
         lex_word_pick: Optional[List[List[int]]] = None
         n_words = 0
         cov_out: Tuple[Optional[torch.Tensor], Dict[str, Any]] = (None, {})
+        # 词形载荷统计（lex_skip=False 时没有选词这回事，必须是 None 而不是未定义）
+        _lex_rows: Optional[List[int]] = None
+        _lex_kept: Optional[List[int]] = None
+        _lex_packed: Optional[List[List[int]]] = None
         if self.lex_skip:
             if w is None:
                 raise RuntimeError("lex_skip=True 但注意力权重为 None（need_weights 未生效）")
@@ -467,17 +576,23 @@ class LatentCompressor(nn.Module):
                     "或显式构造 word_ids/word_penalty。")
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
             z_lex, pick, n_words, _cov_in = self._lex_by_word(
-                h0, w, safe_mask, word_ids, word_penalty, word_group, word_weight)
+                h0, w, safe_mask, word_ids, word_penalty, word_group, word_weight,
+                lex_x=x, token_mode=self.lex_token_mode, backfill=self.bpe_backfill)
             if pick is not None:
                 lex_word_pick = pick.tolist()
             if bool(empty.any()):
                 z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
+            _lex_rows = _cov_in.get("n_lex_rows") if _cov_in else None
+            _lex_kept = _cov_in.get("n_lex_words") if _cov_in else None
+            _lex_packed = _cov_in.get("lex_words_packed") if _cov_in else None
             if want_cov and _cov_in is not None:
-                # L_cov 作用在**未 argmax 的注意力质量**上（_cov_in["mass"] 仍连着计算图）：
+                # L_cov 作用在**未 argmax 的选择分数**上（score 仍连着计算图）：
                 # 硬 argmax 不可微，若把损失建在 pick 的整数索引上，梯度根本回不到
-                # queries / input_proj / hidden_proj —— 那正是选择器一直没学会挑词的根因。
+                # 选择器 —— 那正是它一直没学会挑词的根因。
+                # E1 路径下 score 的梯度只经由词形头（mass 已 detach），
+                # 语义注意力不再被这条损失拉扯。
                 cov_loss, cov_stats = word_coverage_loss(
-                    _cov_in["mass"], _cov_in["eligible"], _cov_in["word_weight"],
+                    _cov_in["score"], _cov_in["eligible"], _cov_in["word_weight"],
                     word_group=_cov_in["word_group"], max_targets=int(cov_targets),
                     eps=float(cov_eps))
                 cov_out = (cov_loss, cov_stats)
@@ -494,6 +609,14 @@ class LatentCompressor(nn.Module):
                 "n_lex_picks": ([int(sum(1 for v in row if int(v) >= 0))
                                  for row in lex_word_pick]
                                 if lex_word_pick is not None else None),
+                # 词形载荷的口径与"实际用掉几行/放进几个完整词"：
+                # mean 模式下两者恒等于 n_lex_picks；bpe 模式下整词放不下会被跳过，
+                # 这个数就是 E2 要记录的"每块保留了几个完整词"。
+                "lex_token_mode": str(self.lex_token_mode),
+                "lex_head": bool(self.lex_scorer is not None),
+                "lex_rows_used": _lex_rows,
+                "lex_words_kept": _lex_kept,
+                "lex_words_packed": _lex_packed,
                 # 覆盖损失：want_cov=False 时恒为 None / 空 dict（推理路径不付这份开销）
                 "cov_loss": cov_out[0],
                 "cov_stats": cov_out[1]}
@@ -503,9 +626,12 @@ class LatentCompressor(nn.Module):
                      safe_mask: torch.Tensor, word_ids: torch.Tensor,
                      word_penalty: Optional[torch.Tensor],
                      word_group: Optional[torch.Tensor] = None,
-                     word_weight: Optional[torch.Tensor] = None
+                     word_weight: Optional[torch.Tensor] = None,
+                     lex_x: Optional[torch.Tensor] = None,
+                     token_mode: str = "mean",
+                     backfill: int = 0
                      ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int, Optional[Dict[str, Any]]]:
-        """按**整词**挑 n_slots 个词，每个词的子词 h0 取均值当 1 个向量。
+        """按**整词**挑 n_slots 个词，生成词形载荷。
 
         输入：
             h0        [B,L,d]  第 0 层隐藏（原生词嵌入空间）
@@ -514,10 +640,24 @@ class LatentCompressor(nn.Module):
             word_ids  [B,L]    token -> 词编号（-1 = 特殊/padding）
             word_penalty [B,W] 词级降权（标点 0 / 停用词 0.35 / 其余 1.0）
             word_weight  [B,W] 词重要性（L_cov 的监督权重；0 = 不进监督目标）
+            lex_x     [B,L,inner] 词形头用的语义特征（内部会 detach）
+            token_mode  "mean" | "bpe"，见类常量 LATENT_LEX_TOKEN_MODE
+            backfill    1 = bpe 模式下把没被选中的候选词也拿来填空位
         返回 (z_lex [B,m,d], pick [B,m] 词编号, n_words, cov_in)。
 
-        cov_in 把 L_cov 需要的东西原样带出去（mass 仍连着计算图）：
-            mass/eligible/word_weight/word_group/n_words；n_words<=0 时为 None。
+        **E2 的两种载荷口径（形状都是 [B,m,d]，下游完全不用改）**
+            mean：每个选中词的子词 h0 取均值 -> 1 个向量，4 个槽装 4 个词；
+            bpe ：按**原文顺序**复制完整 BPE 向量，整块最多 m 个 token；整词放不下
+                  就跳过（绝不截断单词），有效词数因此可能变少。子词均值是一个
+                  词表里不存在的向量（`1838` 被切成 `18`+`38` 后，均值不再是任何
+                  年份），这组对照就是为了量出这条损失有多大。
+
+        **E1 的梯度隔离**：`self.lex_scorer` 不为 None 时，选择分数是
+        `mass.detach() + delta`。L_cov 只能经由 delta 回到词形头，语义注意力
+        （queries / attn / output_proj / input_proj / hidden_proj）拿不到它的梯度。
+
+        cov_in 把 L_cov 需要的东西原样带出去（score 在旧路径下仍连着计算图）：
+            score/eligible/word_weight/word_group/n_words + 载荷统计；n_words<=0 时为 None。
         覆盖损失**不在**这里算：本函数是"选词"（含不可微的 argmax 与互斥去重），
         把可微损失混进来会让两条路径的职责纠缠不清。
 
@@ -525,7 +665,7 @@ class LatentCompressor(nn.Module):
         在 Compressor 所在的 GPU 上；混用会在 mask 构造处直接报 "Expected all tensors to
         be on the same device"。h0 只在最后的聚合一步搬到 w 的设备。
 
-        选词：**每个槽位各自排名**（`mass[:, r, :]`），再排除之前已选过的词。
+        选词：**每个槽位各自排名**（`score[:, r, :]`），再排除之前已选过的词。
         旧写法先 `mass.max(dim=1)` 把 4 个槽的偏好合并成一个全局分数，等价于 4 个槽
         只是取全局 Top-4 —— 槽位之间不再有分工，这是整词化之后才暴露出来的退化。
         """
@@ -540,7 +680,7 @@ class LatentCompressor(nn.Module):
                     None, 0, None)
         ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
         mask_w = (wid.unsqueeze(1) == ar) & smask.unsqueeze(1)          # [B,W,L]
-        mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())  # [B,m,W]
+        mass_raw = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())  # [B,m,W]
         exists = mask_w.any(dim=-1)                                     # [B,W]
         pen = torch.ones((B, n_words), dtype=torch.float32, device=dev)
         if word_penalty is not None:
@@ -553,7 +693,18 @@ class LatentCompressor(nn.Module):
         # 只把分数乘成 0 是不够的 —— 其它候选用完时 Top-k 仍会把零分标点选进来，
         # 而 4 个 z_lex 槽位很宝贵。
         eligible = exists & (pen > 0)
-        mass = mass * pen.unsqueeze(1)                                  # 有效词之间再按降权排
+        score = mass_raw * pen.unsqueeze(1)                             # 有效词之间再按降权排
+        # ---- E1：独立词形头（零初始化时 delta≡0，选择行为与旧实现逐位相同）----
+        if self.lex_scorer is not None and lex_x is not None:
+            cnt = mask_w.to(dtype=torch.float32).sum(dim=-1).clamp_min(1.0)     # [B,W]
+            xw = torch.einsum("bwl,bld->bwd",
+                              mask_w.to(dtype=torch.float32),
+                              lex_x.detach().to(device=dev).float())
+            xw = xw / cnt.unsqueeze(-1)                                 # 词级特征
+            _delta = self.lex_scorer(xw, score.detach())                # [B,m,W]
+            # **mass 侧必须 detach**：否则 L_cov 会顺手更新语义注意力，
+            # 那就是 E1 要隔离的那种干扰（实测把 oracle_sem 打到 7.0%）。
+            score = (mass_raw.detach() + _delta) * pen.unsqueeze(1)
         grp = None
         if word_group is not None:
             grp = word_group.to(device=dev).long()
@@ -573,7 +724,7 @@ class LatentCompressor(nn.Module):
         taken = torch.zeros((B, n_words), dtype=torch.bool, device=dev)
         picks: List[torch.Tensor] = []
         for r in range(self.n_slots):
-            s_r = mass[:, r, :].masked_fill(~eligible | taken, float("-inf"))
+            s_r = score[:, r, :].masked_fill(~eligible | taken, float("-inf"))
             pw = s_r.argmax(dim=-1)                                     # [B]
             ok_r = torch.isfinite(s_r.gather(1, pw.unsqueeze(1)).squeeze(1))
             onehot = torch.zeros_like(eligible)
@@ -590,18 +741,80 @@ class LatentCompressor(nn.Module):
             picks.append(torch.where(ok_r, pw, torch.full_like(pw, -1)))
         pick = torch.stack(picks, dim=1)                                # [B,m]
 
-        pick_safe = pick.clamp_min(0)
-        sel = mask_w.gather(1, pick_safe.unsqueeze(-1).expand(-1, -1, L)).float()
-        sel = sel * (pick >= 0).unsqueeze(-1).to(sel.dtype)
-        denom = sel.sum(dim=-1, keepdim=True).clamp_min(1.0)
         h0d = h0.to(device=dev)                                         # 只在聚合时搬
         wd = h0d.dtype if h0d.dtype.is_floating_point else torch.float32
-        z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd), h0d.to(dtype=wd))
+        _packed_ids = None
+        if str(token_mode or "mean").lower() == "bpe":
+            z_lex, n_rows, n_kept_words, _packed_ids = self._pack_bpe_rows(
+                h0d, mask_w, pick, score, int(backfill))
+        else:
+            pick_safe = pick.clamp_min(0)
+            sel = mask_w.gather(1, pick_safe.unsqueeze(-1).expand(-1, -1, L)).float()
+            sel = sel * (pick >= 0).unsqueeze(-1).to(sel.dtype)
+            denom = sel.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd), h0d.to(dtype=wd))
+            n_rows = (pick >= 0).sum(dim=1)
+            n_kept_words = n_rows
         z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
-        # mass 是**乘过 pen、未 argmax** 的注意力质量，仍连着计算图 —— L_cov 就建在它上面。
-        cov_in = {"mass": mass, "eligible": eligible, "word_weight": wgt,
-                  "word_group": grp, "n_words": int(n_words)}
+        # score 是**乘过 pen、未 argmax** 的选择分数 —— 旧路径下它仍连着计算图，
+        # L_cov 就建在它上面；E1 路径下只有词形头那一支带梯度。
+        cov_in = {"score": score, "eligible": eligible, "word_weight": wgt,
+                  "word_group": grp, "n_words": int(n_words),
+                  "n_lex_rows": [int(v) for v in n_rows.tolist()],
+                  "n_lex_words": [int(v) for v in n_kept_words.tolist()],
+                  # bpe 模式下"真正铺进行的词编号"（mean 模式为 None）：
+                  # 诊断工具要靠它统计"每块保留了几个完整词"，不能拿 picks 冒充。
+                  "lex_words_packed": _packed_ids,
+                  "token_mode": str(token_mode or "mean").lower()}
         return z_lex, pick, n_words, cov_in
+
+    def _pack_bpe_rows(self, h0d: torch.Tensor, mask_w: torch.Tensor,
+                       pick: torch.Tensor, score: Optional[torch.Tensor],
+                       backfill: int = 0):
+        """把选中词的**完整 BPE 向量**按原文顺序铺进 m 行（E2 的 B 组）。
+
+        规则（刻意保守，避免把"多给了 token"混进结论）：
+          - 每行只放**整词**的完整子词序列，绝不截断单词；
+          - 一个词放不下就跳过它（继续试后面的词），有效词数因此可能 < 选中的词数；
+          - backfill=1 时，剩余空位用**没被选中**的候选词按分数补齐（默认关闭：
+            默认口径必须能解释成"同样的选词 + 换一种载荷编码"）。
+        放不满的行留零向量 —— 下游 bridge 把全零行当空槽，退回语义残差。
+        """
+        B, m, d = int(pick.shape[0]), int(pick.shape[1]), int(h0d.shape[-1])
+        dev = h0d.device
+        z = torch.zeros((B, m, d), dtype=h0d.dtype, device=dev)
+        n_rows = torch.zeros((B,), dtype=torch.long, device=dev)
+        n_words_kept = torch.zeros((B,), dtype=torch.long, device=dev)
+        packed_ids: List[List[int]] = []      # 每块真正铺进去的词编号（含顺序）
+        W = int(mask_w.shape[1])
+        # 分数排序供 backfill 用（只取每条样本自己那一行的全局偏好）
+        rank = None
+        if int(backfill) and score is not None:
+            rank = score.detach().max(dim=1).values                      # [B,W]
+        for b in range(B):
+            picked = [int(v) for v in pick[b].tolist()]
+            cand = [v for v in dict.fromkeys(picked) if 0 <= v < W]
+            cand.sort()                                                  # 原文顺序
+            if rank is not None:
+                order = torch.argsort(rank[b], descending=True).tolist()
+                for v in order:
+                    if (0 <= int(v) < W) and int(v) not in cand:
+                        cand.append(int(v))
+            row = 0
+            used: List[int] = []
+            for v in cand:
+                cols = torch.nonzero(mask_w[b, v], as_tuple=False).flatten()
+                k = int(cols.numel())
+                if k <= 0 or row + k > m:
+                    continue                                             # 整词放不下：跳过
+                z[b, row:row + k] = h0d[b, cols]
+                row += k
+                n_words_kept[b] += 1
+                used.append(int(v))
+            n_rows[b] = row
+            packed_ids.append(used)
+        return z, n_rows, n_words_kept, packed_ids
+
 
 # 词级选词用的停用词表（只用于**降权**）。
 # 注意**不能**把否定/时间/比较词算进来：`not`/`no` 决定答案对错，`before`/`after`
@@ -1029,7 +1242,9 @@ class LatentBridge(nn.Module):
                  target_norm: float = LATENT_TARGET_NORM,
                  lex_skip: bool = bool(LATENT_LEX_SKIP),
                  lex_gate_init: float = LATENT_LEX_GATE_INIT,
-                 alpha_max: float = LATENT_ALPHA_MAX):
+                 alpha_max: float = LATENT_ALPHA_MAX,
+                 split_inject: bool = bool(LATENT_SPLIT_INJECT),
+                 split_n_lex: int = LATENT_SPLIT_N_LEX):
         super().__init__()
         if int(hidden_size) <= 0 or int(bottleneck) <= 0:
             raise ValueError(f"hidden_size/bottleneck 必须为正：{hidden_size}/{bottleneck}")
@@ -1050,8 +1265,15 @@ class LatentBridge(nn.Module):
         # （残差从"什么都没有"开始长，而不是一开始就往原生词向量上叠噪声）。
         # 注意零初始化**必须**搭配非零 α 初值（见 LATENT_LEX_GATE_INIT 的注释）：
         # α 也恰好为 0 时语义分支与门控同时失去梯度，会死锁在"永远只有 z_lex"。
-        nn.init.zeros_(self.net[-1].weight)
-        nn.init.zeros_(self.net[-1].bias)
+        #
+        # E3 的 split 模式**不能**零初始化：那时语义 token 不是残差而是独立的
+        # 一个位置，零输出等于往序列里塞一个全零向量（Qwen 会把它当成极低范数
+        # token，比什么都不给更糟）。所以 split 模式下保持默认随机初始化。
+        self.split_inject = bool(split_inject)
+        self.n_lex = max(1, int(split_n_lex))
+        if not self.split_inject:
+            nn.init.zeros_(self.net[-1].weight)
+            nn.init.zeros_(self.net[-1].bias)
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
         self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
         # ---- v4：h0 直通的**方向**门控 ----
@@ -1157,6 +1379,53 @@ class LatentBridge(nn.Module):
                                    "w_last": float(self.net[-1].weight.norm())}
         return res
 
+
+    def forward_separate(self, z: torch.Tensor, z_lex: Optional[torch.Tensor],
+                         n_lex: Optional[int] = None) -> torch.Tensor:
+        """E3：**词形与语义分开注入** —— [lex_1..lex_k] + [sem]，总预算 k+1。
+
+        与 `forward()` 的唯一区别是"语义放在哪"：
+            forward()          语义作为**残差**叠在词形向量上（α≤0.5，且大了就偏离
+                               词表流形）—— 两种信息挤在同一个位置；
+            forward_separate() 语义**独立占一个位置**，自己带完整范数，
+                               词形 token 原样复制、不做任何混合。
+        语义 token 的范数用**整个向量的 L2 范数**对齐到 target_norm（=真实 embedding
+        每向量范数 ≈1.087），不是 RMSNorm 之后再乘常数 —— 后者会把范数推到
+        ≈1.087·√d（几千倍），直接退回"软 token 变 attention sink"那个坑。
+
+        输入 z / z_lex 都是 [..., m, d]；输出 [..., k+1, d]（最后一行为语义）。
+        z_lex 里全零的行（空槽）用语义向量兜底，与残差路径"空槽退回语义"一致。
+        """
+        z = _as_3d(z, "z")
+        if z_lex is None:
+            raise ValueError("forward_separate 需要 z_lex（词形载荷）")
+        lex = _as_3d(z_lex, "z_lex")
+        if tuple(lex.shape) != tuple(z.shape):
+            if int(lex.numel()) == int(z.numel()):
+                lex = lex.reshape(tuple(z.shape))
+            else:
+                raise ValueError(f"z_lex 形状 {tuple(lex.shape)} 必须与 z {tuple(z.shape)} 一致")
+        if z.shape[-1] != self.hidden_size:
+            raise ValueError(f"z 的最后一维 {z.shape[-1]} != hidden_size={self.hidden_size}")
+        p = next(self.parameters())
+        k = int(self.n_lex if n_lex is None else n_lex)
+        k = max(1, min(k, int(z.shape[1])))
+        zp = z.to(device=p.device, dtype=p.dtype)
+        # 语义：一个块只出 1 个向量 -> 该块的 m 个语义向量取均值再走 Bridge
+        out = self.net(zp.mean(dim=1, keepdim=True))
+        out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        n = out.norm(dim=-1, keepdim=True)
+        scale = self.scale().to(device=out.device, dtype=out.dtype)
+        # 零初始化残留（用残差模式的 ckpt 直接跑 split 评测）时的兜底：
+        # 方向退回"池化后的语义向量本身"，仍然做完整的 L2 对齐，不会产生零向量。
+        fallback = zp.mean(dim=1, keepdim=True).to(dtype=out.dtype)
+        fn = fallback.norm(dim=-1, keepdim=True)
+        sem = torch.where(n > 1e-6, out / n.clamp_min(1.0), fallback / fn.clamp_min(1.0))
+        sem = sem * scale
+        lx = lex.to(device=sem.device, dtype=sem.dtype)[:, :k, :]
+        valid = lx.norm(dim=-1, keepdim=True) > 1e-6
+        lx = torch.where(valid, lx, sem.expand_as(lx))
+        return torch.cat([lx, sem], dim=1)
 
 def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
                         q_tok: Optional[torch.Tensor] = None,
@@ -1978,7 +2247,13 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
                     raise ValueError(f"第 {j} 槽直通载荷元素数 {int(zl.numel())} 与语义载荷 "
                                      f"{int(zj.numel())} 不一致，无法对齐")
                 zl = zl.reshape(tuple(zj.shape))
-        s = bridge(zj, zl)
+        # E3：分开注入时走 forward_separate（[lex...]+[sem]），否则走残差叠加。
+        # 只在真的有词形载荷时才分 —— oracle_sem 这类"只给语义"的读法必须保持原样，
+        # 否则两边的 token 数就不同了，读出来的差没法归因。
+        if bool(getattr(bridge, "split_inject", False)) and zl is not None:
+            s = bridge.forward_separate(zj, zl)
+        else:
+            s = bridge(zj, zl)
         if s.dim() == 2:
             s = s.unsqueeze(0)
         s = s.reshape(1, -1, s.shape[-1])
@@ -3427,15 +3702,25 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
                          f"与当前模型 hidden_size={hs} 不一致")
     dev = torch.device(device) if device is not None else _model_device(model)
     lex_skip = bool(cfg.get("lex_skip", False))
+    # E1/E2/E3 的结构开关必须从 ckpt 还原：lex_scorer 存在与否会改变
+    # state_dict 的键集合（strict=True 下漏还原就报 Missing/Unexpected keys），
+    # 而 split_inject / lex_token_mode 决定"同一个权重读出来是什么"。
     comp = LatentCompressor(hs, n_slots=int(cfg["n_slots"]),
                             inner_dim=int(cfg["inner_dim"]),
                             num_heads=int(cfg.get("num_heads", LATENT_N_HEADS)),
-                            lex_skip=lex_skip)
+                            lex_skip=lex_skip,
+                            lex_head=bool(cfg.get("lex_head", False)),
+                            lex_head_hidden=int(cfg.get("lex_head_hidden", 0) or 0),
+                            lex_token_mode=str(cfg.get("lex_token_mode", "mean")),
+                            bpe_backfill=int(cfg.get("bpe_backfill", 0) or 0))
     bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]),
                           target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)),
                           lex_skip=bool(cfg.get("bridge_lex_skip", lex_skip)),
                           alpha_max=float(cfg.get("bridge_alpha_max",
-                                                  LATENT_ALPHA_MAX)))
+                                                  LATENT_ALPHA_MAX)),
+                          split_inject=bool(cfg.get("split_inject", False)),
+                          split_n_lex=int(cfg.get("split_n_lex",
+                                                  LATENT_SPLIT_N_LEX)))
     comp.load_state_dict(blob["compressor"], strict=strict)
     bridge.load_state_dict(blob["bridge"], strict=strict)
     comp.to(dev).eval()
@@ -3516,6 +3801,14 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
     # 非参数约束也必须落盘：alpha_max 决定"残差能长到多强"，不存进 ckpt 的话
     # 同一个权重换个进程/换台机器读出来就是另一套读出行为（与 router 的 ms_tau 同类）。
     cfg["bridge_alpha_max"] = float(getattr(bridge, "alpha_max", LATENT_ALPHA_MAX))
+    # E1/E2/E3：结构与口径一起落盘（见 load_latent_reader 里的说明）
+    cfg["lex_head"] = bool(getattr(compressor, "lex_scorer", None) is not None)
+    if getattr(compressor, "lex_scorer", None) is not None:
+        cfg["lex_head_hidden"] = int(compressor.lex_scorer.hidden)
+    cfg["lex_token_mode"] = str(getattr(compressor, "lex_token_mode", "mean"))
+    cfg["bpe_backfill"] = int(getattr(compressor, "bpe_backfill", 0))
+    cfg["split_inject"] = bool(getattr(bridge, "split_inject", False))
+    cfg["split_n_lex"] = int(getattr(bridge, "n_lex", LATENT_SPLIT_N_LEX))
     if bool(cfg["lex_skip"]) != bool(cfg["bridge_lex_skip"]):
         raise ValueError(f"压缩器 lex_skip={cfg['lex_skip']} 与 bridge lex_skip="
                          f"{cfg['bridge_lex_skip']} 不一致：直通载荷生成端与消费端必须同时开或同时关")

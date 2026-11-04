@@ -782,7 +782,8 @@ class StubTok:
 # 4) 训练
 # =====================================================================
 def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
-                  recon_weight, recon_stage=False, loss_cov=None, cov_weight=0.0):
+                  recon_weight, recon_stage=False, loss_cov=None, cov_weight=0.0,
+                  loss_hid=None, hid_weight=0.0):
     """把各项损失组合起来（**纯函数**，可直接单测）。
 
     唯一允许的行为：寻址/KL/重建/覆盖都**累加**到 QA 损失上。
@@ -812,6 +813,10 @@ def assemble_loss(loss_qa, loss_addr, loss_kl, loss_r, addr_weight, kl_weight,
     # （它监督的是"压缩器保存了什么"，与 QA/重建是正交目标，不该被阶段切换关掉）。
     if loss_cov is not None and float(cov_weight or 0.0) > 0.0:
         loss = loss + float(cov_weight) * loss_cov
+    # E4：隐状态蒸馏。与 L_cov 同理，是**正交**目标（对齐明文/潜层的生成前表征），
+    # 不论阶段切换都加。权重为 0 时这一项完全不进 loss（默认关闭）。
+    if loss_hid is not None and float(hid_weight or 0.0) > 0.0:
+        loss = loss + float(hid_weight) * loss_hid
     return loss
 
 
@@ -848,6 +853,77 @@ def pack_student_batch(pairs):
     return torch.cat(embs, 0), torch.cat(labs, 0), torch.cat(masks, 0)
 
 
+def _hid_answer_pos(labels):
+    """每条样本"第一个答案 token 的前一个位置"。
+
+    为什么取这个位置：Causal LM 在这一步的隐状态正是**生成第一个答案 token 之前**
+    的最后一次表征，它必须已经把"答案是什么"编码进去。取答案中段会把
+    "已经看到答案前缀"的信息混进来，蒸馏就变成抄答案。
+    没有答案（labels 全 -100）的样本返回 -1，调用方跳过。
+    """
+    out = []
+    for b in range(int(labels.shape[0])):
+        sel = torch.nonzero(labels[b] != -100, as_tuple=False).flatten()
+        if int(sel.numel()) == 0:
+            out.append(-1)
+            continue
+        p = int(sel[0]) - 1
+        out.append(p if p >= 0 else -1)
+    return out
+
+
+def _hid_pick_layer(hidden_states, layer="last"):
+    """按 --hid-layer 取一层 hidden_states。默认只取最后一层（变量最少）。"""
+    if hidden_states is None:
+        return None
+    spec = str(layer or "last").strip().lower()
+    if spec in ("last", "-1", ""):
+        return hidden_states[-1]
+    if spec in ("last+18", "18+last"):
+        # 明确不推荐：两处同时蒸馏会同时改变两个尺度的表征，出问题分不清是谁的锅
+        raise ValueError("--hid-layer last+18 不在本轮范围内（先只做最后一层）")
+    try:
+        idx = int(spec)
+    except ValueError:
+        raise ValueError(f"--hid-layer={layer!r} 非法；用 last 或层号")
+    if not (0 <= idx < len(hidden_states)):
+        raise ValueError(f"--hid-layer={idx} 超出 hidden_states 层数 {len(hidden_states)}")
+    return hidden_states[idx]
+
+
+def hid_distill_positions(s_hidden, s_pos, t_hidden, t_pos):
+    """E4 核心：按给定的位置对算 1 - cos（student 向 teacher 靠）。
+
+    只做**余弦**（不看范数）：明文与潜层两条路径的激活尺度天然不同，强行对齐范数
+    会引入一个与"语义是否对齐"无关的自由度。teacher 侧必须在 no_grad 下算好再传进来。
+    """
+    if s_hidden is None or t_hidden is None:
+        return None
+    si, ti = list(s_pos), list(t_pos)
+    acc = []
+    for b, (a, c) in enumerate(zip(si, ti)):
+        if a < 0 or c < 0:
+            continue
+        if a >= int(s_hidden.shape[1]) or c >= int(t_hidden.shape[1]):
+            continue
+        v_s = s_hidden[b, a].float()
+        v_t = t_hidden[b, c].float().to(device=v_s.device)
+        if float(v_s.norm()) < 1e-8 or float(v_t.norm()) < 1e-8:
+            continue
+        acc.append(F.cosine_similarity(v_s.unsqueeze(0), v_t.unsqueeze(0), dim=-1)[0])
+    if not acc:
+        return None
+    return (1.0 - torch.stack(acc)).mean()
+
+
+def hid_distill_loss(s_hidden, labels, t_hidden, t_labels):
+    """E4 的打包路径包装：位置由 labels != -100 的首位推出来。"""
+    if s_hidden is None or t_hidden is None:
+        return None
+    return hid_distill_positions(s_hidden, _hid_answer_pos(labels),
+                                 t_hidden, _hid_answer_pos(t_labels))
+
+
 def _packed_student_step(args, model, pend, recon_stage):
     """把 pack 条样本的 student 前向合成**一次** 4B 前反向（--pack）。
 
@@ -855,8 +931,12 @@ def _packed_student_step(args, model, pend, recon_stage):
     与同步主导），把 4 条并成一个 batch 才能让 TensorCore 吃满。
     """
     embs, labs, mask = pack_student_batch([(p["emb"], p["lab"]) for p in pend])
+    _hid_w = float(getattr(args, "hid_weight", 0.0) or 0.0)
+    _want_hid = _hid_w > 0.0
     with LM.delta_write_disabled(model):
-        s_logits = model(inputs_embeds=embs, attention_mask=mask, use_cache=False).logits
+        s_out = model(inputs_embeds=embs, attention_mask=mask, use_cache=False,
+                      output_hidden_states=_want_hid)
+    s_logits = s_out.logits
     loss_qa = qa_loss(s_logits, labs)
     addr = [p["addr"] for p in pend if p["addr"] is not None]
     loss_addr = torch.stack(addr).mean() if addr else None
@@ -872,7 +952,11 @@ def _packed_student_step(args, model, pend, recon_stage):
     # 丢掉的信号，两个都不能省。这里把 teacher 也按**同一套打包规则**拼起来，
     # 只在答案位置（labels != -100）上算 KL：位置口径与学生侧完全一致。
     loss_kl = None
-    if getattr(args, "kl_weight", 0.0) > 0 and all("temb" in p for p in pend):
+    t_out = None
+    # teacher 前向的触发条件多了一个 hid：E4 只要开了就必须拿到 teacher 的隐状态，
+    # 哪怕 kl_weight=0（否则"--kl-weight 0 + --hid-weight>0"会静默没有蒸馏项）。
+    if ((getattr(args, "kl_weight", 0.0) > 0 or _want_hid)
+            and all("temb" in p for p in pend)):
         t_embs, t_labs, t_mask = pack_student_batch([(p["temb"], p["tlab"]) for p in pend])
         # **两侧序列长度天然不同**：student 的上下文是 T 个软 token，teacher 的是整段
         # 明文记忆（实测 144 vs 933）。旧实现要求两者形状完全一致，于是 KL 在打包路径
@@ -880,8 +964,9 @@ def _packed_student_step(args, model, pend, recon_stage):
         # 正确做法：按 batch 维对齐，逐样本取各自的**答案位置**（labels != -100 的末 n 个），
         # 在 logits 上做 shift-1 对齐后算 KL。
         with LM.delta_write_disabled(model), torch.no_grad():
-            t_logits = model(inputs_embeds=t_embs, attention_mask=t_mask,
-                             use_cache=False).logits
+            t_out = model(inputs_embeds=t_embs, attention_mask=t_mask,
+                          use_cache=False, output_hidden_states=_want_hid)
+        t_logits = t_out.logits
         _kls = []
         for _b in range(int(labs.shape[0])):
             _s_sel = torch.nonzero(labs[_b] != -100, as_tuple=False).flatten()
@@ -903,13 +988,23 @@ def _packed_student_step(args, model, pend, recon_stage):
             _kls.append((_lp_t.exp() * (_lp_t - _lp_s)).sum(dim=-1).mean())
         if _kls:
             loss_kl = torch.stack(_kls).mean()
+    loss_hid = None
+    if _want_hid and t_out is not None:
+        loss_hid = hid_distill_loss(
+            _hid_pick_layer(getattr(s_out, "hidden_states", None),
+                            getattr(args, "hid_layer", "last")),
+            labs,
+            _hid_pick_layer(getattr(t_out, "hidden_states", None),
+                            getattr(args, "hid_layer", "last")),
+            t_labs)
     loss = assemble_loss(loss_qa, loss_addr, loss_kl, loss_r,
                          addr_weight=args.addr_weight, kl_weight=args.kl_weight,
                          recon_weight=args.recon_weight, recon_stage=recon_stage,
                          loss_cov=loss_cov,
-                         cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0))
+                         cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0),
+                         loss_hid=loss_hid, hid_weight=_hid_w)
     (loss / args.accum).backward()
-    return loss_qa, loss_addr, loss_r, loss_kl, loss_cov
+    return loss_qa, loss_addr, loss_r, loss_kl, loss_cov, loss_hid
 
 
 def kl_loss_masked(s_logits, t_logits, labels, tau=1.0):
@@ -1668,9 +1763,18 @@ def train(args):
     print(f"[freeze] 冻结参数 {n_frozen/1e6:.1f}M（Delta 写入同时关闭）", flush=True)
 
     # ---- 可训练模块 ----
+    # E1/E2：词形选择头与词形载荷口径。--lex-token-mode 的 "ckpt" 表示"由 ckpt 决定"，
+    # 训练时没有 ckpt 可依，按 mean 起（E2 本身是评测期开关，不需要重训）。
+    _tok_mode = str(getattr(args, "lex_token_mode", "ckpt"))
+    if _tok_mode == "ckpt":
+        _tok_mode = "mean"
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
                                num_heads=args.heads,
-                               lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
+                               lex_skip=bool(getattr(args, "lex_skip", True)),
+                               lex_head=bool(int(getattr(args, "lex_head", 0) or 0)),
+                               lex_head_hidden=int(getattr(args, "lex_head_hidden", 0) or 0),
+                               lex_token_mode=_tok_mode,
+                               bpe_backfill=int(getattr(args, "bpe_backfill", 0) or 0)).to(dev)
     # 软 token 的范数必须对齐真实 token embedding 的尺度，否则会变成 attention sink
     # 把真实 token 淹没（实测未约束时软 token 范数 96~159，而真实 embedding 约 1.05，
     # 结果：loss 降到 2.8 但同一批样本 200 条只答对 1~3 条，加宽 m 完全无效）。
@@ -1683,7 +1787,10 @@ def train(args):
                              lex_gate_init=float(getattr(args, "lex_gate_init",
                                                          LM.LATENT_LEX_GATE_INIT)),
                              alpha_max=float(getattr(args, "alpha_max",
-                                                     LM.LATENT_ALPHA_MAX))).to(dev)
+                                                     LM.LATENT_ALPHA_MAX)),
+                             split_inject=bool(int(getattr(args, "split_inject", 0) or 0)),
+                             split_n_lex=int(getattr(args, "split_n_lex",
+                                                     LM.LATENT_SPLIT_N_LEX) or 3)).to(dev)
     print(f"[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 {target_norm:.4f}"
           f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）；"
           f"h0 直通 lex_skip={bool(getattr(args, 'lex_skip', True))} "
@@ -1917,6 +2024,15 @@ def train(args):
                 "cov_entity_w": float(LM.LATENT_COV_ENTITY_W),
                 "cov_number_w": float(LM.LATENT_COV_NUMBER_W),
                 "cov_content_w": float(LM.LATENT_COV_CONTENT_W),
+                # 读出结构三轮实验（2026-11-05）：结构开关必须落盘，
+                # 否则同一个权重换个进程就变成另一种读法（与 cov_weight 同类问题）。
+                "lex_head": bool(getattr(comp, "lex_scorer", None) is not None),
+                "lex_token_mode": str(getattr(comp, "lex_token_mode", "mean")),
+                "bpe_backfill": int(getattr(comp, "bpe_backfill", 0) or 0),
+                "split_inject": bool(getattr(bridge, "split_inject", False)),
+                "split_n_lex": int(getattr(bridge, "n_lex", LM.LATENT_SPLIT_N_LEX)),
+                "hid_weight": float(getattr(args, "hid_weight", 0.0) or 0.0),
+                "hid_layer": str(getattr(args, "hid_layer", "last")),
                 "inject_mode": str(getattr(args, "inject_mode", LM.LATENT_INJECT_MODE)),
                 "fence_style": str(getattr(args, "fence_style", LM.LATENT_FENCE_STYLE)),
                 "bridge_alpha_max": float(getattr(bridge, "alpha_max",
@@ -2193,12 +2309,15 @@ def train(args):
             # 目标 g2 自己屏蔽掉，CE=inf，寻址头整条失去梯度（实测 63% 步数如此）。
             loss_addr = addr_pre
             loss_kl = None
+            _loss_hid1 = None
             t_embeds = t_labels = None
             # KL 蒸馏不再绑定 stage=="b"（2026-11-03 决定）：v4 是单阶段训练，
             # 旧条件让 --kl-weight 1.0 在 stage=a 下被静默跳过（7497 步 loss_kl=n/a），
             # 只靠每题两三个答案 token 的稀疏 CE 教不会冻结模型读潜向量。
             # teacher 用金标明文证据，位置严格对齐 [answer..., EOS]。
-            if args.kl_weight > 0:
+            # E4 也要 teacher 的隐状态：只开 --hid-weight 而 kl_weight=0 时，
+            # 这条分支若不进，蒸馏项会静默消失（和 v3 那次 KL 被 stage 门控静默跳过同类）。
+            if args.kl_weight > 0 or float(getattr(args, "hid_weight", 0.0) or 0.0) > 0:
                 # ④ teacher：明文证据，只提供目标分布
                 # --teacher-scope 决定"给 teacher 哪些事实"（默认 gold：与 student 应读到
                 # 的集合一致）。旧行为是整份 memory（20+ 条事实、全部干扰），teacher 自己
@@ -2219,14 +2338,37 @@ def train(args):
                 else:
                     # teacher 也必须关 Delta 写入：只加 no_grad 只能停梯度，挡不住
                     # write_enabled=True 时对在线状态的更新（那会污染后续样本的前向）。
+                    _want_h1 = float(getattr(args, "hid_weight", 0.0) or 0.0) > 0
                     with LM.delta_write_disabled(model), torch.no_grad():
-                        t_logits = model(inputs_embeds=t_embeds,
-                                         attention_mask=torch.ones(t_embeds.shape[:2],
-                                                                   dtype=torch.long,
-                                                                   device=dev),
-                                         use_cache=False).logits
-                    loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)],
-                                      tau=args.kl_tau)
+                        _t_out1 = model(inputs_embeds=t_embeds,
+                                        attention_mask=torch.ones(t_embeds.shape[:2],
+                                                                  dtype=torch.long,
+                                                                  device=dev),
+                                        use_cache=False, output_hidden_states=_want_h1)
+                    t_logits = _t_out1.logits
+                    if args.kl_weight > 0:
+                        loss_kl = kl_loss(s_logits, t_logits, [min(n_ans, t_n)],
+                                          tau=args.kl_tau)
+                    if _want_h1:
+                        # 非打包路径的 student 前向没开 output_hidden_states
+                        # （每样本多存一份全层隐状态太贵），这里补一次只为了取
+                        # "答案前那一位"的最后一层。--pack>1 时不需要这次补算。
+                        with LM.delta_write_disabled(model):
+                            _s_h1 = model(
+                                inputs_embeds=embeds,
+                                attention_mask=torch.ones(embeds.shape[:2],
+                                                          dtype=torch.long, device=dev),
+                                use_cache=False, output_hidden_states=True).hidden_states
+                        # 非打包路径的 teacher 标签是 None（只有 t_n），
+                        # 所以位置直接算：答案首 token 的前一位。
+                        _loss_hid1 = hid_distill_positions(
+                            _hid_pick_layer(_s_h1, getattr(args, "hid_layer", "last")),
+                            [int(embeds.shape[1]) - int(n_ans) - 1],
+                            _hid_pick_layer(_t_out1.hidden_states,
+                                            getattr(args, "hid_layer", "last")),
+                            [int(t_embeds.shape[1]) - int(t_n) - 1])
+                    else:
+                        _loss_hid1 = None
             recon_stage = args.recon_only_steps > 0 and step < args.recon_only_steps
             if args.recon_weight > 0 or recon_stage:
                 # ⑤ 事实重建辅助任务：**输入与目标必须同位**（见 recon_loss_units）。
@@ -2275,14 +2417,17 @@ def train(args):
                 if len(pend) < args.pack:
                     continue
                 (loss_qa, loss_addr_b, _loss_r_b, loss_kl_b,
-                 _loss_cov_b) = _packed_student_step(args, model, pend, recon_stage)
+                 _loss_cov_b, _loss_hid_b) = _packed_student_step(
+                    args, model, pend, recon_stage)
                 pend.clear()
                 acc_items.append((float(loss_qa.detach()),
                                   None if loss_kl_b is None else float(loss_kl_b.detach()),
                                   None if loss_addr_b is None
                                   else float(loss_addr_b.detach()),
                                   None if _loss_cov_b is None
-                                  else float(_loss_cov_b.detach())))
+                                  else float(_loss_cov_b.detach()),
+                                  None if _loss_hid_b is None
+                                  else float(_loss_hid_b.detach())))
             else:
                 loss = assemble_loss(loss_qa, loss_addr, loss_kl, _recon_term,
                                      addr_weight=args.addr_weight,
@@ -2290,13 +2435,17 @@ def train(args):
                                      recon_weight=args.recon_weight,
                                      recon_stage=recon_stage,
                                      loss_cov=_cov_term,
-                                     cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0))
+                                     cov_weight=float(getattr(args, "cov_weight", 0.0) or 0.0),
+                                     loss_hid=_loss_hid1,
+                                     hid_weight=float(getattr(args, "hid_weight", 0.0) or 0.0))
                 (loss / args.accum).backward()
                 acc_items.append((float(loss_qa.detach()),
                                    None if loss_kl is None else float(loss_kl.detach()),
                                    None if loss_addr is None else float(loss_addr.detach()),
                                    None if _cov_term is None
-                                   else float(_cov_term.detach())))
+                                   else float(_cov_term.detach()),
+                                   None if _loss_hid1 is None
+                                   else float(_loss_hid1.detach())))
                 micro += 1
             if micro % args.accum == 0:
                 # 梯度范数（step 前）：.grad is not null 只说明"有梯度"，不说明"梯度可用"；
@@ -2399,6 +2548,8 @@ def train(args):
                 addr_avg = sum(addrs) / len(addrs) if addrs else None
                 covs = [x[3] for x in acc_items if len(x) > 3 and x[3] is not None]
                 cov_avg = sum(covs) / len(covs) if covs else None
+                hids = [x[4] for x in acc_items if len(x) > 4 and x[4] is not None]
+                hid_avg = sum(hids) / len(hids) if hids else None
                 if cov_avg is not None:
                     _cov_seen[0] += 1
                 if args.log_every <= 1 or step % args.log_every == 0:
@@ -2441,7 +2592,8 @@ def train(args):
                           f"compress={enc_info['compression_ratio']} "
                           f"gnorm_comp={gnorm_comp:.3e} gnorm_bridge={gnorm_bridge:.3e} "
                           f"{'gnorm_router=%.3e ' % gnorm_router if router is not None else ''}"
-                          f"gnorm_pre={_gn_total_pre:.3e}{_cs}{_rs}{_bs}{_vs} "
+                          f"gnorm_pre={_gn_total_pre:.3e}{_cs}{_rs}{_bs}{_vs}"
+                          f"{'' if hid_avg is None else f' loss_hid={hid_avg:.4f}'} "
                           f"peakmem={_peak_mb():.0f}MiB "
                           f"({time.time()-t_start:.0f}s)", flush=True)
                 acc_items = []
@@ -3382,6 +3534,36 @@ def parse_args(argv=None):
     ap.add_argument("--cov-targets", type=int, default=LM.LATENT_COV_TARGETS,
                     help="每块最多监督几个词（0=自动取槽数 m）。设得比槽数大就是"
                          "'要求覆盖超过容量'，损失会留一个下不去的常数底")
+    # ---- 读出结构三轮递进实验（2026-11-05）----
+    # 见 results/2026-11-04_readout_probe/：共享注意力下 L_cov 把 oracle_sem 打到 7.0%。
+    # 下面这些开关彼此独立，一次只应该动一个。
+    ap.add_argument("--lex-head", type=int, default=LM.LATENT_LEX_HEAD,
+                    help="E1：1=独立词形选择头（L_cov 的梯度只进这个头，语义注意力不再"
+                         "被覆盖目标拉扯）；0=旧行为（共享注意力）。零初始化保证第 0 步"
+                         "选择与旧实现逐位相同")
+    ap.add_argument("--lex-head-hidden", type=int, default=LM.LATENT_LEX_HEAD_HIDDEN,
+                    help="词形头的隐层宽度（0=自动 max(32, inner_dim//4)）")
+    ap.add_argument("--lex-token-mode", choices=("ckpt",) + tuple(LM._LEX_TOKEN_MODES),
+                    default="ckpt",
+                    help="E2：词形载荷口径。mean=词内子词均值（现行为）；bpe=按原文顺序"
+                         "复制完整 BPE 向量（整词放不下就跳过，不截断单词）。"
+                         "ckpt=沿用 checkpoint 里记录的口径（新训练默认 mean）")
+    ap.add_argument("--bpe-backfill", type=int, default=LM.LATENT_BPE_BACKFILL,
+                    help="bpe 模式下放不下的词是否用后面的候选词补空位（默认 0=不补，"
+                         "保持'同一套选词、只换编码方式'这个对照口径）")
+    ap.add_argument("--split-inject", type=int, default=LM.LATENT_SPLIT_INJECT,
+                    help="E3：1=词形与语义**分开注入**（[lex_1..lex_k] + [sem]，总预算"
+                         " k+1）；0=残差叠加（现行为）。split 模式下 Bridge 末层不做零"
+                         "初始化（零输出等于往序列里塞全零向量）")
+    ap.add_argument("--split-n-lex", type=int, default=LM.LATENT_SPLIT_N_LEX,
+                    help="E3：每块留给词形的 token 数（1~m）。默认 3 = 3 词形 + 1 语义")
+    ap.add_argument("--hid-weight", type=float, default=0.0,
+                    help="E4：隐状态蒸馏权重（0=关闭）。只在**最后一层、答案生成前那一个"
+                         "位置**上做余弦对齐，teacher=明文上下文、student=潜层上下文。"
+                         "先只在 E3 明显不足时才开")
+    ap.add_argument("--hid-layer", type=str, default="last",
+                    help="E4：蒸馏取哪一层。last=最后一层（默认，先只做这一档）；"
+                         "整数=hidden_states 的层号；last+18=两处都做（不推荐，变量太多）")
     ap.add_argument("--counterfactual", action="store_true",
                     help="训练集加入『同主语同属性冲突，只记新值』样本")
     ap.add_argument("--data", default="",
