@@ -95,20 +95,27 @@ GPU=0 bash runs/run_stage2_bridge.sh
 |---|---|
 | `--m 4 --layer 18` | 每条事实 4 个潜槽，取第 18 层隐状态 |
 | `--inner-dim 1024` | Compressor 内部宽度（v3 是 512，v4 加宽） |
-| `--hard-neg-k 2` | 每个 QA 步掺入的难负例槽数（金标永远在） |
+| `--hard-neg-k 2` | 金标 + 难负例路径里掺入的干扰槽数 |
+| `--readout-mode {gold,mixed,router}` | QA 读出的槽位分布。默认 `mixed`：预热后一半步数走 router 的真实 picks（与推理同分布）。`gold` 是旧行为（作对照） |
+| `--teacher-scope {gold,full}` | KL teacher 看到的事实。默认 `gold`（与 student 应读到的一致）；`full` 是旧行为（整份 memory 含干扰） |
+| `--teacher-probe-n 16` | 开跑前先量 teacher 在 memory/gold 两种上下文上的自由生成 acc |
+| `--recon-lex {1,0}` | 重建是否与 QA 走同一条 `bridge(z_sem, z_lex)`。默认 1；0 复现"重建只训语义分支"的旧行为 |
 | `--kl-weight 1.0 --recon-weight 0.5` | 蒸馏与重建权重 |
-| `--topk-per-hop 2` | 2 跳 Top-2 beam → 最多 4 槽读出 |
+| `--alpha-max 0.5 --lex-gate-init 0.05` | 残差 α 的硬上限与初值。初值**不能为 0**（末层零初始化下 α=0 会让语义分支与门控同时失去梯度） |
+| `--diag-every 50` | 每 50 步打印 α / 残差比 / 输出范数 / 末层权重范数，并记录裁剪前总梯度与 clip_coef |
+| `--topk-per-hop 4` | 2 跳 Top-4 beam → 最多 8 槽读出 |
 | `--router-kind {latent,hybrid}` | hybrid = 冻结 h0/h18 注意力池化 + Token-MaxSim 兜底 |
 | `--slot-isolation` | 槽位块对角掩码（**仅 eager 后端生效**，SDPA 会静默丢弃 4D 掩码） |
 
-产物：`$B/ckpt/hotpot_router_10k_v4.pt`；`save_latent_checkpoint` 会写入
+产物：`$B/ckpt/hotpot_router_10k_v6.pt`（v5 的产物是 `hotpot_router_10k_v5.pt`，那一轮早于
+本轮的目标/读出对齐，见 `results/v5_2026-11-04/`）；`save_latent_checkpoint` 会写入
 `lex_skip / router_kind / inner_dim` 等构建参数，加载时按 ckpt 重建结构，**不要手动对齐超参**。
 
 ## 5. 评测
 
 ```bash
 python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
-  --ckpt $B/ckpt/hotpot_router_10k_v4.pt \
+  --ckpt $B/ckpt/hotpot_router_10k_v6.pt \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
   --label v5-router --save-json $B/results/v5_router_500.json
@@ -122,6 +129,9 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
 | `text` | 明文 top-k 段落 | Text-RAG 对照 |
 | `oracle` | 明文金标证据 | 明文上界 |
 | `oracle_latent` | **金标槽位直送 Bridge**（不经 Router） | 潜层读出上界：测"100% 选对证据"时能到多少 |
+| `oracle_lex` | 金标槽位、**只用 z_lex**（α=0） | 读出分解：纯词形保真那条腿 |
+| `oracle_sem` | 金标槽位、**只用 Bridge(z_sem)** | 读出分解：纯语义映射那条腿 |
+| `oracle_embed` | 金标证据原文的真实 token embedding（不压缩） | 区分"软 token 注入机制"与"压缩损失"；预算按 ckpt 的 `max_unit_tokens/m` 对齐 |
 | `bridge` | 压缩器潜向量，单槽 | 保真诊断 |
 | `router` | Router 寻址 + Bridge | 主方法 |
 | `fst` | 多跳潜层接力 + 版本策略 | 动态更新场景 |
@@ -129,14 +139,26 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
 报告口径：**`oracle − oracle_latent` = 压缩损失，`oracle_latent − router` = 寻址损失**。
 日志与 json 里 `enc_ms / gen_ms / prompt_tokens / mem_tokens` 已分开记账，不要只报总耗时。
 
-## 6. 自检
+## 6. 诊断（不训练主模型，只回答一个机制问题）
+
+```bash
+GPU=0 bash runs/diag_router_cache.sh      # 缓存路径 vs 训练路径逐题对拍（P0）
+GPU=0 bash runs/diag_readout.sh           # 五种读法分解：注入 / 词形 / 语义 / 压缩（P0）
+GPU=0 bash runs/diag_symbol_fidelity.sh   # 压缩器选中的词 vs 答案实体（P1）
+GPU=0 bash runs/overfit_probe.sh          # 64 题过拟合 + 三种目标函数对照（P1）
+```
+
+每个脚本的判定路径写在脚本头部注释与 `README.md` 的"诊断脚本"表里。
+它们都**只读** ckpt，不写模型权重。
+
+## 7. 自检
 
 ```bash
 python -m pytest tests/ -q          # 含 v4 七项重构自检（CPU，秒级）
 python -m py_compile latent_memory.py train_latent_memory.py eval_latent_table.py tools/prep_mab.py
 ```
 
-## 7. 常见坑
+## 8. 常见坑
 
 | 现象 | 原因 / 处理 |
 |---|---|

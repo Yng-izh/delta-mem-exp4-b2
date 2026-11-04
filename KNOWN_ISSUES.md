@@ -1,297 +1,144 @@
-# KNOWN_ISSUES.md — 已知问题登记
+# KNOWN_ISSUES.md — 当前仍未解决的问题
 
-**最后更新**：2026-10-27（真实数据接入轮）
+**最后更新**：2026-11-04（读出端对齐轮）
 
-只登记**确实存在、已确认、但尚未修复**的问题。每条都写明「怎么发现的 / 影响什么 / 怎么修」。
-已修的问题记在 [`CHANGELOG.md`](CHANGELOG.md) 对应版本里。
-
----
-
-## P0 — 会影响实验结论的正确性
-
-### 0. 已修（v9.7）：`delta_write_disabled` 永久关闭写入 + KL 覆盖寻址损失
-
-这两条已修复并进 CHANGELOG v9.7；保留说明在此是因为**它们解释了此前所有"训练好、重载崩"类现象**：
-`delta_write_disabled` 退出时恒 `fn(model, False)`，第一次调用后进程内写入永久关闭；
-`loss = loss_qa + kl_weight * loss_kl` 在 KL 分支重新赋值，把 `addr_weight * loss_addr` 整条覆盖。
-回归测试：`tests/test_train_objectives.py`（Q1–Q6 / P1–P8）。
-
-### 1. `delta_write_disabled` 会永久关闭 Delta 写入（已修，见上）
-
-**位置**：`latent_memory.py`，`delta_write_disabled` contextmanager
-
-```python
-finally:
-    fn(model, False)      # ← 本意是"恢复原值"，实际是"强制关闭"
-```
-
-**现象**：任何一次 `with delta_write_disabled(model)` 退出后，该**进程内**模型的 Delta 写入永久为关，
-即使原来是开的。
-
-**怎么发现的**：追查"训练 17%、重载 0%"时，发现训练进程因反复进入该 contextmanager 而被永久关闭写入
-（所以训练期数字是干净的），诊断进程没有反复进入、于是逐步累积 `delta_state` 而崩溃。
-
-**影响**：
-- 目前潜层读出只走软 token，不依赖 Delta 写入，**暂时无害**；
-- 但只要同一进程里既有"需要写"（AR 管线在线写入）又有"需要禁写"（潜层编码）的路径，
-  后者的第一次调用就会悄悄废掉前者的全部能力，且**没有任何日志或异常**。
-
-**修法**：进入时记录原值，`finally` 恢复原值。
-
-```python
-prev = fn(model, None) if fn supports else current_state
-try:
-    yield
-finally:
-    fn(model, prev)
-```
-
-需要先确认 Delta 实现是否有"读当前状态"的接口（`delta_impl.py` 里 `set_delta_mem_write_enabled` 只写不读）。
-
-**为什么还没修**：一改会改变**所有既有实验**的行为基线，必须单独一轮回归，不能夹在重构里顺手改。
+只登记**确实存在、已确认、但尚未修复**的问题，每条写「怎么发现的 / 影响什么 / 怎么修」。
+已修的问题记在 [`CHANGELOG.md`](CHANGELOG.md)，不再在这里重复。
 
 ---
 
-### 2. Router 的重构效果完全未验证
+## P0 — 会影响实验结论
 
-**现象**：`LatentRouter` 只做了机制验证（形状、梯度、ckpt 往返、单测 89 项全过），
-**一步训练都没跑**。
+### 1. `v5-router` 的 500 题数字作废，尚未重跑
 
-**影响**：不能声称"重构解决了位置敏感"。4 槽 target_end 从 0/16 能不能救回来，现在**没有任何证据**。
+**现象**：`results/v5_2026-11-04/v5_router_500.json` 里 `read_acc=6.0%`，而同一份权重在
+阶段一单独评测是 52.0%（28/28 张量已逐位核对相同）。
 
-**修法**：按 `results/latent_router_2026-10-27/README.md` 第六节的阻塞项，先补单槽数据 → Phase 1 → Phase 2。
+**根因**（已修，`3815379`）：`encode_item_slots_full()` 的缓存分支返回 `kfeat=None`；
+评测脚本传 `cache={}`，于是 `HybridLatentRouter` 退回"潜载荷键"，MaxSim 与新信息抑制全部失效。
 
----
+**现状**：`runs/diag_router_cache.sh`（逐题对拍）与 `runs/eval_v5.sh`（重跑 500 题）**都还没执行**。
+在看到这两个结果之前，任何"Router 行/不行"的结论都不成立。
 
-### 3. 数据歧义：22.5% 的样本答案值在干扰事实里重复
+### 2. 训练侧的槽位隔离只有围栏，没有块对角
 
-**位置**：旧合成数据生成器（已随废案移除；结论适用于任何"干扰与答案同值"的数据，含真实数据集）
+**位置**：`train_latent_memory.py::build_student_inputs`（不接受 4D 掩码）
 
-| 数据集 | 歧义样本 | 占比 |
-|---|---|---|
-| `latent_exp2_train` | 45/200 | 22.5% |
-| 旧合成 val | 11/64 | 17.2% |
+**现象**：训练期 `--slot-isolation 1` 只让 `compose_routed_soft` 插入 `-- Fact j --` 前后围栏；
+`build_block_diag_mask` 只在**推理**的 `_emit_latent` 里生效。
 
-**影响**：模型读错槽也能恰好答对 → 准确率**被高估**；这类样本也**无法检验内容寻址是否 work**。
+**影响**：当前训练与评测都用 SDPA，两端都只有围栏，**暂时一致**。一旦把评测切到
+`attn_implementation="eager"`，评测会真的做块对角隔离而训练从未做过，两端口径分叉，
+掉点会被误读成"隔离有害"。
 
-**修法**（二选一，待定）：
-- 改生成器排除同值干扰，重新出数据（干净，但旧 ckpt 全部作废）
-- 保留数据，评估时额外报一列「无歧义子集」准确率（不破坏已有结果）
+**修法**：让 `build_student_inputs` 接收 `seg_ids` 并把 4D 加性掩码传给主干（需先确认 HF
+eager 路径接受 4D `attention_mask`），或显式禁止"训练 SDPA + 评测 eager"的组合。
 
----
+### 3. 残差上限 0.5 只是先验，没有实验支撑
 
-### 3.5 FST-Mem 的效果完全未验证（与第 2 条并列，单独立项）
-
-**位置**：`latent_memory.LatentFactKeyEncoder / LatentStateTrajectoryBank / FstRouter`、
-`train_latent_memory.py --fst`
-
-**现状**：三个机制**结构上都已做到**并有 88 项单测断言（键与值无关、改 A 不动 B 逐位相等、
-两级竞争隔离、前向硬选 + STE、ckpt 严格往返、内容级对齐、指标口径、并列时间戳），
-且核查轮用 6 个变异确认这些断言**真有约束力**（变异审计工具随废案移除；核查轮之前有 3 条恒真，
-让 4 个静默 bug 在 67 项断言下安然无恙，见 CHANGELOG v9.6.1）。但：
-- **一步真实训练都没跑** → 没有任何 `acc / group_acc / ver_multi_acc` 的可用数字；
-- `--fst --smoke-model` 的 smoke 指标是**随机权重下的噪声**，不能引用；
-- 没有与"直接拼接潜槽位 / 阶段 A Router / 硬覆写"的对照跑分。
-
-**影响**：任何"FST 解决了组合不稳定 / 更新局部性 / 时间一致性"的表述**目前都不成立**。
-单测保证的是"实现符合设计"，不是"设计有效"。
-
-**怎么修**：按下述消融矩阵依次跑
-（`--router` → `--fst --hist-max 0` → `--fst --hist-max 2` → `--fst --ignore-query-time`），
-每档至少 3 个 seed，报 `acc + group_acc + ver_multi_acc + 三探针 + pair_acc + order_stable`，
-并且**必须同时报两个常数基线**（`group_const_acc` = 永远选第一组、`ver_newest_acc` = 永远选最新版），
-否则"随机权重下 0.33"会被误读成有信号 —— 核查轮 smoke 里基线其实是 0.667。
-另：评估集必须**按整组问题**截断（`fst_eval_subset`），按行截断会把反事实配对切两半，
-`pair_n` 直接变 0。
-
-### 3.6 FST 没有两跳链式读出（原"未接进线上管线"）
-
-**位置**：`generate_latent_answer_fst`（`latent_memory.py`）
-
-**现状**：
-- `hops>1` **显式报错**（`ValueError`）。FST 的键是静态身份键，没有"客体值接力"那一路，
-  直接按单跳跑会得到"看起来正常的错答案"，所以选择报错而不是静默降级。
-- 真实数据上 FST 已能训练与评估（`train_latent_memory.py --fst` +
-  `eval_latent_table.py --method fst`，MAB-CR 300 题训练、150 步），
-  但**每次只读 1 槽**，而 CR 题多为两跳链 —— 结果表里 CR 的潜层列是**不对等比较**，
-  `oracle` 给 1 条金标也只有 32% 可作旁证。
-
-**影响**：FST 的 acc 列（2.5%）混合了"单槽 vs 两跳任务"的结构性劣势与学习不足，
-只能与"读对槽位 65%"、"group 0.650"一起解读。
-
-**怎么修**：`generate_latent_answer_fst` 支持 hops=2（第一跳读出的客体值回填为
-第二跳的实体特征）。
-
-### 3.7 历史容量与保真度的权衡未量化
-
-**位置**：`LATENT_HIST_MAX`（默认 4）
-
-**现状**：超容量时 FIFO 淘汰最旧版本并**真正释放槽位**（不保留"读不到的僵尸槽"）。
-但"保留几条历史够用""压缩后的历史丢了多少信息""历史变长后读出开销与定位精度如何退化"
-**一个都没测**。
-
-**影响**：`hist_max` 目前是拍的常数，不是实验结论。审稿人会问"历史很长怎么办"。
-
-**已修的相关数据坑**：`hist_max=0` 时"目标版本被淘汰"与"数据缺时间戳"此前共用一个
-`viable=False` 标志，导致无法区分"容量机制在起作用"和"数据有洞"。现已拆成
-`evicted / label_missing / label_mismatch`，训练只跳过 `evicted`（日志 `skip_evicted`），
-遇到 `label_mismatch`（答案不在库里）直接报错。
-
-**怎么修**：造 `hist_max ∈ {0,1,2,4,8}` × 时间跨度 ∈ {3,6,12} 的网格，
-报 `history` 探针准确率与 `n_versions` 的关系曲线。
-
-## P1 — 会让某些路径静默失效
-
-### 4. 多跳路径（`LatentRouter.chain`）从未在真实数据上跑过
-
-**现象**：`chain()` 只有形状验证（`hops=2 → picked=[0,1]`）。
-`generate_latent_answer(hops=2)` 的换行隔离也只在随机权重下验证过不崩。
-
-**影响**：当前两套正式基准里，HotpotQA 全部是 2 跳（bridge/comparison）、MAB-CR 多为两跳链，
-而 `generate_latent_answer(hops=2)` 的链式选槽只在随机权重下验证过不崩；
-Router 训练侧对多跳只监督第 1 跳（`target_slot_index` 取 evidence[0]）。
-两跳链式读出的真实效果仍未知——这正是 HotpotQA 潜层 acc 停在 chance 的候选原因之一。
-
-**修法**：HotpotQA 训练时对第 2 跳加监督（或推理期按 `item["hops"]` 走链并验证），
-
+`--alpha-max 0.5` 的依据是"v5 的 α=0.264 已在退化"，但 0.5 是否合适、是否仍偏大，
+需要 `runs/overfit_probe.sh` 或一轮短训练给证据。它现在是一条**未验证的约束**。
 
 ---
 
-### 5. `stack_payloads` 对一个槽位的多块取均值
+## P1 — 会让指标解释变模糊
 
-**位置**：`latent_memory.py`，`stack_payloads()`
+### 4. `encode_keys` 层没有真正的"锚点文本过滤"
 
-**现象**：一个记忆单元被切成 `k` 块时，`stack_payloads` 对块轴取 `mean`，把 `k` 块压成一个槽位描述。
+标题区加成（前 3 个有效 token）用 `h18` 偏离度做**代理**，没有把"这一槽的标题文本"显式
+送进键编码。跨槽同实体（"张三-雇主" vs "张三-居住地"）时，键仍可能靠池化语义相似度区分，
+而不是靠标题字面。修法：把标题串单独编码成一路键，或在键编码里加字面匹配项。
 
-**影响**：当前数据事实 ≤9 token ≪ `max_unit_tokens=64`，永远 `k=1`，**不触发**。
-但换成长事实后，路由的键是"多块均值"，与 Phase 1 逐块编码的语义有偏差。
+### 5. `--fst` 分支不支持断点续训
 
-**修法**：给 Router 增加块级注意力（对 `k` 轴做 attention pooling 而非 mean），或限制"一槽一块"并显式报错。
+阶段一（`tools/train_router_stage1.py`）与阶段二（`train_latent_memory.py`）都有 `--resume`
+（权重 + AdamW 动量 + step/epoch 位置 + RNG）；`--fst` 的独立循环没有，长跑中断只能从头再来。
+
+### 6. `summarize()` 没有聚合 `slot_isolation`
+
+逐样本已落盘 `info["slot_isolation"]`（`block_diag:eager` / `fence_only:attn_impl=sdpa`），
+但汇总行没有"多少比例真的用上了块对角隔离"。降级会打印，却没进结果表，审计时容易漏看。
+
+### 7. `oracle_embed` 与 `oracle_latent` 的预算只是"按块数估算对齐"
+
+`oracle_embed` 按 `ceil(unit_tokens / max_unit_tokens) × m` 估注入 token 数，
+`oracle_latent` 的 `mem_tokens` 是实际 `n_soft`。块边界上会差几个 token，
+做"注入机制 vs 压缩损失"归因时必须核对结果表这两列的实际值，不能默认相等。
+
+### 8. `--hard-neg-k` 的负例随 router 变强而漂移（课程效应未量化）
+
+负例是"当前 router 认为最像金标的非金标槽"。router 变强 → 负例变难；也可能全变成同类干扰。
+若 EM 曲线后期掉点，先看 `--hard-neg-k` 与 `--gold-readout-ratio` 的交互，再怀疑压缩器。
+新增的 `--readout-mode router` 会把"router 自选时缺了几条金标"记进 `readout_stats`，
+可用于区分"负例太难"与"读出分布本身有缺证据"。
+
+### 9. `HybridLatentRouter` 的 MaxSim 底盘依赖 `LATENT_KEY_TOKENS=64` 的截断
+
+`slot_token_features` 把每槽 token 特征截到 64 个（超出丢弃，非池化）。对
+`max_unit_tokens=32` 够用；换成更长单元（>64 token）后字面匹配覆盖会变差，
+且目前只在 `n_units` 汇总里体现、没有逐样本告警。
+
+### 10. 训练期验证与产品评测的等价性靠全局 `_ARGS_REF`
+
+`evaluate()` 从 `_ARGS_REF[0]` 取 `topk_per_hop/slot_isolation`，等价性依赖
+"`train()` 先设好全局再调 `evaluate()`"。若从其它脚本直接调 `evaluate()`，这两个参数会退回
+默认值（1/0），日志数字与 `eval_latent_table.py` 不可比。
+
+### 11. FST 没有两跳链式读出
+
+`generate_latent_answer_fst` 在 `hops>1` 时**显式报错**（静态身份键没有"客体值接力"那一路，
+按单跳跑会得到"看起来正常的错答案"）。因此 FST 在 CR 类多跳题上是**单槽对两跳**的
+不对等比较，那一列只能与"读对槽位率"一起解读。
+
+### 12. 历史容量与保真度的权衡未量化
+
+`LATENT_HIST_MAX`（默认 4）是拍的常数：超容量 FIFO 淘汰最旧版本，但"保留几条够用"
+"压缩后的历史丢多少信息""历史变长后定位精度如何退化"一个都没测。
+修法：`hist_max ∈ {0,1,2,4,8}` × 时间跨度 ∈ {3,6,12} 网格，报 history 探针准确率曲线。
 
 ---
 
-### 6. （历史）旧评测管线的 3 处已知问题，随方案废除关闭
+## P2 — 数据性质与环境（不是 bug，但必须写进论文/结果表）
 
-`v8_slotpool` 的 top-K 重排顺序 bug、`cur_ts` 单句时间戳冻结、软 token 预算统计口径 ——
-三者都属于已废除的 AR 管线，代码已移除，不再跟踪。
-软 token 预算按真实 `num_chunks * 4` 统计这一条，在当前 `eval_latent_table.py`
-里以实测 `mem_tokens` 列呈现，不受旧口径影响。
+### 13. HotpotQA 的答案几乎总在上下文里
 
----
+含黄金段落时 95.0%、加 8 段干扰后 96.3% 的样本答案能在上下文某句里找到。因此 exact-match
+混入了"字符串检索能力"。**处理**：结果表必须同时给 `none`（不给记忆）这一行 —— 实测 11.2%，
+"有记忆的准确率"要与 11.2% 比，而不是与 0 比；并同时给"读对槽位率"。
 
-## P2 — 环境与流程
+### 14. 干扰事实可能包含与答案相同的值
 
-### 7. 服务器 Python 环境被其他用户破坏
+这类样本"读错槽也能答对"，会**高估**准确率且无法检验内容寻址。当前数据生成器
+（`tools/prep_hotpotqa.py` 的 `select_facts_stream`）**不按答案挑候选**，但也不排除同值干扰。
+修法（二选一）：生成时排除同值干扰（干净，旧 ckpt 作废）；或评估时额外报一列
+"无歧义子集"准确率（不破坏已有结果）。
 
-editable 安装的 `transformers` 指向不存在的 `/root/transformers-main`。所有运行必须带：
+### 15. 槽位容量与 benchmark 规模不匹配（设计级限制）
+
+一条事实一个槽、每槽一次编码前向：HotpotQA（~35 句/题）每题 4~5s 可接受；
+MAB-CR 6k context 只能按 `--cap` 评测；LongMemEval-S（~115k token）当前设计不适用。
+论文里必须写成局限，不能含糊。
+
+### 16. 服务器环境（当前机器）
 
 ```bash
-CUDA_VISIBLE_DEVICES=7 \
-HF_HOME=/share/hf_home HF_HUB_OFFLINE=1 \
-DELTA_MEM_SCAN_IMPL=torch \
-PYTHONPATH=/share/exp4group/shim19:/share/exp4group:/share/delta-Mem \
-/share/conda/envs/latent2/bin/python <script>
+B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
+PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+export DELTA_MEM_SCAN_IMPL=torch
+export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
+export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 ```
 
-**影响**：不知道这一点会得到 `ModuleNotFoundError` 或 import 到错误版本，误判成代码 bug。
-
-### 8. 机器共享，可能被清空
-
-`/share/exp4group` 是普通 scp 同步目录，无版本控制、无备份。**checkpoint 不入库**（30 MB/个），
-配置记在各日志 `[save]` 行。GPU 7 约 3.3 GB 基线占用。长跑每 200 步必须落盘。
-
-### 9. SSH 到 v100-2 偶发超时
-
-`ssh: connect to host 100.94.9.44 port 22: Operation timed out`（exit 255）。
-用 `-o ConnectTimeout=25` 重试循环可恢复。
+- GPU 0/1 与别人的作业共享（曾见 34–39 GB 的 PRLM-C 训练与 YOLO 作业）：启动前用
+  `nvidia-smi` 挑空卡，每步日志已打 `peakmem`，用于区分"自己涨"与"被挤"。
+- checkpoint 不入库（`ckpt/` 已 gitignore）：阶段一 100,991,977 B、v5 224,505,677 B
+  （含 AdamW 状态），只存在于服务器。
+- `deltamem.core` 顶层硬依赖 `transformers.models.smollm3`（4.51 无此子包），
+  必须经 `deltamem_compat` 注入占位后 import。
 
 ---
 
 ## 登记规范
 
-新增一条前先确认：
-
-1. **能复现**（给出具体命令或最小代码片段）
-2. **说清影响**（哪些实验/结论会被它污染）
-3. **给出修法**（哪怕只是方向）
-4. **标注优先级**：`P0` 影响结论正确性 / `P1` 让某路径静默失效 / `P2` 环境与流程
-
----
-
-## P1 — 接入真实数据后新出现、需在结果表里显式说明的
-
-### 4. HotpotQA 的答案几乎总在上下文里（数据集性质，不是缺陷）
-
-含黄金段落时 95.0%、加 8 段干扰后 96.3% 的样本答案能在上下文某句里找到。
-后果：单看 exact-match 会把"字符串检索能力"当成"潜层记忆读出能力"。
-处理：结果表必须同时给 `none`（不给记忆，纯参数知识）这一行 —— 实测 **12.0%**（100 题），
-所以"有记忆的准确率"要与 12% 比，而不是与 0 比。同时给"读对槽位率"这一列。
-
-### 5. `--recon-weight>0` 用整段记忆会在长记忆上 OOM（已修）
-
-整段 recon 对一条 35 句记忆做带梯度的 LM 前向+反传：峰值 21.8GB → 逐步涨到 30GB，第 3 步 OOM。
-已改为 `--recon-units`（默认 2）：峰值钉回 9.19GB，6 步稳定。
-
-### 6. 槽位记忆的容量与 benchmark 规模不匹配（设计级限制，必须写进论文）
-
-一条事实一个槽、每槽一次编码前向（V100 上约 0.1~0.15s）：
-- HotpotQA（~35 句/题）→ 每题 4~5s，可接受；
-- MAB-CR 6k context（数百事实）→ 每题几十秒，**只能按 `--cap`（默认 32 条）评测**；
-- LongMemEval-S（~115k token，40 会话）→ 即使按会话切槽也要读 2% 的内容，**当前设计不适用**。
-
-这不掩饰：MAB-CR 报 `cap`，LME 要么改成"会话级 + 分块"两级读出，要么明确写成局限。
-
-### 7. 服务器没有 huggingface.co / github.com 网络
-
-`hf-mirror.com` 与 `pypi.org` 可达。下载必须显式
-`HF_ENDPOINT=https://hf-mirror.com HF_HUB_OFFLINE=0`，否则静默走离线路径报"数据集不存在"。
-
-### 8. GPU 是共享的，作业会被别人挤掉
-
-10 张 V100-32GB 上长期有其他用户 8~30GB 的进程；同一张卡 30 秒内可用显存能变化 20GB。
-症状是 `OutOfMemoryError` 里写着"Process XXX has N GiB in use"（不是自己的进程号）。
-处理：启动前用 `nvidia-smi` 排序取当前最空的卡；每步日志打印 `peakmem` 以便区分
-"自己涨"还是"别人挤"。
-
----
-
-## v4 重构后仍然**未解决**的风险（2026-11-01）
-
-这些不是"还没实现"，而是实现之后仍需实验确认、或受环境限制的**已知缺口**。
-每条都写明「影响什么 / 怎么确认」，不做无根据的乐观结论。
-
-### A. 槽位块对角隔离在默认后端上不生效
-
-`_emit_latent(isolate=True)` 会用 4D 加性掩码做块对角隔离，但 `transformers` 在
-`attn_implementation="sdpa"` 下由 `_update_causal_mask` 自建因果掩码，**4D 掩码会被静默丢弃**。
-因此默认路径实际生效的是"围栏隔离"（`\n-- Fact j --\n` 前后标记）。
-**记账方式**：每条样本 `meta["slot_isolation"]` 写 `block_diag:eager` 或
-`fence_only:attn_impl=sdpa`；要真开隔离必须把主干改成 `attn_implementation="eager"`
-（慢约 20–30%）并加 `--slot-isolation 1`。**未验证**：eager 下的 prefill+past_key_values
-拼接在 Delta-Mem 包装器上是否逐位稳定（代码已 try/except，失败会退回普通路径并写
-`fallback:<异常名>`）。
-
-### B. `--hard-neg-k` 的负例来自**当前** router 打分
-
-负例是"router 现在认为最像金标的非金标槽"。router 变强后负例会变难、变强后也可能
-变成"全是同类干扰"，难度随训练漂移（课程效应，未量化）。若 EM 曲线出现"后期掉点"，
-先看 `--hard-neg-k` 与 `--gold-readout-ratio` 的交互，而不是先怀疑压缩器。
-
-### C. `HybridLatentRouter` 的 MaxSim 底盘依赖 `LATENT_KEY_TOKENS=64` 的截断
-
-`slot_token_features` 把每槽 token 特征截到 64 个（超出部分丢弃，非池化）。
-对 `max_unit_tokens=32` 的单元够用，但**若改用更长的单元**（>64 token），
-字面匹配的覆盖会变差，且当前只在 `n_units` 汇总里体现、没有逐样本告警。
-确认方式：`meta["key_tokens"]` 与实际单元 token 数对照。
-
-### D. `--pack>1` 与 `kl_weight>0` 并存是新路径
-
-teacher 与学生按同一套 `pack_student_batch` 拼接、只在 `labels != -100` 上算 KL；
-形状不一致时该步**跳过 KL 并打印**（不静默）。尚未在 10k×3ep 的完整规模上跑过，
-首个 step 的 `[pack]`/`[kl]` 日志需要人工确认一次。
-
-### E. 训练期验证与产品评测的等价性靠全局 `_ARGS_REF`
-
-`evaluate()` 从 `_ARGS_REF[0]` 取 `topk_per_hop/slot_isolation`，等价性依赖
-"train() 先设好全局再调 evaluate"。若从其它脚本直接调 `evaluate()`，
-这两个参数会退回默认值（1/0），日志与 `eval_latent_table.py` 的数字将不可比。
+新增一条前先确认：能复现（给命令/最小片段）、说清影响（污染哪些结论）、给出修法（哪怕只是方向）、
+标注优先级（`P0` 影响结论正确性 / `P1` 让某路径静默失效 / `P2` 数据性质与环境）。

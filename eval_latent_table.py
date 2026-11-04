@@ -16,6 +16,10 @@
 | `bridge` | 全部槽位的载荷过 Bridge → 软 token | K × m |
 | `router` | Router 先选 1 个槽 → Bridge → 软 token | m |
 | `fst`    | 两级寻址选 (事实, 版本) → Bridge → 软 token | m |
+| `oracle_latent` | 金标槽 → Bridge(z_sem, z_lex)（残差锚定，当前方法） | K_gold × m |
+| `oracle_lex`    | 金标槽 → **只用 z_lex**（α=0，纯 h0 词形直通） | K_gold × m |
+| `oracle_sem`    | 金标槽 → **只用 Bridge(z_sem)**（不给 z_lex） | K_gold × m |
+| `oracle_embed`  | 金标证据原文的真实 token embedding（不压缩） | 与 oracle_latent 对齐 |
 
 明文基线与潜层基线**走同一个 `_emit_latent` 代码路径**（明文只是 `soft=None`），
 所以"潜层掉点"不可能用"两条路模板不一样"解释掉。
@@ -54,7 +58,7 @@ import latent_memory as LM
 import train_latent_memory as T
 
 METHODS = ("none", "text", "oracle", "oracle_latent", "oracle_embed",
-           "bridge", "router", "fst")
+           "oracle_lex", "oracle_sem", "bridge", "router", "fst")
 
 # ---------------------------------------------------------------------
 # 指标与字段口径
@@ -171,6 +175,28 @@ def memory_block(units, idx):
 # =====================================================================
 def n_tokens_of(tokenizer, text, dev):
     return int(LM._tokenize_no_special(tokenizer, text, dev).shape[1])
+
+
+def _zero_alpha(bridge):
+    """把 bridge 的残差门控临时压到 0（返回原值，供 _restore_alpha 还原）。
+
+    用途：oracle_lex 要测"**只有** z_lex 的读出"。直接传 lex_list 仍会叠加
+    α·Bridge(z_sem) 残差，那就不是纯词形分支了。改参数而不是改代码路径，
+    保证除 α 之外与 oracle_latent 逐位相同。
+    """
+    if not isinstance(bridge, LM.LatentBridge) or not getattr(bridge, "lex_skip", False):
+        return None
+    saved = bridge.lex_gate.detach().clone()
+    with torch.no_grad():
+        bridge.lex_gate.zero_()
+    return saved
+
+
+def _restore_alpha(bridge, saved):
+    if saved is None:
+        return
+    with torch.no_grad():
+        bridge.lex_gate.copy_(saved)
 
 
 def read_one(method, item, ctx):
@@ -364,14 +390,64 @@ def read_one(method, item, ctx):
         _z = [slot_reads[i] for i in _idx]
         _lx = ([lex_payloads[i] for i in _idx if i < len(lex_payloads)]
                if lex_payloads is not None else None)
-        soft = LM.compose_routed_soft(model, tok, ctx["bridge"], _z, dev=dev,
-                                     lex_list=_lx,
-                                     isolate=bool(ctx.get("slot_isolation")))
+        # 隔离参数必须**一路传到 _emit_latent**：旧代码只把 isolate 传给
+        # compose_routed_soft（拿到的是加倍的围栏），却没把 seg_ids 交给注入端，
+        # 于是 oracle_latent 在 eager 后端拿不到块对角掩码，而 router 方法拿得到 ——
+        # 两个"只差寻址"的方法在隔离行为上并不同构，oracle 上界就被系统性压低。
+        _iso = bool(ctx.get("slot_isolation"))
+        _soft_seg = LM.compose_routed_soft(model, tok, ctx["bridge"], _z, dev=dev,
+                                          lex_list=_lx, isolate=_iso,
+                                          return_segs=True)
+        soft, _seg_ids = _soft_seg
         pred, meta = LM._emit_latent(
             model, tok, soft, question, sysp,
             max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
+            seg_ids=_seg_ids, isolate=_iso,
             extra_meta={"has_payload": True, "routed": _idx,
                         "hops": item_hops(item), "oracle_addressing": True})
+        meta = dict(meta)
+        meta["routed"] = _idx
+    elif method in ("oracle_lex", "oracle_sem"):
+        # ---- 读出分解（2026-11-04）：把"当前 oracle_latent"拆成两条腿 ----
+        # oracle_lex：只用 z_lex（h0 符号直通，α 强制 0，不叠加任何语义残差）
+        # oracle_sem：只用 Bridge(z_sem) 的单位化输出（完全不给 z_lex）
+        # 两条腿分别对应"词形保真"与"语义映射"两个假设：
+        #   oracle_lex 高、oracle_sem 低  -> 潜层能读出全靠原生词向量，语义分支在拖后腿
+        #   oracle_sem 高、oracle_lex 低  -> 压缩语义确实编码了答案，词形不是必需
+        #   两者都低                     -> 信息在 Compressor 里就没了（查容量/选词）
+        _idx = [i for i in sorted(_gs) if i < len(slot_reads)]
+        if not _idx:
+            return "", {"oracle_no_evidence": True, "mem_tokens": 0,
+                        "mem_plain_tokens": 0, "prompt_tokens": 0,
+                        "pre_ms": 0.0, "enc_ms": (t_enc - t0) * 1e3,
+                        "gen_ms": 0.0, "total_ms": (time.time() - t0) * 1e3,
+                        "n_read_units": 0, "read_ok": None, "read_all": None,
+                        "picked": [], "gold": []}
+        _z = [slot_reads[i] for i in _idx]
+        _lx = ([lex_payloads[i] for i in _idx if i < len(lex_payloads)]
+               if lex_payloads is not None else None)
+        _iso = bool(ctx.get("slot_isolation"))
+        if method == "oracle_lex":
+            if _lx is None:
+                raise SystemExit("oracle_lex 需要 ckpt 打开 lex_skip（否则没有直通载荷）")
+            _saved = _zero_alpha(ctx["bridge"])
+            try:
+                soft, _seg_ids = LM.compose_routed_soft(
+                    model, tok, ctx["bridge"], _z, dev=dev, lex_list=_lx,
+                    isolate=_iso, return_segs=True)
+            finally:
+                _restore_alpha(ctx["bridge"], _saved)
+        else:
+            soft, _seg_ids = LM.compose_routed_soft(
+                model, tok, ctx["bridge"], _z, dev=dev, lex_list=None,
+                isolate=_iso, return_segs=True)
+        pred, meta = LM._emit_latent(
+            model, tok, soft, question, sysp,
+            max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
+            seg_ids=_seg_ids, isolate=_iso,
+            extra_meta={"has_payload": True, "routed": _idx,
+                        "hops": item_hops(item), "oracle_addressing": True,
+                        "oracle_branch": method})
         meta = dict(meta)
         meta["routed"] = _idx
     else:
@@ -396,6 +472,9 @@ def read_one(method, item, ctx):
             "total_ms": (time.time() - t0) * 1e3,
             "n_read_units": max(1, len(_picked)),
             "decode_mode": meta.get("decode_mode"),
+            # 隔离到底有没有生效必须逐样本落盘：SDPA 下块对角会被静默丢弃，
+            # 只报"开了 isolate=1"而不报实际生效模式，等于把降级藏起来。
+            "slot_isolation": meta.get("slot_isolation"),
             # 多跳样本：只有**整条证据链**都被读到才算"读对"。
             # 旧口径"选中任意一条黄金事实就算对"会把"读了半条链"算成成功，
             # 于是 read_acc 虚高、与 acc 的落差被误读成"读出端有问题"。
@@ -526,6 +605,10 @@ def main(argv=None):
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     ap.add_argument("--label", default="")
     ap.add_argument("--save-json", default="")
+    ap.add_argument("--progress-every", type=int, default=50,
+                    help="每 N 题打印一次进度（acc / 已用时 / ETA）；0=关闭")
+    ap.add_argument("--partial-every", type=int, default=100,
+                    help="每 N 题把**当前已完成**的逐样本结果落一次盘（长跑中途崩掉不丢）")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -552,24 +635,66 @@ def main(argv=None):
            "max_unit_tokens": int(args.max_unit_tokens),
            "embed_budget": int(args.embed_budget)}
 
-    if args.method in ("bridge", "router", "fst", "oracle_latent"):
+    if args.method in ("bridge", "router", "fst", "oracle_latent",
+                       "oracle_lex", "oracle_sem"):
         if not args.ckpt:
             raise SystemExit(f"--method {args.method} 必须给 --ckpt（随机权重没有任何意义）")
         reader = LM.load_latent_reader(args.ckpt, model, tok, device=dev)
+        # **ckpt 的配置优先于命令行默认值**：oracle_embed 的 token 预算按
+        # "每个金标槽 ceil(unit_tokens/max_unit_tokens) 个块 × m" 算，若这里用 CLI
+        # 默认 64 而 ckpt 训练时是 32，两个方法的预算就不是同一个数，对比不成立。
+        # 命令行显式给了不同值时要**报警并采用 ckpt 的值**（不是静默采用命令行的）。
+        _cfg_mut = int(reader.config.get("max_unit_tokens", args.max_unit_tokens))
+        if int(args.max_unit_tokens) != _cfg_mut:
+            print(f"[warn] --max-unit-tokens={args.max_unit_tokens} 与 ckpt 训练时的 "
+                  f"{_cfg_mut} 不一致：预算对比会失真，已按 ckpt 的值运行", flush=True)
+        args.max_unit_tokens = _cfg_mut
+        _cfg_m = int(reader.config.get("n_slots", 4))
+        ctx["max_unit_tokens"] = _cfg_mut
+        ctx["m_slots"] = _cfg_m
+        if int(args.layer) != int(reader.config.get("layer", args.layer)):
+            print(f"[warn] --layer={args.layer} 与 ckpt 的 {reader.config.get('layer')} "
+                  f"不一致，已按 ckpt 的值运行", flush=True)
+        args.layer = int(reader.config.get("layer", args.layer))
+        ctx["layer"] = args.layer
         # **bridge 不许带 router**：旧代码把 ckpt 里的 router 无条件塞进 ctx，
         # 于是 --method bridge 实际跑的是"有路由的单槽读出"，两行结果同源，
         # "Bridge vs Router" 这一列就不成立了（这是结果表里最贵的一处静默错误）。
         use_router = reader.router if args.method == "router" else None
-        # oracle_latent 刻意**不带 router**：它要测的是"给定正确槽位时的读出上界"，
-        # 一旦让 router 参与，它就不再是无寻址误差的量。
+        # oracle_* 刻意**不带 router**：它们要测的是"给定正确槽位时的读出上界"，
+        # 一旦让 router 参与，就不再是无寻址误差的量。
         ctx.update({"encoder": reader.encoder, "bridge": reader.bridge,
                     "router": use_router, "fst_router": reader.fst_router,
                     "hist_max": args.hist_max})
+        if args.method in ("oracle_lex", "oracle_sem") and not getattr(
+                reader.bridge, "lex_skip", False):
+            raise SystemExit(f"--method {args.method} 需要 ckpt 打开 lex_skip")
         if args.method in ("router", "fst"):
             got = reader.router if args.method == "router" else reader.fst_router
             if got is None:
                 raise SystemExit(f"checkpoint {args.ckpt} 里没有 "
                                  f"{'router' if args.method == 'router' else 'fst_router'} 权重")
+
+    if args.method == "oracle_embed":
+        # oracle_embed 不加载 bridge/encoder，但**预算必须和 oracle_latent 对齐**：
+        # 它按"每个金标槽 ceil(unit_tokens / max_unit_tokens) 块 × m 个向量"算注入
+        # token 数。CLI 默认 64 而 v5 训练时是 32，直接跑会让两边的预算差一倍，
+        # "软 token 注入机制 vs 压缩损失"的归因就不成立了。给了 --ckpt 就按 ckpt 的配置。
+        if args.ckpt:
+            _blob = LM._safe_torch_load(args.ckpt)
+            _c = dict((_blob or {}).get("config") or {})
+            if _c:
+                _mut = int(_c.get("max_unit_tokens", ctx["max_unit_tokens"]))
+                _ms = int(_c.get("n_slots", ctx["m_slots"]))
+                print(f"[budget] oracle_embed 按 ckpt 配置对齐："
+                      f"max_unit_tokens={_mut}（CLI {ctx['max_unit_tokens']}）、"
+                      f"m={_ms}（CLI {ctx['m_slots']}）", flush=True)
+                ctx["max_unit_tokens"] = _mut
+                ctx["m_slots"] = _ms
+        else:
+            print(f"[budget][warn] oracle_embed 未给 --ckpt：按 CLI max_unit_tokens="
+                  f"{ctx['max_unit_tokens']} 算预算，与训练配置不一致时该行不可比",
+                  flush=True)
 
     data = T.load_synth_jsonl(args.data, limit=args.limit, seed=args.seed)
     if not data:
@@ -589,6 +714,7 @@ def main(argv=None):
               f"训练侧建议 --max-slots 0", flush=True)
 
     rows = []
+    _t_run = time.time()
     for i, item in enumerate(data):
         pred, info = read_one(args.method, item, ctx)
         gold = item["answer"]
@@ -604,6 +730,23 @@ def main(argv=None):
         if args.verbose:
             print(f"  [{label}] {'✓' if ok else '✗'} q={item['question'][:50]!r} "
                   f"gold_ans={gold!r} pred={str(pred)[:40]!r}", flush=True)
+        # 长跑（500 题 ≈ 25 分钟）必须能看出"跑到哪、现在多少分"，
+        # 而且中途崩掉不能把已跑完的几百题丢掉 —— 这两件事之前都缺。
+        if args.progress_every > 0 and (i + 1) % args.progress_every == 0:
+            _el = time.time() - _t_run
+            _acc = sum(int(r["ok"]) for r in rows) / len(rows)
+            _eta = _el / (i + 1) * (len(data) - i - 1)
+            print(f"[progress] {i + 1}/{len(data)} acc={_acc:.4f} "
+                  f"elapsed={_el:.0f}s eta={_eta:.0f}s", flush=True)
+        if (args.save_json and args.partial_every > 0
+                and (i + 1) % args.partial_every == 0 and (i + 1) < len(data)):
+            _s_part = summarize(rows, label)
+            _dump = {"summary": _s_part, "config": vars(args), "rows": rows,
+                     "partial": True, "n_done": len(rows)}
+            os.makedirs(os.path.dirname(os.path.abspath(args.save_json)) or ".",
+                        exist_ok=True)
+            with open(args.save_json, "w", encoding="utf-8") as f:
+                json.dump(_dump, f, ensure_ascii=False, indent=1)
 
     s = summarize(rows, label)
     print("| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% "

@@ -31,9 +31,28 @@
 | Router（v3 权重） | 4 槽 | 12.6 | 12.8 | 5.6 |
 | Router（v4 权重，接线有 bug） | 4 槽 | 9.8 | 9.8 | 15.6 |
 | **阶段一 Router** | **8 槽** | — | — | **52.0** |
+| v5 Router（端到端，**作废**） | 8 槽 | 10.6 | 10.6 | 6.0 |
+| v5 oracle_latent（金标槽直送） | 8 槽 | 11.8 | 11.8 | 100 |
 
 阶段一（8 槽读出）把完整证据召回从 15.6% 拉到 **52.0%**（=2 条证据的题 63.1%，
-≥3 条的题 28.6%）。端到端 EM 等阶段二评测完成后再补。
+≥3 条的题 28.6%）。
+
+**v5 的两个数字说明什么**（详见 `results/v5_2026-11-04/`）：
+
+- `v5 Router` 的 6.0% 与阶段一的 52.0% 矛盾，原因是 `encode_item_slots_full()` 的
+  缓存分支丢 `kfeat`（已修），这一行**不能用来判断 Router 能力**，需重跑；
+- `v5 oracle_latent` 11.8% 是**有效**的，且它完全绕过 Router —— 说明即使寻址全对，
+  当前压缩+读出也只能到"无记忆 +0.6 个点"。因此下一步不是继续训 Router，
+  而是先定位读出端（`runs/diag_readout.sh`）。
+
+## 诊断脚本（每条只回答一个问题，不训练）
+
+| 脚本 | 回答什么 | 判定 |
+|---|---|---|
+| `runs/diag_router_cache.sh` | 缓存路径与训练路径是否等价 | kfeat 最大差 < tol 且 picks 一致率 100%，否则非零退出 |
+| `runs/diag_readout.sh` | 读出损失在哪一段：注入 / 词形 / 语义 / 压缩 | 明文高而 embed 低 → 查注入；embed 高而 lex 低 → 查选词；lex 高而 latent 低 → 查残差 |
+| `runs/diag_symbol_fidelity.sh` | 答案实体有没有进潜层、进了有没有被改坏 | 命中率≈0 且 α 正常 → 压缩器选词/容量；命中率高但答错 → 读出端 |
+| `runs/overfit_probe.sh` | 64 题能不能拟合；重建目标是否在拖主任务 | 连训练集都拟合不上 → 先修梯度/接口；`qa_kl` vs `recon_old` vs `recon_qa` 三条曲线同框比较 |
 
 ## 仓库结构
 
@@ -43,9 +62,14 @@
 | `train_latent_memory.py` | 阶段二训练 + 评测（`--fst` 分支为动态更新场景） |
 | `eval_latent_table.py` | 统一评测入口（`none/text/oracle/oracle_latent/oracle_embed/bridge/router/fst`） |
 | `tools/train_router_stage1.py` | 阶段一：只训 Router，训完直接报召回 |
+| `tools/diag_router_cache.py` | P0：缓存路径与训练路径逐题对拍（kfeat / picks / 召回） |
+| `tools/diag_symbol_fidelity.py` | P1：压缩器选中的词 vs 答案实体，附 Bridge 的 α / 残差比 |
+| `tools/overfit_probe.py` | P1：64 题过拟合 + 三种目标（`qa_kl`/`recon_old`/`recon_qa`）对照 |
 | `tools/prep_hotpotqa.py` / `tools/prep_mab.py` | 数据转换（**不按答案挑候选**） |
 | `runs/run_stage1_router.sh` / `runs/run_stage2_bridge.sh` / `runs/eval_v5.sh` | 三段流程的启动脚本 |
+| `runs/diag_*.sh` / `runs/overfit_probe.sh` | 上面四个诊断实验的启动脚本（不训练主模型） |
 | `tests/test_v4_refactor.py` | 8 组 CPU 自检（压缩/直通/Bridge/Router/beam/掩码/银行/数据） |
+| `tests/test_diag_contracts.py` | 29 项回归：Bridge 梯度量级、α 上限/死锁、重建与 QA 同路径、teacher scope、重建口径 |
 | `SETUP.md` | 从零重建：依赖、权重、数据、训练、评测 |
 | `DATASETS.md` | 数据集字段、规模与已知性质 |
 | `KNOWN_ISSUES.md` | 当前仍未解决的风险 |
@@ -56,9 +80,14 @@
    软 token 变成 attention sink，200 条只答对 1–3 条。
 2. **读出以原生词嵌入为主干**：同 33 token 预算下，直接注入金标 token 的真实 embedding
    有 32.8% EM，而平滑平均出来的潜向量只有 17.2%。因此 Bridge 是**残差**：
-   `E = z_lex + tanh(α)·Bridge(z_sem)`，α 初值 0、最后一层零初始化。
+   `E = z_lex + tanh(α)·Bridge(z_sem)`，最后一层零初始化，α 初值 **0.05**、硬上限 **0.5**。
+   α 不能取 0：末层零初始化下 α=0 会让语义分支与门控**同时**失去梯度（死锁在"永远只有 z_lex"）。
+   α 也不能无限涨：v5 涨到 0.264 时读出 EM 反而低于 v3。
 3. **训练与推理必须是同一套算法**：v4 的教训是训练期 `kfeat/lex_payloads` 被清空、
    第二跳接力方向写反、KL 被 stage 门控静默跳过 —— 三处都让"训练在跑、指标不动"。
+   同一条规则现在也适用于**读出分布**（`--readout-mode`）、**teacher 上下文**
+   （`--teacher-scope`）与**重建的 bridge 输入**（`--recon-lex`）：任何训练期与推理期
+   不一致的地方，都必须显式成参数并写进 ckpt 的 `config`。
 
 ## 已知边界
 

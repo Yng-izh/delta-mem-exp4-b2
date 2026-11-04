@@ -90,8 +90,19 @@ LATENT_LEX_SKIP        = _env_int("LATENT_LEX_SKIP", 1)         # 1=启用直通
 # 的原生 h0，而不是把 30 个 token 平均成一团"模糊面团"（2026-11-03 归因：
 # 同样 33 token 预算下，原生 h0 = 32.8% EM，压缩软向量只有 17.2%）。
 LATENT_LEX_TAU         = _env_float("LATENT_LEX_TAU", 0.05)
-# 门控 α 初值 = 0：第 0 步输出严格等于 z_lex（原生词嵌入），残差从 0 开始学。
-LATENT_LEX_GATE_INIT   = _env_float("LATENT_LEX_GATE_INIT", 0.0)
+# 门控 α 初值。**不能是 0**（2026-11-04 定位到的死锁）：
+#   末层零初始化 ⇒ res = unit(0)·scale = 0 ⇒ e = lex + α·res = lex。
+#   α=0 时 ∂e/∂W_last ∝ α = 0，而 ∂e/∂α ∝ res = 0，于是语义分支与门控**同时**
+#   拿不到梯度，只能靠"另一条不走 α 的重建路径"启动 —— 而那条路径正是与 QA 冲突的
+#   旧写法。改成 0.05 后：res 仍然严格为 0（输出逐位等于 z_lex，oracle_embed 起点不变），
+#   但 ∂e/∂W_last ∝ 0.05 ≠ 0，语义分支从第 0 步就能学；res 一旦非零，α 也开始动。
+LATENT_LEX_GATE_INIT   = _env_float("LATENT_LEX_GATE_INIT", 0.05)
+# α 的**硬上限**（tanh 之后的截断）。残差锚定形式的唯一风险是"残差越训越大，
+# 把 z_lex 这条原生词向量拉离词表流形"：v5 实测 α 已从 0 涨到 tanh(0.2705)=0.264、
+# 同时 bridge 末层权重范数 13.29、out_norm 从 1.05 涨到 1.36，读出端 EM 反而比 v3 低
+# （11.8% vs 17.2%）。这里给残差一个可解释的上限：α<=0.5 时 e = lex + α·res 与 lex 的
+# 夹角不超过 ~30°，方向仍由原生词向量主导；需要更强残差时再显式调这个环境变量。
+LATENT_ALPHA_MAX       = _env_float("LATENT_ALPHA_MAX", 0.5)
 # ---- v4 手术二：HybridLatentRouter 的 h0 Token-MaxSim 底盘 ----
 LATENT_ADDR_GAMMA      = _env_float("LATENT_ADDR_GAMMA", 0.5)   # γ 初值：MaxSim 占比（可学习）
 LATENT_MS_TAU          = _env_float("LATENT_MS_TAU", 0.2)       # MaxSim 的固定逆温度
@@ -351,6 +362,7 @@ class LatentCompressor(nn.Module):
             z = z.masked_fill(empty.view(B, 1, 1), 0.0)
 
         z_lex: Optional[torch.Tensor] = None
+        lex_pick: Optional[List[List[int]]] = None
         if self.lex_skip:
             if w is None:
                 raise RuntimeError("lex_skip=True 但注意力权重为 None（need_weights 未生效）")
@@ -376,12 +388,17 @@ class LatentCompressor(nn.Module):
             logits = logits.masked_fill(~safe_mask.unsqueeze(1), -1e4)
             taken = torch.zeros((B, L), dtype=torch.bool, device=logits.device)
             rows = []
+            picked_cols = []
             for _r in range(self.n_slots):
                 row = logits[:, _r, :].masked_fill(taken, -1e4)
                 p_r = torch.softmax(row / max(1e-3, float(self.lex_tau)), dim=-1)
                 rows.append(p_r)
                 pick = p_r.argmax(dim=-1, keepdim=True)          # [B,1]
+                picked_cols.append(pick.squeeze(1))
                 taken = taken.scatter(1, pick, True)
+            # 选出的是哪几个 token（列号）：符号保真诊断必须能打印"压缩器锚在哪个词上"，
+            # 否则"实体有没有进潜层"只能靠猜（见 tools/diag_symbol_fidelity.py）。
+            lex_pick = torch.stack(picked_cols, dim=1).tolist()   # [B,m] 列号
             w = torch.stack(rows, dim=1)                          # [B,m,L]
             w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
             wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
@@ -395,7 +412,8 @@ class LatentCompressor(nn.Module):
         info = {"n_rows": int(B), "seq_len": int(L),
                 "n_tokens": [int(v) for v in mask.sum(dim=1).tolist()],
                 "n_empty_rows": int(empty.sum().item()),
-                "lex_skip": bool(self.lex_skip)}
+                "lex_skip": bool(self.lex_skip),
+                "lex_pick": lex_pick}
         return z, z_lex, info
 
 
@@ -434,22 +452,28 @@ class LatentBridge(nn.Module):
     def __init__(self, hidden_size: int, bottleneck: int = LATENT_BOTTLENECK,
                  target_norm: float = LATENT_TARGET_NORM,
                  lex_skip: bool = bool(LATENT_LEX_SKIP),
-                 lex_gate_init: float = LATENT_LEX_GATE_INIT):
+                 lex_gate_init: float = LATENT_LEX_GATE_INIT,
+                 alpha_max: float = LATENT_ALPHA_MAX):
         super().__init__()
         if int(hidden_size) <= 0 or int(bottleneck) <= 0:
             raise ValueError(f"hidden_size/bottleneck 必须为正：{hidden_size}/{bottleneck}")
         if not (float(target_norm) > 0):
             raise ValueError(f"target_norm 必须为正，得到 {target_norm}")
+        if not (0.0 < float(alpha_max) <= 1.0):
+            raise ValueError(f"alpha_max 必须在 (0,1] 内，得到 {alpha_max}")
         self.hidden_size = int(hidden_size)
         self.bottleneck = int(bottleneck)
+        self.alpha_max = float(alpha_max)
         self.net = nn.Sequential(
             nn.LayerNorm(self.hidden_size),
             nn.Linear(self.hidden_size, self.bottleneck),
             nn.SiLU(),
             nn.Linear(self.bottleneck, self.hidden_size),
         )
-        # 最后一层零初始化：配合 α 初值 0，保证第 0 步 E_soft 严格等于 z_lex
+        # 最后一层零初始化：配合 α 初值 ≈0，保证第 0 步 E_soft 严格等于 z_lex
         # （残差从"什么都没有"开始长，而不是一开始就往原生词向量上叠噪声）。
+        # 注意零初始化**必须**搭配非零 α 初值（见 LATENT_LEX_GATE_INIT 的注释）：
+        # α 也恰好为 0 时语义分支与门控同时失去梯度，会死锁在"永远只有 z_lex"。
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
@@ -461,6 +485,11 @@ class LatentBridge(nn.Module):
         # 因此在单位球面上做门控插值：方向由语义/符号两支按 α 竞争，范数仍由受限标量
         # 给出。α→0 时结果与 v3 逐位相同（unit(out)·scale，归一化是幂等的）。
         self.lex_skip = bool(lex_skip)
+        # 诊断开关：True 时 forward 会把"残差有多强 / 输出范数多大"记进 self.last_stats。
+        # 默认关闭 —— 这些统计要做 .item()，每步都同步会把 4B 前向的空隙填满。
+        # 训练脚本在 --diag-every 的那一步打开它，用来回答"α 是不是在把读出拖离词表"。
+        self.collect_stats = False
+        self.last_stats: Dict[str, float] = {}
         # 门控参数**只在开启直通时注册**。v2/v3 的 ckpt 里根本没有 `lex_gate`，
         # 无条件注册会让 `load_state_dict(strict=True)` 报
         # `Missing key(s) in state_dict: "lex_gate"`，于是所有历史权重都读不进来
@@ -474,15 +503,20 @@ class LatentBridge(nn.Module):
         return self.out_norm.clamp(self.NORM_MIN, self.NORM_MAX)
 
     def alpha(self) -> torch.Tensor:
-        """h0 直通的**残差**系数 α（tanh，初值 0）。
+        """h0 直通的**残差**系数 α（tanh，初值很小，上限 alpha_max）。
 
-        初值为 0 是有物理含义的：第 0 步输出严格等于 z_lex（原生关键 token 的 h0），
-        于是训练起点就是"零训练也能拿 32.8% EM 的 oracle_embed 状态"，而不是从一团
-        随机投影开始。α 只在 KL/QA 梯度真正需要补上下文时才离开 0。
+        初值必须**非零但很小**（默认 0.05）：末层零初始化让 res 严格为 0，于是第 0 步
+        输出逐元素等于 z_lex（零训练就有 oracle_embed 的起点），但若 α 也恰好为 0，
+        ∂e/∂W_last ∝ α 与 ∂e/∂α ∝ res 会同时为零 —— 语义分支与门控一起死锁。
+        这是把"残差从零开始长"和"梯度必须能流进语义分支"同时满足的唯一取值方式。
+
+        上限是**约束**而不是装饰：v5 的 α 一路涨到 0.264 而读出 EM 反而退到 11.8%，
+        说明残差在偏离词表流形。clamp 之后超过上限的梯度为 0（硬约束），
+        残差强度只能通过调整 alpha_max 放开，不能靠训练自己越界。
         """
         if not self.lex_skip:
             return torch.zeros((), device=self.out_norm.device, dtype=self.out_norm.dtype)
-        return torch.tanh(self.lex_gate)
+        return torch.tanh(self.lex_gate).clamp(-self.alpha_max, self.alpha_max)
 
     def forward(self, z: torch.Tensor, z_lex: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Z [B,m,d]（+ 可选 z_lex [B,m,d]）-> soft tokens [B,m,d]，范数对齐真实 embedding。"""
@@ -493,8 +527,15 @@ class LatentBridge(nn.Module):
         out = self.net(z.to(device=p.device, dtype=p.dtype))
         out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
         # 方向保留、范数对齐到真实 embedding 尺度（见类文档里的实测数据）
+        #
+        # **分母必须夹在 1.0，不能夹在 1e-6**：末层零初始化（见 __init__）使第 0 步
+        # ‖out‖≈0，而 d(out/‖out‖)/dout ≈ 1/‖out‖ —— 夹在 1e-6 等于给末层乘上 1e6
+        # 的雅可比。v5 实测初始 bridge 分支梯度范数 1.85e10，grad_clip=1.0 之后
+        # 实际更新方向几乎完全由这一条病态路径决定（裁剪前/后的比值就是证据）。
+        # 夹在 1.0 的含义：‖out‖>=1 时逐位等价于原来的单位化；‖out‖<1 时不再放大，
+        # 残差范数自然小于 target_norm（正是"从零开始长"想要的行为）。
         n = out.norm(dim=-1, keepdim=True)
-        unit = out / n.clamp_min(1e-6)
+        unit = out / n.clamp_min(1.0)
         res = unit * self.scale().to(device=unit.device, dtype=unit.dtype)
         if z_lex is not None and self.lex_skip:
             # ---- 残差锚定（v4 手术二）----
@@ -518,7 +559,26 @@ class LatentBridge(nn.Module):
             tgt = self.scale().to(device=res.device, dtype=res.dtype)
             en = e.norm(dim=-1, keepdim=True).clamp_min(1e-6)
             fac = (tgt / en).clamp(self.NORM_MIN, self.NORM_MAX)
+            if self.collect_stats:
+                with torch.no_grad():
+                    _ln = float(ln[valid].mean()) if bool(valid.any()) else 0.0
+                    _rn = float((a * res).norm(dim=-1).mean())
+                    self.last_stats = {
+                        "alpha": float(a), "scale": float(tgt),
+                        "lex_norm": _ln, "res_norm": _rn,
+                        "res_ratio": (_rn / _ln) if _ln > 0 else 0.0,
+                        "e_norm": float(e.norm(dim=-1).mean()),
+                        "net_out_norm": float(n.mean()),
+                        "w_last": float(self.net[-1].weight.norm()),
+                    }
             return e * fac
+        if self.collect_stats:
+            with torch.no_grad():
+                self.last_stats = {"alpha": 0.0, "scale": float(self.scale()),
+                                   "lex_norm": 0.0, "res_norm": 0.0, "res_ratio": 0.0,
+                                   "e_norm": float(res.norm(dim=-1).mean()),
+                                   "net_out_norm": float(n.mean()),
+                                   "w_last": float(self.net[-1].weight.norm())}
         return res
 
 
@@ -2434,6 +2494,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     span: List[Tuple[int, int]] = []
     n_tokens: List[int] = []
     chunk_text: List[Optional[str]] = []
+    chunk_ids: List[List[int]] = []      # 每块的 token id：符号保真诊断要按列号回查"哪个词"
     n_empty_units = 0
 
     with torch.no_grad(), delta_write_disabled(model):
@@ -2461,12 +2522,14 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                         h18_out.append(torch.zeros((1, d), dtype=hl.dtype))
                         mask_out.append(torch.zeros((1,), dtype=torch.long))
                         chunk_text.append(None)
+                        chunk_ids.append([])
                         n_empty_units += 1
                     else:
                         h0_out.append(h0[r, a:b].to("cpu"))
                         h18_out.append(hl[r, a:b].to("cpu"))
                         mask_out.append(torch.ones((b - a,), dtype=torch.long))
                         chunk_text.append(_decode_ids(tokenizer, ids[r, a:b]))
+                        chunk_ids.append([int(v) for v in ids[r, a:b].tolist()])
                     parents.append(pid)
                     chunk_index.append(int(k))
                     n_chunks.append(len(spans))
@@ -2487,6 +2550,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     return {"h0": h0_b, "h18": h18_b, "mask": m_b,
             "parents": parents, "chunk_index": chunk_index, "n_chunks": n_chunks,
             "span": span, "n_tokens": n_tokens, "chunk_text": chunk_text,
+            "chunk_ids": chunk_ids,
             "n_units": len(texts), "n_chunks_total": Nc, "n_empty_units": n_empty_units,
             "max_unit_tokens": int(max_unit_tokens), "layer": int(layer),
             "pad_len": int(T)}
@@ -2708,7 +2772,9 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
                             lex_skip=lex_skip)
     bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]),
                           target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)),
-                          lex_skip=bool(cfg.get("bridge_lex_skip", lex_skip)))
+                          lex_skip=bool(cfg.get("bridge_lex_skip", lex_skip)),
+                          alpha_max=float(cfg.get("bridge_alpha_max",
+                                                  LATENT_ALPHA_MAX)))
     comp.load_state_dict(blob["compressor"], strict=strict)
     bridge.load_state_dict(blob["bridge"], strict=strict)
     comp.to(dev).eval()
@@ -2786,6 +2852,9 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
     cfg["bottleneck"] = int(bridge.bottleneck)
     cfg["lex_skip"] = bool(getattr(compressor, "lex_skip", False))
     cfg["bridge_lex_skip"] = bool(getattr(bridge, "lex_skip", False))
+    # 非参数约束也必须落盘：alpha_max 决定"残差能长到多强"，不存进 ckpt 的话
+    # 同一个权重换个进程/换台机器读出来就是另一套读出行为（与 router 的 ms_tau 同类）。
+    cfg["bridge_alpha_max"] = float(getattr(bridge, "alpha_max", LATENT_ALPHA_MAX))
     if bool(cfg["lex_skip"]) != bool(cfg["bridge_lex_skip"]):
         raise ValueError(f"压缩器 lex_skip={cfg['lex_skip']} 与 bridge lex_skip="
                          f"{cfg['bridge_lex_skip']} 不一致：直通载荷生成端与消费端必须同时开或同时关")

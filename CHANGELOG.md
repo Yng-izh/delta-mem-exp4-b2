@@ -2,6 +2,29 @@
 
 只保留对**当前代码**有约束力的条目。历史实验的逐轮流水已随旧版本一起移除。
 
+## 读出端与训练目标的六处对齐（2026-11-04 第二轮）
+
+v5 的 oracle_latent 只有 11.8%（无记忆 11.2%），说明**寻址全对也读不出来**。这一轮只动
+"训练目标与读出路径"，不动架构：
+
+| 问题 | 根因 | 修法 | 回归测试 |
+|---|---|---|---|
+| 重建与 QA 用不同的 bridge 输入 | recon 走 `bridge(z_sem)`，QA 走 `bridge(z_sem, z_lex)`：同一组参数被两个冲突目标拉扯 | `--recon-lex 1`（默认）：recon 也走 `compose_routed_soft`，输入逐位同构；`0` 复现旧行为 | C1–C3 |
+| 初始 bridge 梯度 1.85e10 | 末层零初始化 + `unit = out / n.clamp_min(1e-6)`：雅可比 ≈1e6 | 分母夹在 **1.0**（‖out‖≥1 时逐位等价），梯度回到 O(1) | A3–A4 |
+| α 无约束地涨到 0.264 | `tanh(lex_gate)` 无上限，残差把读出拖离词表流形 | `--alpha-max`（默认 0.5）+ 诊断打印 α / 残差比 / ‖W_last‖ | B1–B2 |
+| α=0 时语义分支永远拿不到梯度 | 零初始化下 ∂e/∂W ∝ α = 0 且 ∂e/∂α ∝ res = 0，只能靠"另一条不走 α 的重建路径"启动 | α 初值 **0.05**（res 仍严格为 0，输出仍等于 z_lex，但梯度可流） | A5–A6 |
+| 训练从未见过推理的读出分布 | 训练=金标+难负例，推理=router 自选 8 条（可能缺证据） | `--readout-mode gold/mixed/router`（默认 mixed，预热后 50% 走 `forward_hops` 的真实 picks），并累计 `readout_stats` 写进 ckpt | — |
+| teacher 吃整份 memory | 20+ 条干扰下 teacher 自己也可能答错，KL 在蒸馏噪声 | `--teacher-scope gold`（默认）+ 开跑前 `--teacher-probe-n` 量两种上下文的 acc | D1–D6 |
+
+另外三处口径修正：
+
+- `evaluate_recon` 改为**单槽输入 / 单槽目标 / 自由生成**，并单独报实体与数字恢复率；
+  旧口径（整份 memory 当目标 + teacher forcing）的 59.6% token-acc 不能当保真结论。
+- `oracle_latent` 之前没把 `seg_ids`/`isolate` 传给 `_emit_latent`，eager 后端拿不到
+  块对角掩码，与 `router` 不同构；现在两条路都传。
+- `oracle_embed` 的预算按 ckpt 的 `max_unit_tokens`/`m` 对齐（旧默认 64 对 32 会让
+  "软 token 注入 vs 压缩损失"的归因失真）。
+
 ## 三段流程（2026-11-04 定稿）
 
 | 阶段 | 做什么 | 为什么 |
@@ -21,7 +44,9 @@
 
 ## 结构决策（有实测支撑，别改回去）
 
-1. **Bridge 用残差锚定**：`E = z_lex + tanh(α)·Bridge(z_sem)`，α 初值 0、末层零初始化。
+1. **Bridge 用残差锚定**：`E = z_lex + tanh(α)·Bridge(z_sem)`，末层零初始化，
+   α 初值 **0.05**（不能是 0：零初始化下 α=0 会让语义分支与门控同时失去梯度）、
+   硬上限 **0.5**（v5 涨到 0.264 时读出退化）。
    依据：同 33 token 预算，原生 h0 embedding 32.8% EM，平滑平均的潜向量 17.2%。
 2. **直通分支低温尖锐选通**：`τ_lex=0.05` + 逐行互斥，m 个槽分别锚到 m 个不同实词 token。
 3. **寻址键来自冻结特征**：`h0/h18` 注意力池化 + 去均值 IDF-MaxSim；k_out 做新信息抑制，
