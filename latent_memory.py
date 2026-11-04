@@ -331,7 +331,9 @@ class LatentCompressor(nn.Module):
         return z_sem
 
     def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
-                      attention_mask: Optional[torch.Tensor] = None
+                      attention_mask: Optional[torch.Tensor] = None,
+                      word_ids: Optional[torch.Tensor] = None,
+                      word_penalty: Optional[torch.Tensor] = None
                       ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
         """返回 (z_sem [B,m,d], z_lex [B,m,d] 或 None, info)。
 
@@ -393,6 +395,9 @@ class LatentCompressor(nn.Module):
 
         z_lex: Optional[torch.Tensor] = None
         lex_pick: Optional[List[List[int]]] = None
+        lex_word_pick: Optional[List[List[int]]] = None
+        lex_granularity = "token"
+        n_words = 0
         if self.lex_skip:
             if w is None:
                 raise RuntimeError("lex_skip=True 但注意力权重为 None（need_weights 未生效）")
@@ -416,26 +421,39 @@ class LatentCompressor(nn.Module):
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
             logits = torch.log(w.clamp_min(1e-9))
             logits = logits.masked_fill(~safe_mask.unsqueeze(1), -1e4)
-            taken = torch.zeros((B, L), dtype=torch.bool, device=logits.device)
-            rows = []
-            picked_cols = []
-            for _r in range(self.n_slots):
-                row = logits[:, _r, :].masked_fill(taken, -1e4)
-                p_r = torch.softmax(row / max(1e-3, float(self.lex_tau)), dim=-1)
-                rows.append(p_r)
-                pick = p_r.argmax(dim=-1, keepdim=True)          # [B,1]
-                picked_cols.append(pick.squeeze(1))
-                taken = taken.scatter(1, pick, True)
-            # 选出的是哪几个 token（列号）：符号保真诊断必须能打印"压缩器锚在哪个词上"，
-            # 否则"实体有没有进潜层"只能靠猜（见 tools/diag_symbol_fidelity.py）。
-            lex_pick = torch.stack(picked_cols, dim=1).tolist()   # [B,m] 列号
-            w = torch.stack(rows, dim=1)                          # [B,m,L]
-            w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
-            wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
-            z_lex = torch.einsum("bml,bld->bmd",
-                                 w.to(dtype=wd),
-                                 h0.to(device=w.device, dtype=wd))
-            z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
+            if word_ids is not None:
+                # ---- v6：按**整词**选，不再按子词 ----
+                # 旧写法在 token 级 argmax，一个词被切成 2~4 个 token 时只抓到一片
+                # （实测选中 `Mer` / `cedes` / `-`），碎片向量在词表里不对应任何词。
+                z_lex, pick, n_words = self._lex_by_word(
+                    h0, w, safe_mask, word_ids, word_penalty)
+                lex_granularity = "word"
+                if pick is not None:
+                    lex_word_pick = pick.tolist()
+                    # 兼容旧字段：给出每个被选词的首个 token 列号（诊断脚本仍在用）
+                    lex_pick = self._first_token_of_words(
+                        word_ids, safe_mask, pick).tolist()
+            else:
+                taken = torch.zeros((B, L), dtype=torch.bool, device=logits.device)
+                rows = []
+                picked_cols = []
+                for _r in range(self.n_slots):
+                    row = logits[:, _r, :].masked_fill(taken, -1e4)
+                    p_r = torch.softmax(row / max(1e-3, float(self.lex_tau)), dim=-1)
+                    rows.append(p_r)
+                    pick = p_r.argmax(dim=-1, keepdim=True)          # [B,1]
+                    picked_cols.append(pick.squeeze(1))
+                    taken = taken.scatter(1, pick, True)
+                # 选出的是哪几个 token（列号）：符号保真诊断必须能打印"压缩器锚在哪个词上"，
+                # 否则"实体有没有进潜层"只能靠猜（见 tools/diag_symbol_fidelity.py）。
+                lex_pick = torch.stack(picked_cols, dim=1).tolist()   # [B,m] 列号
+                w = torch.stack(rows, dim=1)                          # [B,m,L]
+                w = w / w.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+                wd = h0.dtype if h0.dtype.is_floating_point else p.dtype
+                z_lex = torch.einsum("bml,bld->bmd",
+                                     w.to(dtype=wd),
+                                     h0.to(device=w.device, dtype=wd))
+                z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
             if bool(empty.any()):
                 z_lex = z_lex.masked_fill(empty.view(B, 1, 1), 0.0)
 
@@ -443,8 +461,207 @@ class LatentCompressor(nn.Module):
                 "n_tokens": [int(v) for v in mask.sum(dim=1).tolist()],
                 "n_empty_rows": int(empty.sum().item()),
                 "lex_skip": bool(self.lex_skip),
-                "lex_pick": lex_pick}
+                "lex_pick": lex_pick,
+                "lex_word_pick": lex_word_pick,
+                "lex_granularity": lex_granularity,
+                "n_words": int(n_words)}
         return z, z_lex, info
+
+    def _lex_by_word(self, h0: torch.Tensor, w: torch.Tensor,
+                     safe_mask: torch.Tensor, word_ids: torch.Tensor,
+                     word_penalty: Optional[torch.Tensor]
+                     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int]:
+        """按**整词**挑 n_slots 个词，每个词的子词 h0 取均值当 1 个向量。
+
+        输入：
+            h0        [B,L,d]  第 0 层隐藏（原生词嵌入空间）
+            w         [B,m,L]  交叉注意力权重（已是 float32、padding 已清零）
+            safe_mask [B,L]    有效 token
+            word_ids  [B,L]    token -> 词编号（-1 = 特殊/padding）
+            word_penalty [B,W] 词级降权（标点 0.1 / 停用词 0.35 / 其余 1.0）
+        返回 (z_lex [B,m,d], pick [B,m] 词编号, n_words)。
+
+        为什么用"注意力质量取行最大"当词分：同一个词可能被多个槽位注意到，
+        取最大等价于"只要有一个槽位看重这个词就算数"，不会因为别的槽位分散而漏掉。
+        选择本身是**硬 argmax**（逐行互斥），没有 STE —— 与旧实现一致：
+        `nn.MultiheadAttention(need_weights=True)` 返回的权重本来就不带梯度，
+        这里再加 STE 只会凭空引入一条没有依据的梯度。
+        """
+        B, L, d = int(h0.shape[0]), int(h0.shape[1]), int(h0.shape[2])
+        dev = h0.device
+        wid = word_ids.to(device=dev).long()
+        valid = wid >= 0
+        n_words = int(wid.max().item()) + 1 if bool(valid.any()) else 0
+        if n_words <= 0:
+            return torch.zeros((B, self.n_slots, d), dtype=h0.dtype, device=dev), None, 0
+        ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
+        # [B,W,L]：每个词包含哪些 token（并保证只含有效 token）
+        mask_w = (wid.unsqueeze(1) == ar) & safe_mask.unsqueeze(1)
+        mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())   # [B,m,W]
+        score = mass.max(dim=1).values                                   # [B,W]
+        if word_penalty is not None:
+            pen = word_penalty.to(device=dev, dtype=score.dtype)
+            if int(pen.shape[1]) < n_words:                              # 词数超出（理论不会）
+                pen = torch.cat([pen, torch.ones((B, n_words - int(pen.shape[1])),
+                                                 dtype=pen.dtype, device=dev)], dim=1)
+            score = score * pen[:, :n_words]
+        exists = mask_w.any(dim=-1)                                      # [B,W]
+        score = score.masked_fill(~exists, float("-inf"))
+
+        taken = torch.zeros((B, n_words), dtype=torch.bool, device=dev)
+        picks: List[torch.Tensor] = []
+        for _r in range(self.n_slots):
+            s_r = score.masked_fill(taken, float("-inf"))
+            pw = s_r.argmax(dim=-1)                                      # [B]
+            cur = s_r.gather(1, pw.unsqueeze(1)).squeeze(1)
+            if picks:
+                # 词数少于 m（极短单元）时复用上一个词，保持 [B,m] 形状稳定
+                pw = torch.where(torch.isfinite(cur), pw, picks[-1])
+            taken = taken.scatter(1, pw.unsqueeze(1), True)
+            picks.append(pw)
+        pick = torch.stack(picks, dim=1)                                 # [B,m]
+
+        sel = mask_w.gather(1, pick.unsqueeze(-1).expand(-1, -1, L)).float()
+        denom = sel.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        wd = h0.dtype if h0.dtype.is_floating_point else torch.float32
+        z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd),
+                             h0.to(device=dev, dtype=wd))
+        z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
+        return z_lex, pick, n_words
+
+    @staticmethod
+    def _first_token_of_words(word_ids: torch.Tensor, safe_mask: torch.Tensor,
+                              pick: torch.Tensor) -> torch.Tensor:
+        """被选中的每个词在块内的**首个 token 列号**（兼容旧的 lex_pick 字段）。"""
+        B, L = int(word_ids.shape[0]), int(word_ids.shape[1])
+        dev = word_ids.device
+        n_words = int(pick.max().item()) + 1
+        ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
+        mask_w = (word_ids.to(device=dev).long().unsqueeze(1) == ar) & \
+            safe_mask.to(device=dev).unsqueeze(1)
+        first = mask_w.float().argmax(dim=-1)                            # [B,W]
+        return first.gather(1, pick.to(device=dev).long())
+
+
+# 词级选词用的停用词表（只用于**降权**，不参与语义；故意保持小而常见，
+# 免得把"not/no"这类对答案有影响的否定词也压掉）。
+_LATENT_STOPWORDS = frozenset(
+    "a an the of in on at to and or is was were be been being for by with as that "
+    "this these those from it its his her their they he she them we you i not no "
+    "do does did has have had will would can could may might there which who whom "
+    "also into over after before during between about while than then so such".split())
+
+
+def _word_ids_from_offsets(offsets, token_texts):
+    """按**字符偏移**把 token 分组成词，返回逐 token 的词编号（-1 = 特殊/padding）。
+
+    为什么用偏移而不是 Ġ/▁ 前缀：前缀标记只是字节级 BPE 的约定，换一个分词器
+    （SentencePiece、或带特殊前处理的模型）就失效，而字符偏移是 tokenizer 直接给的。
+    词边界规则：
+        - 偏移之间有间隔（跳过了空白）-> 新词；
+        - 该 token 以标点开头（`'`/`’`/`-` 除外，它们常在词内）-> 单独成词；
+        - 上一个 token 是标点 -> 当前 token 也起新词（`Rome."` 里的引号不会吃掉下一个词）。
+    偏移全 0（特殊 token / padding）的 token 记 -1，不参与选词。
+    """
+    out = []
+    wid = -1
+    prev_end = None
+    prev_punct = False
+    for (s, e), txt in zip(offsets, token_texts):
+        s, e = int(s), int(e)
+        if e <= s:
+            out.append(-1)
+            prev_punct = False
+            continue
+        t = str(txt).strip()
+        # 字节级 BPE 的偏移**包含词前的空格**（" was" 的 span 起点正好等于上一个
+        # token 的终点），所以只看 s > prev_end 会把整句并成一个词。必须再看
+        # "解码后的文本是否以空白开头"——这是文本层面的判断，不是 Ġ/▁ 约定。
+        starts_ws = str(txt)[:1].isspace()
+        punct = bool(t) and (not t[:1].isalnum()) and t[:1] not in "'\u2019-"
+        start_new = ((prev_end is None) or (s > prev_end) or starts_ws
+                     or punct or prev_punct)
+        if start_new:
+            wid += 1
+        out.append(wid)
+        prev_end = e
+        prev_punct = punct
+    return out
+
+
+def _word_ids_from_texts(token_texts):
+    """拿不到字符偏移时的回退：按"词前空格标记 + 标点"切词。
+
+    这是**降级路径**，只在 tokenizer 不支持 `return_offsets_mapping` 时使用，
+    并且会把 `word_boundary_source` 记成 "prefix"，绝不假装与偏移路径等价。
+    """
+    out = []
+    wid = -1
+    prev_punct = False
+    for txt in token_texts:
+        t = str(txt)
+        stripped = t.strip()
+        if not stripped:
+            out.append(-1)
+            prev_punct = False
+            continue
+        starts_space = t[:1].isspace() or t.startswith(("\u0120", "\u2581"))
+        punct = (not stripped[:1].isalnum()) and stripped[:1] not in "'\u2019-"
+        if wid < 0 or starts_space or punct or prev_punct:
+            wid += 1
+        out.append(wid)
+        prev_punct = punct
+    return out
+
+
+def _word_penalty_for(tok, ids, word_ids):
+    """每个词一个**降权系数**：纯标点 0.1，停用词 0.35，其余 1.0。
+
+    返回与词编号对齐的 list[float]（长度 = 词数）。选词时乘到词分数上：
+    不直接置零是为了"整句都是标点时仍能选出东西"，不至于给出全零载荷。
+    """
+    n_words = (max(word_ids) + 1) if word_ids else 0
+    if n_words <= 0:
+        return []
+    texts = [""] * n_words
+    for tid, wid in zip(ids, word_ids):
+        if wid is None or int(wid) < 0:
+            continue
+        try:
+            texts[int(wid)] += tok.decode([int(tid)])
+        except Exception:
+            pass
+    pens = []
+    for txt in texts:
+        t = str(txt).strip().lower()
+        if not t or all(not ch.isalnum() for ch in t):
+            pens.append(0.1)
+        elif t in _LATENT_STOPWORDS:
+            pens.append(0.35)
+        else:
+            pens.append(1.0)
+    return pens
+
+
+def _pad_word_tensors(chunk_word_ids, chunk_word_penalty):
+    """把逐块变长的 (词编号, 词降权) 填成 [Nc,T] / [Nc,W] 两个张量。
+
+    T 取块内最长 token 数，W 取所有块里最多的词数；缺的位置分别填 -1 / 1.0
+    （-1 = 不属于任何词，1.0 = 不降权），保证 downstream 不必处理变长。
+    """
+    Nc = len(chunk_word_ids)
+    T = max((len(x) for x in chunk_word_ids), default=1) or 1
+    W = max((len(x) for x in chunk_word_penalty), default=1) or 1
+    wid = torch.full((Nc, T), -1, dtype=torch.long)
+    pen = torch.ones((Nc, W), dtype=torch.float32)
+    for i, w in enumerate(chunk_word_ids):
+        if w:
+            wid[i, :len(w)] = torch.tensor([int(v) for v in w], dtype=torch.long)
+    for i, p in enumerate(chunk_word_penalty):
+        if p:
+            pen[i, :len(p)] = torch.tensor([float(v) for v in p], dtype=torch.float32)
+    return wid, pen
+
 
 
 def _as_3d(t: torch.Tensor, name: str) -> torch.Tensor:
@@ -2540,12 +2757,29 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     n_tokens: List[int] = []
     chunk_text: List[Optional[str]] = []
     chunk_ids: List[List[int]] = []      # 每块的 token id：符号保真诊断要按列号回查"哪个词"
+    # 词边界（v6）：逐块的"token -> 词编号"与"词 -> 降权系数"。
+    # 选词从"按子词"改成"按整词"就靠这两份信息；用 tokenizer 的**字符偏移**分组，
+    # 不依赖 Ġ/▁ 前缀（换分词器就失效）。拿不到偏移时降级为前缀规则并记账。
+    chunk_word_ids: List[List[int]] = []
+    chunk_word_penalty: List[List[float]] = []
+    word_boundary_source = "offset"
     n_empty_units = 0
 
     with torch.no_grad(), delta_write_disabled(model):
         for s in range(0, len(texts), bs):
             batch = texts[s:s + bs]
-            enc = tokenizer(batch, return_tensors="pt", padding=True, truncation=False)
+            try:
+                enc = tokenizer(batch, return_tensors="pt", padding=True,
+                                truncation=False, return_offsets_mapping=True)
+                offsets = enc.pop("offset_mapping", None)
+                if offsets is None:
+                    raise ValueError("tokenizer 未返回 offset_mapping")
+                offsets = offsets.cpu().tolist()
+            except Exception:
+                enc = tokenizer(batch, return_tensors="pt", padding=True,
+                                truncation=False)
+                offsets = None
+                word_boundary_source = "prefix"
             ids = enc["input_ids"].to(dev)
             am = enc["attention_mask"].to(dev)
             out = model(input_ids=ids, attention_mask=am, output_hidden_states=True,
@@ -2568,13 +2802,25 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                         mask_out.append(torch.zeros((1,), dtype=torch.long))
                         chunk_text.append(None)
                         chunk_ids.append([])
+                        chunk_word_ids.append([])
+                        chunk_word_penalty.append([])
                         n_empty_units += 1
                     else:
                         h0_out.append(h0[r, a:b].to("cpu"))
                         h18_out.append(hl[r, a:b].to("cpu"))
                         mask_out.append(torch.ones((b - a,), dtype=torch.long))
+                        _ids_chunk = [int(v) for v in ids[r, a:b].tolist()]
                         chunk_text.append(_decode_ids(tokenizer, ids[r, a:b]))
-                        chunk_ids.append([int(v) for v in ids[r, a:b].tolist()])
+                        chunk_ids.append(_ids_chunk)
+                        _texts = [_decode_ids(tokenizer, torch.tensor([t]))
+                                  for t in _ids_chunk]
+                        if offsets is not None:
+                            _wids = _word_ids_from_offsets(offsets[r][a:b], _texts)
+                        else:
+                            _wids = _word_ids_from_texts(_texts)
+                        chunk_word_ids.append(_wids)
+                        chunk_word_penalty.append(
+                            _word_penalty_for(tokenizer, _ids_chunk, _wids))
                     parents.append(pid)
                     chunk_index.append(int(k))
                     n_chunks.append(len(spans))
@@ -2596,6 +2842,9 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
             "parents": parents, "chunk_index": chunk_index, "n_chunks": n_chunks,
             "span": span, "n_tokens": n_tokens, "chunk_text": chunk_text,
             "chunk_ids": chunk_ids,
+            "chunk_word_ids": chunk_word_ids,
+            "chunk_word_penalty": chunk_word_penalty,
+            "word_boundary_source": word_boundary_source,
             "n_units": len(texts), "n_chunks_total": Nc, "n_empty_units": n_empty_units,
             "max_unit_tokens": int(max_unit_tokens), "layer": int(layer),
             "pad_len": int(T)}
@@ -2668,13 +2917,21 @@ class LatentEncoder:
                                     "n_soft_tokens": 0, "compression_ratio": None}
         feats = self.features(texts, parent_ids=parent_ids)
         kw = {"want_lex": bool(want_lex and getattr(self.compressor, "lex_skip", False))}
+        # 词边界一起交给压缩器：选词从"按子词"改成"按整词"的入口就在这里。
+        # 没有词信息（老特征/空单元）时不传，压缩器自动退回 token 级并在 info 里记账。
+        _wids_raw = feats.get("chunk_word_ids") or []
+        _lex_kw: Dict[str, Any] = {}
+        if _wids_raw:
+            _wid, _wpen = _pad_word_tensors(_wids_raw,
+                                            feats.get("chunk_word_penalty") or [])
+            _lex_kw = {"word_ids": _wid, "word_penalty": _wpen}
         if grad:
             z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
-                                                           feats["mask"])
+                                                           feats["mask"], **_lex_kw)
         else:
             with torch.no_grad():
                 z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
-                                                               feats["mask"])
+                                                               feats["mask"], **_lex_kw)
         if not kw["want_lex"]:
             z_lex = None
         # 按父槽位分组（保持输入顺序，块内按 chunk_index）
@@ -2701,7 +2958,12 @@ class LatentEncoder:
                 "compression_ratio": (round(n_soft / n_in, 6) if n_in else None),
                 "n_slots": int(z.shape[1]), "dim": int(z.shape[-1]),
                 "n_empty_rows": int(cinfo.get("n_empty_rows", 0)),
-                "lex_skip": bool(z_lex is not None)}
+                "lex_skip": bool(z_lex is not None),
+                # 选词粒度与词边界来源必须随 info 走：改了粒度而日志里看不出来，
+                # 就只能靠"指标怎么变了"反推，那是本仓库反复踩过的坑。
+                "lex_granularity": str(cinfo.get("lex_granularity", "token")),
+                "n_words": int(cinfo.get("n_words", 0)),
+                "word_boundary_source": str(feats.get("word_boundary_source", "none"))}
         kfeat = None
         if want_kfeat:
             kfeat = self._kfeat_from_feats(feats, order, groups)

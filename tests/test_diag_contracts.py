@@ -259,7 +259,7 @@ def test_alpha_toggle():
 
 
 # =====================================================================
-# G. 符号保真的词边界还原（碎片 vs 整词）
+# G. 选词结果的还原（词级 / token 级降级）
 # =====================================================================
 class _TokStub:
     """字节级 BPE 风格的假分词器：'Ġ' 表示词前空格。"""
@@ -271,30 +271,31 @@ class _TokStub:
         return self.toks[int(i)]
 
     def decode(self, ids):
-        # 真实字节级 BPE 的 decode 会把 "Ġ" 还原成空格；假分词器必须同样处理，
-        # 否则 `.strip()` 去不掉 "Ġ"，测试会因为"分词器不真实"而误报失败。
+        # 真实字节级 BPE 的 decode 会把 "Ġ" 还原成空格；假分词器必须同样处理。
         return "".join(self.toks[int(i)] for i in ids).replace("Ġ", " ")
 
 
-def test_word_span():
+def test_slot_words():
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import diag_symbol_fidelity as S
     tok = _TokStub(["ĠMer", "cedes", "Ġis", "Ġhead", "-", "Ġx"])
     ids = list(range(6))
-    ok("G1 子词向后合并成整词", S._word_span(tok, ids, 1) == (0, 2),
-       extra=str(S._word_span(tok, ids, 1)))
-    ok("G2 词首 token 只覆盖自己", S._word_span(tok, ids, 2) == (2, 3))
-    ok("G3 标点单独成词", S._word_span(tok, ids, 4) == (4, 5))
-    # 整词还原：选中 'cedes'（列 1）应还原出 'Mercedes'
-    feats = {"chunk_ids": [ids]}
-    cinfo = {"lex_pick": [[1, 3]]}
-    pieces, whole = S._slot_picks(tok, feats, cinfo)
-    ok("G4 碎片口径保留子词", pieces == ["cedes", "head"], extra=str(pieces))
-    ok("G5 整词口径还原成整词", whole == ["Mercedes", "head"], extra=str(whole))
+    # 词结构：[Mer cedes] [is] [head] [-] [x]
+    feats = {"chunk_ids": [ids], "chunk_word_ids": [[0, 0, 1, 2, 3, 4]]}
+    words, gran = S._slot_words(
+        tok, feats, {"lex_word_pick": [[0, 2]], "lex_latent": None})
+    ok("G1 词级还原出整词（不是子词）",
+       words == ["Mercedes", "head"] and gran == "word", extra=f"{words}/{gran}")
 
-    # 命中判定：子词前缀也算命中（'Mer' ⊂ 'Mercedes'）
-    ok("G6 子词前缀算命中", S._hit(["Mer"], "Mercedes-AMG") is True)
-    ok("G7 无关词不算命中", S._hit(["is"], "Mercedes-AMG") is False)
+    # token 级（旧 ckpt）也要按词边界扩成整词
+    words2, gran2 = S._slot_words(
+        tok, feats, {"lex_word_pick": None, "lex_pick": [[1, 3]]})
+    ok("G2 token 级降级时仍按词边界合并",
+       words2 == ["Mercedes", "head"] and gran2 == "token", extra=f"{words2}/{gran2}")
+
+    ok("G3 命中判定用内容词（子词拼回整词后命中）",
+       S._hit(["Mercedes"], "Mercedes-AMG") is True)
+    ok("G4 停用词不算命中", S._hit(["is"], "Mercedes-AMG") is False)
 
 
 # =====================================================================
@@ -370,9 +371,87 @@ def test_inject_position():
        E._salient_pick(wt, ids, 99, "q").tolist() == [0, 1, 2, 3])
 
 
+# =====================================================================
+# I. 词边界分组 / 词级选词 / 覆盖率口径
+# =====================================================================
+def test_word_grouping():
+    # 用户给的例子：Tosca was filmed in Rome.
+    texts = ["T", "os", "ca", " was", " filmed", " in", " Rome", "."]
+    # 真实偏移**包含词前空格**：" was" 的 span 是 (5,10)，起点正好等于 "ca" 的终点。
+    offs = [(0, 1), (1, 3), (3, 5), (5, 10), (10, 17), (17, 20), (20, 25), (25, 26)]
+    wid = LM._word_ids_from_offsets(offs, texts)
+    ok("I1 偏移分组：T+os+ca 属于同一个词", wid[:3] == [0, 0, 0], extra=str(wid))
+    ok("I2 每个词一个编号，标点单独成词",
+       wid == [0, 0, 0, 1, 2, 3, 4, 5], extra=str(wid))
+    # 回退路径（无 offsets）对同一句话给出同样的分组
+    wid2 = LM._word_ids_from_texts(texts)
+    ok("I3 前缀回退路径与偏移路径一致", wid2 == wid, extra=str(wid2))
+    # 特殊 token / padding 记为 -1
+    wid3 = LM._word_ids_from_offsets([(0, 0), (0, 1)], ["<s>", "Hi"])
+    ok("I4 特殊 token 记 -1", wid3 == [-1, 0], extra=str(wid3))
+
+    # 词级降权：标点 0.1 / 停用词 0.35 / 内容词 1.0
+    wt = _WordTok(["Tosca", "was", "in", "Rome", "."])
+    pen = LM._word_penalty_for(wt, [0, 1, 2, 3, 4], [0, 1, 2, 3, 4])
+    ok("I5 标点降权 0.1", abs(pen[4] - 0.1) < 1e-9, extra=str(pen))
+    ok("I6 停用词降权 0.35", abs(pen[1] - 0.35) < 1e-9 and abs(pen[2] - 0.35) < 1e-9,
+       extra=str(pen))
+    ok("I7 内容词不降权", pen[0] == 1.0 and pen[3] == 1.0, extra=str(pen))
+
+
+def test_word_level_selection():
+    torch.manual_seed(0)
+    comp = LM.LatentCompressor(16, n_slots=4, inner_dim=16, num_heads=2, lex_skip=True)
+    B, L, d = 2, 8, 16
+    h0 = torch.randn(B, L, d)
+    h18 = torch.randn(B, L, d)
+    mask = torch.ones(B, L, dtype=torch.long)
+    wid = torch.tensor([[0, 0, 1, 2, 3, 4, 5, 6]] * B)   # 第 0 个词有 2 个 token
+    pen = torch.ones(B, 7)
+    pen[:, 0] = 0.1                                      # 把第 0 个词降权
+    z, zlex, info = comp.forward_split(h0, h18, mask, word_ids=wid, word_penalty=pen)
+    ok("I8 词级选择仍是 m=4 个向量", tuple(zlex.shape) == (B, 4, d),
+       extra=str(tuple(zlex.shape)))
+    ok("I9 info 标注词级粒度", info["lex_granularity"] == "word" and info["n_words"] == 7,
+       extra=f"{info['lex_granularity']}/{info['n_words']}")
+    ok("I10 每次选的是**不同的词**（不重复占槽）",
+       all(len(set(row)) == len(row) for row in info["lex_word_pick"]),
+       extra=str(info["lex_word_pick"]))
+    ok("I11 被降权的词不会优先被选", all(row[0] != 0 for row in info["lex_word_pick"]),
+       extra=str(info["lex_word_pick"]))
+    ok("I12 lex_pick 给出的是被选词的首个 token 列号",
+       all(len(row) == 4 for row in info["lex_pick"]), extra=str(info["lex_pick"]))
+    # 不传词边界 -> 退回 token 级，并在 info 里标注
+    _z, _zl, info2 = comp.forward_split(h0, h18, mask)
+    ok("I13 无词边界时退回 token 级并记账",
+       info2["lex_granularity"] == "token" and info2["lex_word_pick"] is None)
+
+
+def test_coverage_metrics():
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import diag_symbol_fidelity as S
+    ok("I14 标点/停用词算无效选择",
+       S._is_invalid_word(".") and S._is_invalid_word("the")
+       and not S._is_invalid_word("Rome"))
+    words = ["Rome", "9,984"]
+    ok("I15 完整答案覆盖：答案两个词都在 -> True",
+       S._full_answer_covered(words, "Rome 9,984") is True)
+    ok("I16 只覆盖一半 -> False（只命中一个子词不算成功）",
+       S._full_answer_covered(["Rome"], "Rome 9,984") is False)
+    ok("I17 数字整体保留才算覆盖",
+       S._numbers_covered(["9,984"], "population was 9,984") is True)
+    ok("I18 数字被拆开 -> False",
+       S._numbers_covered(["9"], "population was 9,984") is False)
+    ok("I19 无数字时返回 None（不是 False）",
+       S._numbers_covered(["Rome"], "in Rome") is None)
+
+
 def main():
+    test_word_grouping()
+    test_word_level_selection()
+    test_coverage_metrics()
     test_inject_position()
-    test_word_span()
+    test_slot_words()
     test_bridge_numerics()
     test_recon_uses_lex()
     test_teacher_scope()
