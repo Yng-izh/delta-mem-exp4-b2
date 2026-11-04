@@ -388,7 +388,7 @@ def test_word_grouping():
     # 词级降权：标点 0.1 / 停用词 0.35 / 内容词 1.0
     wt = _WordTok(["Tosca", "was", "in", "Rome", "."])
     pen = LM._word_penalty_for(wt, [0, 1, 2, 3, 4], [0, 1, 2, 3, 4])
-    ok("I5 标点降权 0.1", abs(pen[4] - 0.1) < 1e-9, extra=str(pen))
+    ok("I5 纯标点降权为 0（不可选）", pen[4] == 0.0, extra=str(pen))
     ok("I6 停用词降权 0.35", abs(pen[1] - 0.35) < 1e-9 and abs(pen[2] - 0.35) < 1e-9,
        extra=str(pen))
     ok("I7 内容词不降权", pen[0] == 1.0 and pen[3] == 1.0, extra=str(pen))
@@ -545,7 +545,80 @@ def test_train_eval_layout_identity():
            extra=f"n_in={cap.shape[0]} n_train={emb.shape[1]}")
 
 
+def test_punct_hard_mask():
+    """纯标点必须**不可选**，而不是"分数低但仍可能被选"。"""
+    texts = ["[Smyrna", "]", "is", "a", "city", "northwest", "of", "Atlanta", "."]
+    tok = _WordTok(texts)
+    ids = list(range(len(texts)))
+    wids = list(range(len(texts)))
+    pen = LM._word_penalty_for(tok, ids, wids)
+    grp = LM._word_groups(texts)
+    ok("J1 纯标点降权为 0", pen[1] == 0.0 and pen[8] == 0.0, extra=str(pen))
+    ok("J2 带标点的实词仍可选（[Smyrna / Atlanta）",
+       pen[0] == 1.0 and pen[7] == 1.0, extra=str(pen))
+    ok("J3 连字符姓名不被当标点", LM._word_penalty_for(
+        _WordTok(["Robert", "Gascoyne-Cecil"]), [0, 1], [0, 1])[1] == 1.0)
+
+    comp = LM.LatentCompressor(16, n_slots=4, inner_dim=16, num_heads=2, lex_skip=True)
+    L, d = len(texts), 16
+    h0 = torch.randn(1, L, d)
+    mask = torch.ones(1, L, dtype=torch.long)
+    w = torch.zeros(1, 4, L)
+    # 把注意力**全压在标点**上：如果没有硬屏蔽，标点必然被选中
+    w[0, :, 1] = 10.0
+    w[0, :, 8] = 10.0
+    w[0, :, 0] = 1.0
+    w[0, :, 4] = 0.9
+    _z, pick, _n = comp._lex_by_word(
+        h0, w, mask, torch.tensor([wids]), torch.tensor([pen]), torch.tensor([grp]))
+    picked = [texts[i] for i in pick[0].tolist() if i >= 0]
+    ok("J4 标点即使注意力最高也不会被选中",
+       not any(t in ("]", ".") for t in picked), extra=str(picked))
+
+    # 去重：标题里的 [Smyrna 与正文 Smyrna 只占一个槽
+    texts2 = ["[Smyrna", "]", "Smyrna", "city"]
+    pen2 = LM._word_penalty_for(tok, [0, 1, 2, 3], [0, 1, 2, 3])
+    grp2 = LM._word_groups(texts2)
+    ok("J5 标题与正文的同名词分到同一组", grp2[0] == grp2[2] != -1, extra=str(grp2))
+    w2 = torch.zeros(1, 4, len(texts2))
+    w2[0, :, 0] = 5.0
+    w2[0, :, 2] = 4.0
+    w2[0, :, 3] = 1.0
+    _z2, pick2, _n2 = comp._lex_by_word(
+        h0[:, :4], w2, mask[:, :4], torch.tensor([[0, 1, 2, 3]]),
+        torch.tensor([pen2]), torch.tensor([grp2]))
+    got2 = [i for i in pick2[0].tolist() if i >= 0]
+    ok("J6 同名词只占一个槽（不重复占坑）",
+       sum(1 for i in got2 if i in (0, 2)) == 1, extra=str(pick2[0].tolist()))
+
+    # 有效词不足 4 个：空位记 -1，不拿无效词凑数
+    texts3 = ["city", "."]
+    pen3 = LM._word_penalty_for(tok, [0, 1], [0, 1])
+    grp3 = LM._word_groups(texts3)
+    w3 = torch.zeros(1, 4, 2)
+    w3[0, :, 0] = 1.0
+    w3[0, :, 1] = 9.0
+    _z3, pick3, _n3 = comp._lex_by_word(
+        h0[:, :2], w3, mask[:, :2], torch.tensor([[0, 1]]),
+        torch.tensor([pen3]), torch.tensor([grp3]))
+    ok("J7 有效词不足时空位记 -1（不拿标点凑数）",
+       pick3[0].tolist() == [0, -1, -1, -1], extra=str(pick3[0].tolist()))
+
+    # 数字必须作为完整候选
+    texts4 = ["population", "was", "9,984"]
+    pen4 = LM._word_penalty_for(tok, [0, 1, 2], [0, 1, 2])
+    grp4 = LM._word_groups(texts4)
+    w4 = torch.zeros(1, 4, 3)
+    w4[0, :, 2] = 1.0
+    _z4, pick4, _n4 = comp._lex_by_word(
+        h0[:, :3], w4, mask[:, :3], torch.tensor([[0, 1, 2]]),
+        torch.tensor([pen4]), torch.tensor([grp4]))
+    ok("J8 9,984 作为完整数字候选被选中", pick4[0, 0].item() == 2,
+       extra=str(pick4[0].tolist()))
+
+
 def main():
+    test_punct_hard_mask()
     test_train_eval_layout_identity()
     test_numeric_and_stopwords()
     test_per_slot_ranking()

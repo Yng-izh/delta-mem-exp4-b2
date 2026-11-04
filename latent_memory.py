@@ -328,15 +328,18 @@ class LatentCompressor(nn.Module):
     def forward(self, h0: torch.Tensor, h18: torch.Tensor,
                 attention_mask: Optional[torch.Tensor] = None,
                 word_ids: Optional[torch.Tensor] = None,
-                word_penalty: Optional[torch.Tensor] = None) -> torch.Tensor:
+                word_penalty: Optional[torch.Tensor] = None,
+                word_group: Optional[torch.Tensor] = None) -> torch.Tensor:
         z_sem, _lex, _info = self.forward_split(
-            h0, h18, attention_mask, word_ids=word_ids, word_penalty=word_penalty)
+            h0, h18, attention_mask, word_ids=word_ids, word_penalty=word_penalty,
+            word_group=word_group)
         return z_sem
 
     def forward_split(self, h0: torch.Tensor, h18: torch.Tensor,
                       attention_mask: Optional[torch.Tensor] = None,
                       word_ids: Optional[torch.Tensor] = None,
-                      word_penalty: Optional[torch.Tensor] = None
+                      word_penalty: Optional[torch.Tensor] = None,
+                      word_group: Optional[torch.Tensor] = None
                       ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
         """返回 (z_sem [B,m,d], z_lex [B,m,d] 或 None, info)。
 
@@ -428,7 +431,7 @@ class LatentCompressor(nn.Module):
                     "或显式构造 word_ids/word_penalty。")
             w = w.to(dtype=torch.float32).masked_fill(~safe_mask.unsqueeze(1), 0.0)
             z_lex, pick, n_words = self._lex_by_word(
-                h0, w, safe_mask, word_ids, word_penalty)
+                h0, w, safe_mask, word_ids, word_penalty, word_group)
             if pick is not None:
                 lex_word_pick = pick.tolist()
             if bool(empty.any()):
@@ -439,12 +442,17 @@ class LatentCompressor(nn.Module):
                 "n_empty_rows": int(empty.sum().item()),
                 "lex_skip": bool(self.lex_skip),
                 "lex_word_pick": lex_word_pick,
-                "n_words": int(n_words)}
+                "n_words": int(n_words),
+                # 每行真正选到几个词（< n_slots 表示该块有效词不够，空位留零）
+                "n_lex_picks": ([int(sum(1 for v in row if int(v) >= 0))
+                                 for row in lex_word_pick]
+                                if lex_word_pick is not None else None)}
         return z, z_lex, info
 
     def _lex_by_word(self, h0: torch.Tensor, w: torch.Tensor,
                      safe_mask: torch.Tensor, word_ids: torch.Tensor,
-                     word_penalty: Optional[torch.Tensor]
+                     word_penalty: Optional[torch.Tensor],
+                     word_group: Optional[torch.Tensor] = None
                      ) -> Tuple[torch.Tensor, Optional[torch.Tensor], int]:
         """按**整词**挑 n_slots 个词，每个词的子词 h0 取均值当 1 个向量。
 
@@ -475,27 +483,49 @@ class LatentCompressor(nn.Module):
         ar = torch.arange(n_words, device=dev).view(1, n_words, 1)
         mask_w = (wid.unsqueeze(1) == ar) & smask.unsqueeze(1)          # [B,W,L]
         mass = torch.einsum("bml,bwl->bmw", w.float(), mask_w.float())  # [B,m,W]
-        if word_penalty is not None:
-            pen = word_penalty.to(device=dev, dtype=torch.float32)
-            if int(pen.shape[1]) < n_words:
-                pen = torch.cat([pen, torch.ones((B, n_words - int(pen.shape[1])),
-                                                 dtype=pen.dtype, device=dev)], dim=1)
-            mass = mass * pen[:, :n_words].unsqueeze(1)                 # 每个槽各自降权
         exists = mask_w.any(dim=-1)                                     # [B,W]
+        pen = torch.ones((B, n_words), dtype=torch.float32, device=dev)
+        if word_penalty is not None:
+            p_in = word_penalty.to(device=dev, dtype=torch.float32)
+            if int(p_in.shape[1]) < n_words:
+                p_in = torch.cat([p_in, torch.ones((B, n_words - int(p_in.shape[1])),
+                                                   dtype=p_in.dtype, device=dev)], dim=1)
+            pen = p_in[:, :n_words]
+        # **硬屏蔽**：纯标点（pen == 0）直接不进候选集。
+        # 只把分数乘成 0 是不够的 —— 其它候选用完时 Top-k 仍会把零分标点选进来，
+        # 而 4 个 z_lex 槽位很宝贵。
+        eligible = exists & (pen > 0)
+        mass = mass * pen.unsqueeze(1)                                  # 有效词之间再按降权排
+        grp = None
+        if word_group is not None:
+            grp = word_group.to(device=dev).long()
+            if int(grp.shape[1]) < n_words:
+                grp = torch.cat([grp, torch.full((B, n_words - int(grp.shape[1])), -1,
+                                                 dtype=torch.long, device=dev)], dim=1)
+            grp = grp[:, :n_words]
         taken = torch.zeros((B, n_words), dtype=torch.bool, device=dev)
         picks: List[torch.Tensor] = []
         for r in range(self.n_slots):
-            s_r = mass[:, r, :].masked_fill(~exists | taken, float("-inf"))
+            s_r = mass[:, r, :].masked_fill(~eligible | taken, float("-inf"))
             pw = s_r.argmax(dim=-1)                                     # [B]
-            cur = s_r.gather(1, pw.unsqueeze(1)).squeeze(1)
-            if picks:
-                # 词数少于 m（极短单元）时复用上一个词，保持 [B,m] 形状稳定
-                pw = torch.where(torch.isfinite(cur), pw, picks[-1])
-            taken = taken.scatter(1, pw.unsqueeze(1), True)
-            picks.append(pw)
+            ok_r = torch.isfinite(s_r.gather(1, pw.unsqueeze(1)).squeeze(1))
+            onehot = torch.zeros_like(eligible)
+            onehot = onehot.scatter(1, pw.unsqueeze(1), True)
+            add = onehot & ok_r.unsqueeze(1)
+            taken = taken | add
+            if grp is not None:
+                # 去重：同一个表面键（`[Smyrna` 与 `Smyrna`）只占一个槽
+                g = grp.gather(1, pw.unsqueeze(1)).squeeze(1)
+                same = (grp == g.unsqueeze(1)) & (grp >= 0) & ok_r.unsqueeze(1)
+                taken = taken | same
+            # 没有可选词时记 -1（不是"随便挑一个"）：对应 z_lex 行留零，
+            # bridge 会把零直通向量当成空槽、退回语义残差。
+            picks.append(torch.where(ok_r, pw, torch.full_like(pw, -1)))
         pick = torch.stack(picks, dim=1)                                # [B,m]
 
-        sel = mask_w.gather(1, pick.unsqueeze(-1).expand(-1, -1, L)).float()
+        pick_safe = pick.clamp_min(0)
+        sel = mask_w.gather(1, pick_safe.unsqueeze(-1).expand(-1, -1, L)).float()
+        sel = sel * (pick >= 0).unsqueeze(-1).to(sel.dtype)
         denom = sel.sum(dim=-1, keepdim=True).clamp_min(1.0)
         h0d = h0.to(device=dev)                                         # 只在聚合时搬
         wd = h0d.dtype if h0d.dtype.is_floating_point else torch.float32
@@ -625,8 +655,10 @@ def _word_penalty_for(tok, ids, word_ids):
     pens = []
     for txt in texts:
         t = str(txt).strip().lower()
-        if not t or all(not ch.isalnum() for ch in t):
-            pens.append(0.1)
+        if not t or not any(ch.isalnum() for ch in t):
+            # 纯标点**不可选**（0.0）。乘一个小权重是不够的：其它候选用完时
+            # Top-k 仍会把零分标点选进来，而 4 个 z_lex 槽位很宝贵。
+            pens.append(0.0)
         elif t in _LATENT_STOPWORDS:
             pens.append(0.35)
         else:
@@ -634,7 +666,54 @@ def _word_penalty_for(tok, ids, word_ids):
     return pens
 
 
-def _pad_word_tensors(chunk_word_ids, chunk_word_penalty):
+def _word_surface(text):
+    """词的**表面键**：去掉首尾标点、转小写；中间的连字符/逗号/句点保留。
+
+    用途只有一个：防止同一个词在标题和正文里各占一个槽位
+    （`[Smyrna]` 里的 `[Smyrna` 与正文 `Smyrna` 必须算同一个词）。
+    只削首尾，`Gascoyne-Cecil`、`9,984` 的内部结构原样保留。
+    """
+    t = str(text or "").strip()
+    a, b = 0, len(t)
+    while a < b and not t[a].isalnum():
+        a += 1
+    while b > a and not t[b - 1].isalnum():
+        b -= 1
+    return t[a:b].lower()
+
+
+def _word_groups(word_texts):
+    """同表面键的词分到同一组（-1 = 不参与去重，例如空表面）。"""
+    seen = {}
+    out = []
+    for txt in word_texts:
+        key = _word_surface(txt)
+        if not key:
+            out.append(-1)
+            continue
+        if key not in seen:
+            seen[key] = len(seen)
+        out.append(seen[key])
+    return out
+
+
+def _word_texts(tok, ids, word_ids):
+    """每个词的解码文本（按词编号聚合 token）。"""
+    n_words = (max(word_ids) + 1) if word_ids else 0
+    if n_words <= 0:
+        return []
+    parts = [[] for _ in range(n_words)]
+    for tid, wid in zip(ids, word_ids):
+        if wid is None or int(wid) < 0:
+            continue
+        try:
+            parts[int(wid)].append(tok.decode([int(tid)]))
+        except Exception:
+            pass
+    return ["".join(p).strip() for p in parts]
+
+
+def _pad_word_tensors(chunk_word_ids, chunk_word_penalty, chunk_word_group=None):
     """把逐块变长的 (词编号, 词降权) 填成 [Nc,T] / [Nc,W] 两个张量。
 
     T 取块内最长 token 数，W 取所有块里最多的词数；缺的位置分别填 -1 / 1.0
@@ -645,13 +724,17 @@ def _pad_word_tensors(chunk_word_ids, chunk_word_penalty):
     W = max((len(x) for x in chunk_word_penalty), default=1) or 1
     wid = torch.full((Nc, T), -1, dtype=torch.long)
     pen = torch.ones((Nc, W), dtype=torch.float32)
+    grp = torch.full((Nc, W), -1, dtype=torch.long)
     for i, w in enumerate(chunk_word_ids):
         if w:
             wid[i, :len(w)] = torch.tensor([int(v) for v in w], dtype=torch.long)
     for i, p in enumerate(chunk_word_penalty):
         if p:
             pen[i, :len(p)] = torch.tensor([float(v) for v in p], dtype=torch.float32)
-    return wid, pen
+    for i, g in enumerate(chunk_word_group or []):
+        if g:
+            grp[i, :len(g)] = torch.tensor([int(v) for v in g], dtype=torch.long)
+    return wid, pen, grp
 
 
 
@@ -2753,6 +2836,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     # 不依赖 Ġ/▁ 前缀（换分词器就失效）。拿不到偏移时降级为前缀规则并记账。
     chunk_word_ids: List[List[int]] = []
     chunk_word_penalty: List[List[float]] = []
+    chunk_word_group: List[List[int]] = []
     word_boundary_source = "offset"
     n_empty_units = 0
 
@@ -2795,6 +2879,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                         chunk_ids.append([])
                         chunk_word_ids.append([])
                         chunk_word_penalty.append([])
+                        chunk_word_group.append([])
                         n_empty_units += 1
                     else:
                         h0_out.append(h0[r, a:b].to("cpu"))
@@ -2812,6 +2897,8 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                         chunk_word_ids.append(_wids)
                         chunk_word_penalty.append(
                             _word_penalty_for(tokenizer, _ids_chunk, _wids))
+                        _wtexts = _word_texts(tokenizer, _ids_chunk, _wids)
+                        chunk_word_group.append(_word_groups(_wtexts))
                     parents.append(pid)
                     chunk_index.append(int(k))
                     n_chunks.append(len(spans))
@@ -2835,6 +2922,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
             "chunk_ids": chunk_ids,
             "chunk_word_ids": chunk_word_ids,
             "chunk_word_penalty": chunk_word_penalty,
+            "chunk_word_group": chunk_word_group,
             "word_boundary_source": word_boundary_source,
             "n_units": len(texts), "n_chunks_total": Nc, "n_empty_units": n_empty_units,
             "max_unit_tokens": int(max_unit_tokens), "layer": int(layer),
@@ -2913,9 +3001,10 @@ class LatentEncoder:
         _wids_raw = feats.get("chunk_word_ids") or []
         _lex_kw: Dict[str, Any] = {}
         if _wids_raw:
-            _wid, _wpen = _pad_word_tensors(_wids_raw,
-                                            feats.get("chunk_word_penalty") or [])
-            _lex_kw = {"word_ids": _wid, "word_penalty": _wpen}
+            _wid, _wpen, _wgrp = _pad_word_tensors(
+                _wids_raw, feats.get("chunk_word_penalty") or [],
+                feats.get("chunk_word_group") or [])
+            _lex_kw = {"word_ids": _wid, "word_penalty": _wpen, "word_group": _wgrp}
         if grad:
             z, z_lex, cinfo = self.compressor.forward_split(feats["h0"], feats["h18"],
                                                            feats["mask"], **_lex_kw)

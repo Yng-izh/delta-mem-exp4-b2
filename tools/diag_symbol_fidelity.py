@@ -131,6 +131,8 @@ def _slot_words(tok, feats, cinfo):
             continue
         wmap, cids = wids_all[k], cids_all[k]
         for wid in (cols or []):
+            if int(wid) < 0:
+                continue                      # 空位：该块有效词不够，不算一次选择
             toks = [cids[i] for i, w in enumerate(wmap) if int(w) == int(wid)]
             if toks:
                 words.append(_decode(tok, toks))
@@ -336,8 +338,9 @@ def _word_kwargs(feats):
     wids = feats.get("chunk_word_ids") or []
     if not wids:
         return {}
-    wid, pen = LM._pad_word_tensors(wids, feats.get("chunk_word_penalty") or [])
-    return {"word_ids": wid, "word_penalty": pen}
+    wid, pen, grp = LM._pad_word_tensors(wids, feats.get("chunk_word_penalty") or [],
+                                         feats.get("chunk_word_group") or [])
+    return {"word_ids": wid, "word_penalty": pen, "word_group": grp}
 
 
 if __name__ == "__main__":
