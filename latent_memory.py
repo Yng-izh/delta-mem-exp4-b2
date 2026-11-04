@@ -740,13 +740,31 @@ def _word_penalty_for(tok, ids, word_ids):
 # 不参与分词 —— 分词在 `_group_word_ids` 里已经按"逗号/句点必须紧跟连续数字"的
 # 规则把 `9,984` 合成一个词了。
 _NUMERIC_CHARS = frozenset(",.%$+-")
+# 序数后缀 / 年代复数后缀。没有这一条时 `7th`、`22nd`、`1980s` 会掉进"内容词 0.5"，
+# 而它们恰恰是最该被存下来的时间信息（真实数据里 95 次/29520 词，全部是这个形态）。
+_NUMERIC_SUFFIXES = ("st", "nd", "rd", "th", "s")
+
+
+def _strip_numeric_suffix(surf: str) -> str:
+    """去掉紧跟在数字后面的序数/年代后缀（`7th`->`7`、`1980s`->`1980`）。
+
+    必须"后缀前面一位是数字"才削，否则 `Analysis`、`Status` 这类词会被误削。
+    """
+    low = surf.lower()
+    for suf in _NUMERIC_SUFFIXES:
+        if len(surf) > len(suf) and low.endswith(suf) and surf[-len(suf) - 1].isdigit():
+            return surf[: -len(suf)]
+    return surf
 
 
 def _is_numeric_word(surf: str) -> bool:
-    """整串由数字（可含千分位/小数点/百分号/货币符号）构成。"""
+    """整串由数字（可含千分位/小数点/百分号/货币符号/序数后缀）构成。"""
     if not surf or not any(ch.isdigit() for ch in surf):
         return False
-    return all(ch.isdigit() or ch in _NUMERIC_CHARS for ch in surf)
+    core = _strip_numeric_suffix(surf)
+    if not core or not any(ch.isdigit() for ch in core):
+        return False
+    return all(ch.isdigit() or ch in _NUMERIC_CHARS for ch in core)
 
 
 def _is_entity_word(surf: str) -> bool:

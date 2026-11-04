@@ -638,6 +638,19 @@ def test_cov_weights():
     ok("K5 干扰事实走同一套规则（无金标泄漏）",
        w2[0] == 2.0 and w2[5] == 3.0 and w2[1] == 0.0, extra=str(w2))
 
+    # 序数 / 年代：真实数据里 95 次全部掉成"内容词 0.5"，是最该被存下来的时间信息
+    t3 = ["7th", "1980s", "22nd", "3rd", "1950s", "R509", "F1", "analysis"]
+    w3 = LM._word_weight_for(_WordTok(t3), list(range(len(t3))), list(range(len(t3))))
+    ok("K5a 序数与年代算数字（3.0）",
+       w3[:5] == [3.0] * 5, extra=str(w3))
+    ok("K5b 字母打头的编号仍是实体（R509/F1），不被误判成数字",
+       w3[5] == 2.0 and w3[6] == 2.0, extra=str(w3))
+    ok("K5c 后缀削除不能误伤普通词（analysis 是内容词）",
+       w3[7] == 0.5, extra=str(w3))
+    ok("K5d 后缀只在数字后面才削（Analysis/Status 不是数字）",
+       not LM._is_numeric_word("Analysis") and not LM._is_numeric_word("Status")
+       and LM._is_numeric_word("1980s") and LM._is_numeric_word("7th"))
+
 
 def test_cov_loss_formula():
     """L_cov 的公式语义：完美覆盖 -> 0；全压在同一个词上 -> 大惩罚。"""
