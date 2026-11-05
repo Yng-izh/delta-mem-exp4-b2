@@ -742,6 +742,8 @@ def summarize(rows, label):
     # 潜层记忆到底丢了哪一类事实（符号精确值 vs 实体名）。
     for key, name in (("ans_type", "by_ans_type"), ("hops", "by_hops"),
                       ("binding", "by_binding")):
+        if key == "binding" and all(r.get("binding") is None for r in rows):
+            continue      # 没给 --binding-labels 时不要凭空造一个 "None" 分组
         groups = {}
         for r in rows:
             groups.setdefault(str(r.get(key)), []).append(r)
