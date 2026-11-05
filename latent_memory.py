@@ -866,6 +866,52 @@ _LATENT_STOPWORDS = frozenset(
     "also into over during between about while then so such".split())
 
 
+def _word_start_flags(offsets, token_texts):
+    """逐 token 的"是否起新词"标记（与 `_group_word_ids` 的判定同源）。
+
+    判据与 `_word_ids_from_offsets` 完全一致：解码文本以空白开头，或字符偏移跳跃。
+    单独抽出来是为了让**分块**能用同一套词边界 —— 分块和选词各写一套规则，
+    迟早会出现"选词认为是整词、分块却把它劈开"这种自相矛盾。
+    """
+    flags: List[bool] = []
+    prev_end = None
+    for (s, e), txt in zip(offsets, token_texts):
+        s, e = int(s), int(e)
+        if e <= s:                      # 特殊 token / padding
+            flags.append(False)
+            prev_end = None
+            continue
+        flags.append(bool(str(txt)[:1].isspace()
+                          or (prev_end is not None and s > prev_end)))
+        prev_end = e
+    return flags
+
+
+def _split_chunks_word_aligned(flags: Sequence[bool], width: int) -> List[Tuple[int, int]]:
+    """按**词边界**切块：每块尽量装满 width 个 token，但**绝不把词切开**。
+
+    为什么必须这样（2026-11-05 实测）：Qwen3 把数字切成"一个数字一个 token"，
+    `51,271` 是 `5`/`1`/`,`/`2`/`7`/`1` 六个 token。纯 token 窗口会把这种数字从
+    中间劈开 —— 一半落在前一块、一半落在后一块，于是**任何"整词保真"的编码在结构上
+    都不可能成立**（bpe 模式只会搬半截，mean 模式只能糊成一个向量）。
+
+    代价：块可能略大于 width（最长 = width + 该词长度 - 1），单个超长词独占一块。
+    这是"词不可分"必然要付的，比"数字被劈开"便宜得多。
+    """
+    n = int(len(flags))
+    if n <= 0:
+        return [(0, 0)]
+    w = max(1, int(width))
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    for i in range(1, n):
+        if bool(flags[i]) and (i - start) >= w:
+            spans.append((start, i))
+            start = i
+    spans.append((start, n))
+    return spans
+
+
 def _group_word_ids(items):
     """逐 token 分组成词，返回词编号（-1 = 特殊/padding）。
 
@@ -3502,6 +3548,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
     # 不看问题、不看金标答案，因此干扰事实与证据事实走同一套规则（Query-Agnostic）。
     chunk_word_weight: List[List[float]] = []
     word_boundary_source = "offset"
+    chunk_align = "word" if True else "token"   # 实际生效的分块口径，随产出一起返回
     n_empty_units = 0
 
     with torch.no_grad(), delta_write_disabled(model):
@@ -3519,6 +3566,7 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
                                 truncation=False)
                 offsets = None
                 word_boundary_source = "prefix"
+                chunk_align = "token"
             ids = enc["input_ids"].to(dev)
             am = enc["attention_mask"].to(dev)
             out = model(input_ids=ids, attention_mask=am, output_hidden_states=True,
@@ -3533,7 +3581,16 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
             for r in range(len(batch)):
                 L = int(am[r].sum().item())
                 pid = parent_ids[s + r]
-                spans = _split_chunks(L, max_unit_tokens)
+                # 分块**按词边界**：先算出整行的 token 文本与词首标记，再切。
+                # 拿不到字符偏移时（非 HF tokenizer）退回纯 token 窗口并记账，
+                # 绝不假装两条路径等价。
+                _row_texts = [_decode_ids(tokenizer, torch.tensor([int(v)]))
+                              for v in ids[r, :L].tolist()]
+                if offsets is not None:
+                    _flags = _word_start_flags(offsets[r][:L], _row_texts)
+                    spans = _split_chunks_word_aligned(_flags, max_unit_tokens)
+                else:
+                    spans = _split_chunks(L, max_unit_tokens)
                 for k, (a, b) in enumerate(spans):
                     if b <= a:                        # 空单元：保留 1 个全 padding 位
                         h0_out.append(torch.zeros((1, d), dtype=h0.dtype))
@@ -3592,6 +3649,8 @@ def encode_latent_units(model: Any, tokenizer: Any, texts: Sequence[str],
             "chunk_word_group": chunk_word_group,
             "chunk_word_weight": chunk_word_weight,
             "word_boundary_source": word_boundary_source,
+            # 分块口径：word=按词边界（默认，绝不劈开数字）；token=拿不到偏移时的降级
+            "chunk_align": chunk_align,
             "n_units": len(texts), "n_chunks_total": Nc, "n_empty_units": n_empty_units,
             "max_unit_tokens": int(max_unit_tokens), "layer": int(layer),
             "pad_len": int(T)}
