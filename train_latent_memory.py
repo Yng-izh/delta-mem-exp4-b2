@@ -2000,6 +2000,13 @@ def train(args):
           f"{getattr(args, 'router_readout_p', 0.0):.2f} 概率走 router 自选分布；"
           f"teacher_scope={getattr(args, 'teacher_scope', 'gold')} "
           f"recon_lex={getattr(args, 'recon_lex', 1)}", flush=True)
+    if not bool(getattr(args, "lex_skip", True)):
+        # 实验 B 的关键性质，必须在日志里明写：训练与评测的读出**同构**。
+        # 过去所有 oracle_sem 数字都是"拿训练时吃两份输入的 Bridge 去单喂 z_sem"，
+        # 那是训练时没优化过的输入；这一轮不是。
+        print("[readout] 纯语义读出（--no-lex-skip）：Bridge 只吃 z_sem、α 恒 0、"
+              "无词形直通；训练前向 / QA 损失 / 评测 oracle_sem 用的是同一个函数",
+              flush=True)
     max_steps = args.max_steps if args.max_steps > 0 else max(1, len(train_data) // args.accum)
     _cw0 = float(getattr(args, "cov_weight", 0.0) or 0.0)
     if _cw0 > 0.0:
@@ -3679,8 +3686,52 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+def validate_lex_config(args) -> None:
+    """组合约束检查：这些开关凑在一起时**不会报错，只会静默不生效**。
+
+    为什么必须在开跑前拦下来：训练一轮 1000 步要一小时，跑完拿到一条"和基线没差别"
+    的曲线，再去查是"假设错了"还是"开关被忽略了"，成本完全不同。下面每一条都是
+    真会静默失效的组合：
+
+      `--no-lex-skip` + `--lex-head 1`
+          没有词形直通就没有词级选词，`LatentCompressor` 只在 `lex_skip=True` 时
+          注册 `lex_scorer`，于是独立词形头**根本不会被创建**，权重里也不会有它。
+      `--no-lex-skip` + `--cov-weight > 0`
+          L_cov 的目标是"被选中的词覆盖了哪些重要词"，没有选词就没有目标，
+          `cov` 恒为空，权重给多大都等于 0。
+      `--no-lex-skip` + `--split-inject 1`
+          分开注入是"词形占 k 个位置 + 语义占 1 个"，没有词形就退化成残差路径，
+          注入 token 数也和预期不符。
+      `--no-lex-skip` + `--recon-lex 1`
+          重建会用到不存在的词形载荷，只能退化（这里只告警：重建本身仍在跑）。
+
+    纯语义读出（`--no-lex-skip`）是实验 B 的全部内容：训练时的 Bridge 输入、
+    QA 损失、评测时的 oracle 读出**必须是同一个函数同一种输入**，否则"训练没学会"
+    和"训练学会了但评测换了个输入"这两件事分不开。
+    """
+    if bool(getattr(args, "lex_skip", True)):
+        return
+    bad = []
+    if int(getattr(args, "lex_head", 0) or 0):
+        bad.append("--lex-head 1（独立词形头只在 lex_skip=True 时注册，会被静默丢弃）")
+    if float(getattr(args, "cov_weight", 0.0) or 0.0) > 0:
+        bad.append("--cov-weight > 0（L_cov 依赖词级选词，没有直通时目标恒为空）")
+    if int(getattr(args, "split_inject", 0) or 0):
+        bad.append("--split-inject 1（分开注入需要词形载荷，缺了会退回残差路径）")
+    if bad:
+        raise SystemExit(
+            "[错误] --no-lex-skip（纯语义读出）与下列开关冲突，它们会静默不生效：\n  - "
+            + "\n  - ".join(bad)
+            + "\n去掉这些开关，或不要用 --no-lex-skip。")
+    if int(getattr(args, "recon_lex", 1) or 0):
+        print("[warn] --no-lex-skip 下 --recon-lex 1 没有词形载荷可用，重建会退化成"
+              "只用 z_sem（建议显式 --recon-lex 0，让两轮实验的重建口径一致）",
+              flush=True)
+
+
 def main(argv=None):
     args = parse_args(argv)
+    validate_lex_config(args)
     print(f"[cfg] stage={args.stage} m={args.m} layer={args.layer} "
           f"inner={args.inner_dim} heads={args.heads} bottleneck={args.bottleneck} "
           f"max_unit_tokens={args.max_unit_tokens} lr={args.lr} accum={args.accum} "
@@ -3688,6 +3739,7 @@ def main(argv=None):
           f"readout={args.readout_mode} teacher={args.teacher_scope} "
           f"recon_lex={args.recon_lex} alpha_max={LM.LATENT_ALPHA_MAX} "
           f"cov={args.cov_weight}(targets={args.cov_targets or args.m}) "
+          f"lex_skip={bool(getattr(args, 'lex_skip', True))} "
           f"smoke={args.smoke_model} dry_run={args.dry_run}", flush=True)
     if args.fst:
         print(f"[cfg] fst=True hist_max={args.hist_max} "

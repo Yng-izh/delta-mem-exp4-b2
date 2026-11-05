@@ -66,6 +66,8 @@ E3 分开注入 → E4 隐状态蒸馏），协议、判据与"什么条件下�
 | `runs/diag_symbol_fidelity.sh` | 答案实体有没有进潜层、进了有没有被改坏 | 命中率≈0 且 α 正常 → 压缩器选词/容量；命中率高但答错 → 读出端 |
 | `oracle_embed_full` / `oracle_embed_salient`（同一脚本） | 不压缩的原生词嵌入上限；同预算下按显著性挑词 | 与 `oracle_embed`（句首截断）对比，量化"截断/位置"造成的损失 |
 | `runs/overfit_probe.sh` | 64 题能不能拟合；重建目标是否在拖主任务 | 连训练集都拟合不上 → 先修梯度/接口；`qa_kl` vs `recon_old` vs `recon_qa` 三条曲线同框比较 |
+| **`runs/exp_a_capacity.sh`**（实验 A） | 读不回来是**接口容量**还是**压缩损失** | 同预算原生 BPE（`raw_salient`）≈ 潜层 → 接口是主要限制；≫ → 压缩确实丢东西 |
+| **`runs/exp_b_pure_sem.sh`**（实验 B） | 不靠词形直通，语义压缩器能不能学会产出可读的事实记忆 | 显著高于 `none` 且随步数上升 → 能；贴着 `none` → 接口/容量/训练方式要重想 |
 
 ## 定位实验结果（2026-11-04，四组诊断）
 
@@ -92,6 +94,7 @@ E3 分开注入 → E4 隐状态蒸馏），协议、判据与"什么条件下�
 | `tools/diag_router_cache.py` | P0：缓存路径与训练路径逐题对拍（kfeat / picks / 召回） |
 | `tools/diag_symbol_fidelity.py` | P1：压缩器选中的词 vs 答案实体，附 Bridge 的 α / 残差比 |
 | `tools/overfit_probe.py` | P1：64 题过拟合 + 三种目标（`qa_kl`/`recon_old`/`recon_qa`）对照 |
+| `tools/probe_readout_capacity.py` | 实验 A：同一道题、同一 prompt 骨架、**逐槽位等预算**下原生 BPE vs 潜层 |
 | `tools/prep_hotpotqa.py` / `tools/prep_mab.py` | 数据转换（**不按答案挑候选**） |
 | `runs/run_stage1_router.sh` / `runs/run_stage2_bridge.sh` / `runs/eval_stage2.sh` | 三段流程的启动脚本 |
 | `runs/diag_*.sh` / `runs/overfit_probe.sh` | 上面四个诊断实验的启动脚本（不训练主模型） |

@@ -1271,7 +1271,15 @@ class LatentBridge(nn.Module):
         # token，比什么都不给更糟）。所以 split 模式下保持默认随机初始化。
         self.split_inject = bool(split_inject)
         self.n_lex = max(1, int(split_n_lex))
-        if not self.split_inject:
+        self.lex_skip = bool(lex_skip)
+        # 末层零初始化的**前提是有一个锚**：残差模式下 E = z_lex + α·res，res=0 意味着
+        # "第 0 步输出逐位等于 z_lex"，这是想要的行为。
+        # 但没有词形直通时（`--no-lex-skip`，纯语义读出）没有任何锚 —— 零初始化的
+        # 后果是第 0 步往序列里塞**全零向量**，Qwen 会把它当成极低范数 token，比不给
+        # 更糟；而且 soft token 的范数本该对齐真实 embedding（≈1.09），从 0 起步要花
+        # 好几步才能长回来。所以纯语义模式保持默认随机初始化（输出立刻是满范数）。
+        # 同理 split 模式也不能零初始化：语义 token 在那里是独立占位，不是残差。
+        if not self.split_inject and self.lex_skip:
             nn.init.zeros_(self.net[-1].weight)
             nn.init.zeros_(self.net[-1].bias)
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
@@ -1282,7 +1290,7 @@ class LatentBridge(nn.Module):
         # 推到 60+，软 token 立刻退化成 attention sink（本类文档里那组实测数据）。
         # 因此在单位球面上做门控插值：方向由语义/符号两支按 α 竞争，范数仍由受限标量
         # 给出。α→0 时结果与 v3 逐位相同（unit(out)·scale，归一化是幂等的）。
-        self.lex_skip = bool(lex_skip)
+        # （`self.lex_skip` 已在上面赋值 —— 零初始化的条件要用到它，必须提前。）
         # 诊断开关：True 时 forward 会把"残差有多强 / 输出范数多大"记进 self.last_stats。
         # 默认关闭 —— 这些统计要做 .item()，每步都同步会把 4B 前向的空隙填满。
         # 训练脚本在 --diag-every 的那一步打开它，用来回答"α 是不是在把读出拖离词表"。

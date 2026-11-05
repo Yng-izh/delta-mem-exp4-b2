@@ -407,18 +407,218 @@ def test_ckpt_roundtrip():
 
 
 def _raises(fn):
+    """期望抛异常。**必须连 SystemExit 一起抓**：训练脚本的守卫用的是
+    `raise SystemExit(...)`（命令行工具的正常退出方式），它继承 BaseException 而不是
+    Exception —— 只抓 Exception 会让测试进程被守卫直接终止，看起来像"测试崩了"。
+    """
     try:
         fn()
-    except Exception:
+    except KeyboardInterrupt:                                 # pragma: no cover
+        raise
+    except BaseException:
         return True
     return False
+
+
+# =====================================================================
+# PA. 实验 A：原生 BPE 与潜层的**逐槽等预算**对照
+# =====================================================================
+def _probe():
+    """懒加载探针模块：它 import 评测脚本，放在函数里可以让其它测试不受牵连。"""
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import probe_readout_capacity as PRC
+    return PRC
+
+
+def test_budget_matching():
+    """等预算的实现细节：数得对、挑得对、围栏与 compose 逐字一致。"""
+    PRC = _probe()
+    ok("PA1 per_slot_counts 只数段号>0 的 token",
+       PRC.per_slot_counts([0, 1, 1, 1, 0, 2, 2], 2) == [3, 2],
+       extra=str(PRC.per_slot_counts([0, 1, 1, 1, 0, 2, 2], 2)))
+    ids = torch.tensor([10, 11, 12, 13, 14, 15, 16])
+    tok = T.StubTok(vocab_size=256)
+    pre = PRC.pick_ids(tok, ids, 3, "raw_prefix", "q")
+    ok("PA2 raw_prefix 是原序前缀（不是乱序挑）",
+       pre.tolist() == [10, 11, 12], extra=str(pre.tolist()))
+    sal = PRC.pick_ids(tok, ids, 3, "raw_salient", "q")
+    ok("PA3 raw_salient 结果按原文顺序单调递增（拼回原序，不打乱句子）",
+       sal.tolist() == sorted(sal.tolist()) and len(set(sal.tolist())) == len(sal),
+       extra=str(sal.tolist()))
+    ok("PA4 预算 >= 可用 token 时全给（不能凭空造词）",
+       PRC.pick_ids(tok, ids, 99, "raw_prefix", "q").tolist() == ids.tolist())
+    ok("PA5 raw_full 不受预算限制",
+       PRC.pick_ids(tok, ids, 2, "raw_full", "q").tolist() == ids.tolist())
+
+    # 围栏文本必须与 compose_routed_soft 逐字一致：这是"骨架相同"的唯一保证。
+    model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
+    bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=False)
+    z = [torch.randn(1, 4, 32), torch.randn(1, 4, 32)]
+    for style, iso in (("bracket", False), ("bracket", True), ("verbose", False)):
+        soft, segs = LM.compose_routed_soft(model, tok, bridge, z, lex_list=None,
+                                            isolate=iso, return_segs=True,
+                                            fence_style=style)
+        runs, cur = [], 0
+        for v in segs:                        # 数出每段围栏实际占几个 token
+            if int(v) == 0:
+                cur += 1
+            elif cur:
+                runs.append(cur)
+                cur = 0
+        if cur:
+            runs.append(cur)
+        want = [int(LM._tokenize_no_special(
+            tok, PRC._fence_text(j, style, iso), torch.device("cpu")).shape[1])
+            for j in range(len(z))]
+        ok(f"PA6 围栏 token 数与 compose 实际插入的一致（{style}/isolate={iso}）",
+           runs[:len(want)] == want, extra=f"实际={runs[:len(want)]} 期望={want}")
+
+
+def test_answer_type():
+    import eval_latent_table as EVM
+    cases = {"1968": "date", "May 2019": "date", "3rd": "date", "yes": "yesno",
+             "1,234": "number", "Virginia Commonwealth University": "entity",
+             "": "empty"}
+    got = {k: EVM.answer_type(k) for k in cases}
+    ok("PA7 题型分类（日期/数字/实体/是非）逐例正确", got == cases, extra=str(got))
+
+
+def test_raw_skeleton_parity():
+    """同一道题、同一批槽位：原生 BPE 与潜层的注入骨架必须**逐 token 对齐**。
+
+    这条是实验 A 的全部立论基础。骨架一旦漂了（围栏少一个 token、槽位顺序变了），
+    两条读法的差就不再是"载荷不同"，而会把"模板不同"算成"压缩损失"。
+    """
+    PRC = _probe()
+    model = T.SmokeModel(vocab_size=512, hidden_size=32, n_layers=2, n_heads=2)
+    tok = T.StubTok(vocab_size=512)
+    bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=False)
+    z = [torch.randn(1, 4, 32), torch.randn(1, 4, 32)]
+    soft_lat, segs_lat = LM.compose_routed_soft(model, tok, bridge, z, lex_list=None,
+                                                isolate=False, return_segs=True,
+                                                fence_style="bracket")
+    counts = PRC.per_slot_counts(segs_lat, len(z))
+    ok("PA8 latent 每槽 4 个内容向量（m=4）", counts == [4, 4], extra=str(counts))
+    item = {"units": ["alpha beta gamma delta epsilon zeta",
+                      "one two three four five six"],
+            "evidence": ["alpha beta gamma delta epsilon zeta",
+                         "one two three four five six"],
+            "question": "which one?"}
+    for arm in ("raw_prefix", "raw_salient"):
+        soft_r, segs_r, info_r = PRC.build_raw_soft(
+            model, tok, item, [0, 1], counts, torch.device("cpu"), arm, "bracket", False)
+        ok(f"PA9a {arm} 围栏数与 latent 逐个相等（骨架没漂）",
+           info_r["fences"] == PRC.fence_runs(segs_lat), extra=str(info_r["fences"]))
+        ok(f"PA9 {arm} 的总 token 数与 latent 完全相同",
+           int(soft_r.shape[1]) == int(soft_lat.shape[1]),
+           extra=f"raw={int(soft_r.shape[1])} latent={int(soft_lat.shape[1])}")
+        ok(f"PA10 {arm} 的段号序列与 latent 完全相同（围栏位置也没漂）",
+           [int(v) for v in segs_r] == [int(v) for v in segs_lat],
+           extra=f"raw={segs_r} latent={[int(v) for v in segs_lat]}")
+        # 内容位置上必须是**真实词表向量**：这是"原生 BPE 直通"的定义，
+        # 一旦变成软向量（或均值），这条基线就不是它声称的那条基线了。
+        _emb_w = model.get_input_embeddings().weight.detach()
+        _content = soft_r[0, 1:5].detach()
+        _dmin = (_content[:, None, :] - _emb_w[None, :, :]).abs().sum(-1).min(dim=1).values
+        ok(f"PA11 {arm} 每个内容位置都是词表里真实存在的 embedding 行",
+           float(_dmin.max()) < 1e-6, extra=f"最大距离={float(_dmin.max()):.2e}")
+    soft_f, segs_f, _info_f = PRC.build_raw_soft(
+        model, tok, item, [0, 1], [0, 0], torch.device("cpu"), "raw_full", "bracket", False)
+    ok("PA12 raw_full 不受预算限制（token 数多于 latent）",
+       int(soft_f.shape[1]) > int(soft_lat.shape[1]),
+       extra=f"full={int(soft_f.shape[1])} latent={int(soft_lat.shape[1])}")
+
+
+# =====================================================================
+# PB. 实验 B：纯语义读出（--no-lex-skip）的口径与守卫
+# =====================================================================
+def test_pure_sem_guards():
+    """冲突开关必须**直接报错**：静默不生效会让一轮一小时的训练白跑。"""
+    def _args(*extra):
+        return T.parse_args(["--data", "x.jsonl"] + list(extra))
+
+    ok("PB1 --no-lex-skip + --lex-head 1 直接报错（否则独立词形头根本不会被创建）",
+       _raises(lambda: T.validate_lex_config(_args("--no-lex-skip", "--lex-head", "1"))))
+    ok("PB2 --no-lex-skip + --cov-weight>0 直接报错（L_cov 目标恒为空）",
+       _raises(lambda: T.validate_lex_config(
+           _args("--no-lex-skip", "--cov-weight", "0.1"))))
+    ok("PB3 --no-lex-skip + --split-inject 1 直接报错（没有词形可分开注入）",
+       _raises(lambda: T.validate_lex_config(
+           _args("--no-lex-skip", "--split-inject", "1"))))
+    try:
+        T.validate_lex_config(_args("--no-lex-skip", "--cov-weight", "0",
+                                    "--lex-head", "0", "--recon-lex", "0"))
+        ok("PB4 纯语义的合法组合不报错", True)
+    except Exception as e:                                    # pragma: no cover
+        ok("PB4 纯语义的合法组合不报错", False, extra=f"{type(e).__name__}: {e}")
+    try:
+        T.validate_lex_config(_args())                        # 默认 lex_skip=True
+        ok("PB5 默认配置（有词形直通）不受影响", True)
+    except Exception as e:                                    # pragma: no cover
+        ok("PB5 默认配置（有词形直通）不受影响", False, extra=f"{type(e).__name__}: {e}")
+
+
+def test_pure_sem_readout_identity():
+    """实验 B 的核心性质：训练读出与 oracle_sem 评测**同一个函数同一种输入**。
+
+    `lex_skip=False` 时 `alpha()` 恒 0，且 forward 的残差分支要求 `self.lex_skip`，
+    所以就算有人把词形载荷传进来也会被忽略 —— 这条不变量破了，"训练/评测同构"
+    这个立论就没了。
+    """
+    torch.manual_seed(0)
+    d, m, tn = 32, 4, 1.05
+    br = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=False)
+    ok("PB6 纯语义 Bridge 的 α 恒为 0", float(br.alpha()) == 0.0,
+       extra=str(float(br.alpha())))
+    z = torch.randn(2, m, d)
+    out = br(z)
+    ok("PB7 纯语义输出仍是**满范数**（不是被 α 缩小的残差）",
+       torch.allclose(out.norm(dim=-1), torch.full((2, m), tn), atol=1e-4),
+       extra=str([round(float(v), 4) for v in out.detach().norm(dim=-1).flatten()[:4]]))
+    lex = torch.randn(2, m, d)
+    lex = lex / lex.norm(dim=-1, keepdim=True) * tn
+    ok("PB8 传进来的词形载荷被忽略（没有直通分支就不可能有残差混合）",
+       torch.allclose(br(z, lex), out, atol=1e-6))
+    model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
+    tok = T.StubTok(vocab_size=256)
+    s_none, seg_none = LM.compose_routed_soft(model, tok, br, [z[:1]], lex_list=None,
+                                              return_segs=True, fence_style="bracket")
+    s_lex, seg_lex = LM.compose_routed_soft(model, tok, br, [z[:1]], lex_list=[lex[:1]],
+                                            return_segs=True, fence_style="bracket")
+    ok("PB9 compose 在纯语义权重下给不给 lex_list 结果逐位相同",
+       torch.allclose(s_none, s_lex, atol=1e-6)
+       and [int(v) for v in seg_none] == [int(v) for v in seg_lex])
+
+
+def test_eval_stratify():
+    """评测侧的分层统计：总 EM 会把"日期题全灭 + 实体题变好"平均成"没变化"。"""
+    import eval_latent_table as EVM
+    rows = [
+        {"ok": True, "em": 1.0, "f1": 1.0, "ans_type": "date", "hops": 2,
+         "question": "q1", "mem_tokens": 8, "mem_plain_tokens": 0, "prompt_tokens": 40,
+         "total_ms": 1.0, "pre_ms": 0.0, "read_ok": True},
+        {"ok": False, "em": 0.0, "f1": 0.5, "ans_type": "entity", "hops": 1,
+         "question": "q2", "mem_tokens": 8, "mem_plain_tokens": 0, "prompt_tokens": 40,
+         "total_ms": 1.0, "pre_ms": 0.0, "read_ok": True},
+    ]
+    s = EVM.summarize(rows, "t")
+    ok("PB10 summarize 产出按题型分层（date 1/1、entity 0/1）",
+       s["by_ans_type"]["date"]["em"] == 1.0
+       and s["by_ans_type"]["entity"]["em"] == 0.0,
+       extra=str({k: round(v["em"], 3) for k, v in s["by_ans_type"].items()}))
+    ok("PB11 summarize 产出按跳数分层", set(s["by_hops"]) == {"1", "2"},
+       extra=str(list(s["by_hops"])))
+    ok("PB12 题型分类只有一个实现（探针与评测脚本共用同一个函数）",
+       _probe().answer_type is EVM.answer_type)
 
 
 def main():
     for fn in (test_lex_head_zero_init, test_lex_head_gradient_isolation,
                test_bpe_payload, test_bpe_no_truncation, test_lex_mean_unchanged,
                test_bridge_split, test_compose_split_tokens, test_hid_distill,
-               test_ckpt_roundtrip):
+               test_ckpt_roundtrip, test_budget_matching, test_answer_type,
+               test_raw_skeleton_parity, test_pure_sem_guards,
+               test_pure_sem_readout_identity, test_eval_stratify):
         print(f"--- {fn.__name__}")
         fn()
     print("=" * 70)

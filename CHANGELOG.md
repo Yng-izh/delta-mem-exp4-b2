@@ -2,6 +2,41 @@
 
 只保留对**当前代码**有约束力的条目。历史实验的逐轮流水已随旧版本一起移除。
 
+## 路线收束：先证明事实能被读回来，再谈加模块（2026-11-05 第十五轮）
+
+E1 证伪之后（`results/2026-11-05_readout_e1/`：梯度隔离机械上成功，但三条读法与
+共享注意力那组**逐题同分**，`oracle_latent` 9 比 9、p=1.00），主线从"给读出端加
+模块"收束成两个实验。代码这一轮全部落地：
+
+**实验 A（不训练）** `tools/probe_readout_capacity.py` + `runs/exp_a_capacity.sh`
+- 同一道题、同一 prompt 骨架、**逐槽位相同的 token 数**，只换载荷：`latent` /
+  `raw_prefix` / `raw_salient` / `raw_full` / `text` / `none`。
+- 与已有的 `eval_latent_table.py --method oracle_embed*` 的区别就在这里：那三条是
+  **独立进程 + 按块数公式估算预算**，两行不在同一道题上对齐（`KNOWN_ISSUES.md` 13），
+  而且裸词向量没有围栏。新工具先跑潜层拿到 `seg_ids`，按每槽实际内容向量数拼原生
+  BPE，围栏用同一个字符串、同一个位置；token 数不一致**直接报错**，不静默降级。
+- 输出按题型（yesno/date/number/entity）与跳数分层，并与 `latent` 做逐题 McNemar。
+
+**实验 B（1 × 1000 步）** `runs/exp_b_pure_sem.sh`
+- `--no-lex-skip` 从头训：Bridge 只吃 `z_sem`、α 恒 0、无词形直通。训练前向 / QA 损失 /
+  评测 `oracle_sem` 走同一个函数同一种输入 —— 这是与过去所有 `oracle_sem` 数字的
+  唯一区别（那些是"拿吃两份输入的 Bridge 单喂 z_sem"，训练时没优化过的输入）。
+- `train.validate_lex_config()`：`--no-lex-skip` 与 `--lex-head/--cov-weight/--split-inject`
+  冲突时**直接报错**。这些组合原本会静默不生效（`lex_scorer` 根本不注册、L_cov 目标
+  恒为空），跑完一小时才发现等于白跑。
+- `eval_latent_table.py --method oracle_sem` 不再对 `lex_skip=False` 的权重报错：那组
+  权重上它与 `oracle_latent` 逐位同构，是主读法而不是消融。
+
+**顺带修掉一个真 bug**：`LatentBridge` 的末层零初始化原本无条件执行（只要不是 split
+模式），但零初始化**依赖有一个锚**（残差模式下 E = z_lex + α·res，res=0 等于"第 0 步
+输出就是 z_lex"）。纯语义模式没有锚，零初始化等于第 0 步往序列里塞**全零向量**
+（比不给更糟，范数还得从 0 长回来）。现在只在 `lex_skip=True` 时零初始化。
+
+**同时给评测加了分层**：`eval_latent_table.py --stratify` 与 `summarize()` 的
+`by_ans_type` / `by_hops`。总 EM 会把"日期题全灭 + 实体题变好"平均成"没变化"。
+
+**暂停**：E2 / E3 / E4、`L_cov` 调参、独立词形头。理由写在 `EXPERIMENTS.md` 开头。
+
 ## L_cov 探针的读出分解：语义腿被打掉（2026-11-04 第十二轮）
 
 把 `oracle_lex` / `oracle_sem` / `oracle_latent` 三条读法放到 L_cov 探针的两个权重上

@@ -197,6 +197,33 @@ def f1_score(pred, gold):
     return 2 * prec * rec / (prec + rec)
 
 
+# 答案表面形式 -> 题型。HotpotQA 官方 type 只有 bridge/comparison 两类，但"答案长
+# 什么样"决定了读出端要从记忆里捞什么（一个日期？一个实体名？），这是不同难度的
+# 任务，混在总 EM 里会互相抵消 —— 例如"日期题全灭、实体题变好"会显示成没变化。
+_MONTHS = {m.lower() for m in (
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December",
+    "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec")}
+_ORD = re.compile(r"^\d+(st|nd|rd|th)$", re.I)
+
+
+def answer_type(ans):
+    """金标答案 -> 题型（启发式，只用于分层统计，不参与判定）。"""
+    a = str(ans or "").strip()
+    low = a.lower()
+    if low in ("yes", "no"):
+        return "yesno"
+    if not a:
+        return "empty"
+    if re.fullmatch(r"\d{4}", a) or _ORD.match(a):
+        return "date"
+    if any(t in _MONTHS for t in low.replace(",", " ").split()):
+        return "date"
+    if re.fullmatch(r"[\d\s.,%-]+", a):
+        return "number"
+    return "entity"
+
+
 def item_hops(item):
     """与 train.item_hops 同一套规则：item["hops"] → meta["type"] → 1。"""
     v = item.get("hops")
@@ -606,6 +633,17 @@ def summarize(rows, label):
     # ---- HotpotQA 官方口径：EM / F1（acc 是包含匹配，必须与它们同时报） ----
     out["em"] = sum(float(r.get("em") or 0.0) for r in rows) / n
     out["f1"] = sum(float(r.get("f1") or 0.0) for r in rows) / n
+    # ---- 分层 EM / F1 ----
+    # 总 EM 会把"日期题全灭、实体题变好"平均成"没变化"。分层之后才能看出
+    # 潜层记忆到底丢了哪一类事实（符号精确值 vs 实体名）。
+    for key, name in (("ans_type", "by_ans_type"), ("hops", "by_hops")):
+        groups = {}
+        for r in rows:
+            groups.setdefault(str(r.get(key)), []).append(r)
+        out[name] = {k: {"n": len(v),
+                         "em": sum(float(x.get("em") or 0.0) for x in v) / len(v),
+                         "f1": sum(float(x.get("f1") or 0.0) for x in v) / len(v)}
+                     for k, v in sorted(groups.items())}
     # ---- 完整证据召回：两种口径都落盘 ----
     # 主表看 full_recall_leq2：读出预算固定 2 跳时，金标证据 >2 句的样本
     # 物理上不可能全覆盖；混在一起算会把"口径缺陷"读成"机制缺陷"。
@@ -721,6 +759,9 @@ def main(argv=None):
     ap.add_argument("--partial-every", type=int, default=100,
                     help="每 N 题把**当前已完成**的逐样本结果落一次盘（长跑中途崩掉不丢）")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--stratify", action="store_true",
+                    help="按题型（yesno/date/number/entity）与跳数分层打印 EM/F1。"
+                         "总 EM 会把\"日期题全灭 + 实体题变好\"平均成\"没变化\"")
     args = ap.parse_args(argv)
 
     dev = torch.device(args.device if args.device else
@@ -801,9 +842,14 @@ def main(argv=None):
         print(f"[inject] inject_mode={ctx['inject_mode']} "
               f"fence_style={ctx['fence_style']} "
               f"（ckpt: {_ck_inj or '未记录'} / {_ck_fen or '未记录'}）", flush=True)
-        if args.method in ("oracle_lex", "oracle_sem") and not getattr(
-                reader.bridge, "lex_skip", False):
-            raise SystemExit(f"--method {args.method} 需要 ckpt 打开 lex_skip")
+        # oracle_lex 必须有直通载荷；oracle_sem 不需要 —— 在 `--no-lex-skip` 训出来的
+        # 权重上（纯语义读出，Bridge 只吃 z_sem，α 恒 0），oracle_sem 与 oracle_latent
+        # **逐位同构**，此时它是这组权重的**主读法**而不是消融。
+        if args.method == "oracle_lex" and not getattr(reader.bridge, "lex_skip", False):
+            raise SystemExit("--method oracle_lex 需要 ckpt 打开 lex_skip")
+        if args.method == "oracle_sem" and not getattr(reader.bridge, "lex_skip", False):
+            print("[oracle_sem] ckpt 未开 lex_skip（纯语义读出权重）：oracle_sem 与 "
+                  "oracle_latent 逐位同构，读数即训练时的读出方式", flush=True)
         # E2/E3：把命令行覆盖应用到已加载的 reader 上（只影响"载荷怎么拼"，
         # 不影响权重）。默认值 ckpt / -1 表示完全沿用 ckpt 里记录的口径。
         _ck_tok = str(reader.config.get("lex_token_mode", "mean"))
@@ -881,7 +927,8 @@ def main(argv=None):
         rows.append(dict(info, question=item["question"], gold_ans=gold,
                          pred=str(pred), ok=bool(ok), idx=i,
                          em=em_score(pred, gold), f1=f1_score(pred, gold),
-                         n_ev=n_ev_of(item), hops=item_hops(item)))
+                         n_ev=n_ev_of(item), hops=item_hops(item),
+                         ans_type=answer_type(gold)))
         if args.verbose:
             print(f"  [{label}] {'✓' if ok else '✗'} q={item['question'][:50]!r} "
                   f"gold_ans={gold!r} pred={str(pred)[:40]!r}", flush=True)
@@ -910,6 +957,15 @@ def main(argv=None):
     print(fmt_line(s), flush=True)
     print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v)
                       for k, v in s.items()}, ensure_ascii=False), flush=True)
+    if args.stratify:
+        for name, title in (("by_ans_type", "题型"), ("by_hops", "跳数")):
+            st = s.get(name) or {}
+            print(f"\n[分层] 按{title}：")
+            print("| 分组 | n | EM% | F1% |")
+            print("|---|---|---|---|")
+            for k, v in st.items():
+                print(f"| {k} | {v['n']} | {100 * v['em']:.1f} | {100 * v['f1']:.1f} |")
+        print("", flush=True)
     if args.save_json:
         os.makedirs(os.path.dirname(os.path.abspath(args.save_json)) or ".", exist_ok=True)
         with open(args.save_json, "w", encoding="utf-8") as f:
