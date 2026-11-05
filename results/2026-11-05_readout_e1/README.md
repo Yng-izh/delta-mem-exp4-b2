@@ -83,7 +83,8 @@ E1 属于预案里的 **❌ 失败**分支：`oracle_sem` 没恢复 → **语义
 复现：
 
 ```bash
-GPU=1 bash runs/exp_e1_lexhead.sh                     # 训练（约 55 分钟）
+GPU=1 COV=0.1 LEX_HEAD=1 OUT=$B/ckpt/probe_e1_lexhead.pt \
+  bash runs/train_arm.sh                               # 训练（约 55 分钟）
 GPU=1 CKPT=$B/ckpt/probe_e1_lexhead.pt TAG=readout_e1 \
   MODES="oracle_lex oracle_sem oracle_latent" bash runs/eval_stage2.sh   # 三条读法，各约 11 分钟
 python tools/cmp_readout.py base.json e1.json          # 逐题配对（McNemar）

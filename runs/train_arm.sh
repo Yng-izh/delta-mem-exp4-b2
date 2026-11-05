@@ -1,42 +1,46 @@
 #!/bin/bash
-# E1：解耦 Attention —— L_cov 只更新**独立词形选择头**，不碰语义注意力。
+# 训练**一个臂**：1000 步，超参与 `probe_base_1000` 逐字相同，只由环境变量换一个变量。
 #
-# 背景（RESULTS.md「L_cov 探针」）：共享注意力下 `--cov-weight 0.1` 把
-# oracle_sem 从 14.0% 打到 7.0%（配对 McNemar p=0.0013），oracle_lex 基本不动。
-# E1 把选词分数拆成 `mass.detach() + lex_scorer(w.detach(), x.detach())`：
-#   - lex_scorer 零初始化 => 第 0 步选择与旧实现**逐位相同**；
-#   - L_cov 只能回到 lex_scorer => 语义分支不再被覆盖目标拉扯。
+# 为什么只有一个脚本：每个实验都复制一份脚本，迟早会漂成"两份会漂移的实现"。
+# 这里把所有"会变的"都提成环境变量，其余（数据、步数、lr、pack、accum、注入位置、
+# 围栏、router）全部写死，保证任意两臂之间只差你显式改的那一个变量。
 #
-# 与已有两组的唯一差别是 `--lex-head 1`（其余超参逐字相同、同为 1000 步）：
-#   已有：COV=0.0（probe_base_1000.pt）/ COV=0.1（probe_cov_1000.pt）
-#   本组：COV=0.1 + LEX_HEAD=1
-#
-# 判据：同一批 200 题跑 oracle_sem / oracle_lex / oracle_latent（runs/exp_e2 一起做）。
-#   成功 = oracle_sem 明显恢复（回到 ~14%）**且** 词形选择仍在改善（无效选择率降）。
-#   若 oracle_sem 恢复但 oracle_lex 不涨 => 解耦解决了干扰，但覆盖监督本身没收益。
+# ---- 变量 ----
+#   OUT          产物路径（必填）
+#   MAX_UNIT     每块多少 token 才压成 m 个向量（默认 32 = 训练时的口径）
+#                32/m=4 => 8 倍压缩；8/m=4 => 2 倍压缩（每题注入 token 数随之涨 4 倍）
+#   COV          L_cov 权重（默认 0；0.1 = 第十二轮探针那档）
+#   LEX_HEAD     1 = 独立词形选择头（E1）
+#   SPLIT_INJECT 1 = 词形与语义分开注入（E3）
+#   STEPS        训练步数（默认 1000）
+#   RESUME=1     从 OUT 续训
 #
 # ---- 用法 ----
-#   首次：  bash runs/exp_e1_lexhead.sh
-#   续训：  RESUME=1 bash runs/exp_e1_lexhead.sh
+#   基线（cov=0）：        OUT=$B/ckpt/probe_base_1000.pt bash runs/train_arm.sh
+#   L_cov 探针：           COV=0.1 OUT=$B/ckpt/probe_cov_1000.pt bash runs/train_arm.sh
+#   E1 独立词形头：        COV=0.1 LEX_HEAD=1 OUT=$B/ckpt/probe_e1_lexhead.pt bash runs/train_arm.sh
+#   降压缩比（2 倍）：     MAX_UNIT=8 OUT=$B/ckpt/probe_mut8_1000.pt bash runs/train_arm.sh
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
 PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
-OUT=${OUT:-$B/ckpt/probe_e1_lexhead.pt}
-COV=${COV:-0.1}
-LEX_HEAD=${LEX_HEAD:-1}
+OUT=${OUT:?必须显式指定 OUT}
+MAX_UNIT=${MAX_UNIT:-32}
+COV=${COV:-0}
+LEX_HEAD=${LEX_HEAD:-0}
 LEX_HEAD_HIDDEN=${LEX_HEAD_HIDDEN:-0}
 LEX_TOKEN_MODE=${LEX_TOKEN_MODE:-mean}
-RESUME=${RESUME:-0}
+SPLIT_INJECT=${SPLIT_INJECT:-0}
 STEPS=${STEPS:-1000}
 SAVE_EVERY=${SAVE_EVERY:-100}
 EVAL_EVERY=${EVAL_EVERY:-500}
+RESUME=${RESUME:-0}
 TEACHER_PROBE=${TEACHER_PROBE:-16}
 export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
 export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export CUDA_VISIBLE_DEVICES=${GPU:-0}
-cd $R || exit 1
+cd "$R" || exit 1
 
 RESUME_ARG=""
 if [ "$RESUME" = "1" ]; then
@@ -45,6 +49,8 @@ if [ "$RESUME" = "1" ]; then
   echo "[resume] 从 $OUT 接着训"
 fi
 
+echo "[train_arm] OUT=$OUT MAX_UNIT=$MAX_UNIT COV=$COV LEX_HEAD=$LEX_HEAD" \
+     "SPLIT=$SPLIT_INJECT STEPS=$STEPS"
 $PY train_latent_memory.py --router \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
@@ -59,11 +65,11 @@ $PY train_latent_memory.py --router \
   --router-kind hybrid --addr-gamma 0.5 --addr-maxsim 1 \
   --init-router $B/ckpt/router_stage1_8slot.pt --freeze-router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
-  --cov-weight $COV --cov-targets ${COV_TARGETS:-0} \
+  --cov-weight $COV --cov-targets 0 \
   --lex-head $LEX_HEAD --lex-head-hidden $LEX_HEAD_HIDDEN \
-  --lex-token-mode $LEX_TOKEN_MODE \
+  --lex-token-mode $LEX_TOKEN_MODE --split-inject $SPLIT_INJECT \
   --alpha-max 0.5 --lex-gate-init 0.05 --diag-every 50 \
   --inject-mode user --fence-style bracket \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
-  --max-unit-tokens 32 --max-slots 0 --lr 2e-4 \
+  --max-unit-tokens $MAX_UNIT --max-slots 0 --lr 2e-4 \
   --out "$OUT" --save-every $SAVE_EVERY $RESUME_ARG

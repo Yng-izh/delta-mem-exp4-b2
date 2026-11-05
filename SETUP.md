@@ -85,7 +85,8 @@ GPU=0 bash runs/run_stage1_router.sh
 
 # 阶段二：固定阶段一 Router，只训 Compressor + Bridge（KL 蒸馏 + 重建 + 抗噪）
 #   现有可用的两个训练臂（超参逐字相同，只差读出结构）：
-GPU=1 bash runs/exp_e1_lexhead.sh    # 词形直通 + L_cov + 独立词形头（E1）
+GPU=1 OUT=$B/ckpt/probe_base_1000.pt bash runs/train_arm.sh   # 基线（cov=0）
+GPU=1 MAX_UNIT=8 OUT=$B/ckpt/probe_mut8_1000.pt bash runs/train_arm.sh  # 降压缩比
 GPU=1 bash runs/exp_b_pure_sem.sh    # 纯语义读出（实验 B，训练/评测同构）
 ```
 
