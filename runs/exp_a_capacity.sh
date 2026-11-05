@@ -31,6 +31,9 @@ CKPT=${CKPT:?必须显式指定 CKPT}
 TAG=${TAG:-exp_a}
 LIMIT=${LIMIT:-200}
 ARMS=${ARMS:-none,text,latent,raw_prefix,raw_salient,raw_full}
+# 小样本 sanity：DUMP=1 打开逐样本明细 + 记录原生基线实际挑中的词
+EXTRA=""
+if [ "${DUMP:-0}" = "1" ]; then EXTRA="--dump-picks --show-items ${SHOW:-5}"; fi
 OUT=${OUT:-$B/results/$TAG}
 mkdir -p "$OUT"
 export DELTA_MEM_SCAN_IMPL=torch
@@ -47,7 +50,7 @@ $PY tools/probe_readout_capacity.py \
   --max-new-tokens 16 --slot-isolation 1 \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
-  --progress-every 25 --partial-every 25 \
+  --progress-every 25 --partial-every 25 $EXTRA \
   --save-json "$OUT/capacity.json" \
   > "$OUT/capacity.log" 2>&1
 echo "[exp_a $(date '+%F %T')] 结束 rc=$? -> $OUT/capacity.json"

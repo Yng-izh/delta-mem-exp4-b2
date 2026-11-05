@@ -157,7 +157,8 @@ def fence_runs(segs: Sequence[int]) -> List[int]:
 
 
 def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
-                   dev, arm: str, style: str, isolate: bool
+                   dev, arm: str, style: str, isolate: bool,
+                   dump: bool = False
                    ) -> Tuple[Optional[torch.Tensor], List[int], Dict[str, Any]]:
     """按 latent 的槽位结构拼一段**原生词向量**序列，返回 (soft[1,T,d], segs, info)。
 
@@ -165,6 +166,8 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
       - 围栏数与 latent 不一致 => 骨架漂了，调用方必须报错；
       - 内容比预算少 => 原文本身不够长（合法），但要记账，否则"原生基线吃亏"
         会被读成"原生不如潜层"。
+    dump=True 时额外记下**实际挑中的词**（`picks`）：2 题的 sanity 只能看这个，
+    否则总分是 0 还是 1 根本看不出"挑词逻辑对不对"。
     """
     emb = model.get_input_embeddings()
     dt = next(model.parameters()).dtype
@@ -173,6 +176,7 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
     fences: List[int] = []
     used: List[int] = []
     avail: List[int] = []
+    picks: List[List[str]] = []
     for j, (i, c) in enumerate(zip(idx, counts)):
         fence = emb(LM._tokenize_no_special(tok, _fence_text(j, style, isolate), dev))
         pieces.append(fence.to(dtype=dt))
@@ -182,6 +186,9 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
         avail.append(int(ids.numel()))
         keep = pick_ids(tok, ids, int(c), arm, str(item.get("question") or ""))
         used.append(int(keep.numel()))
+        if dump:
+            picks.append([str(tok.decode([int(t)], skip_special_tokens=True))
+                          for t in keep.tolist()])
         if int(keep.numel()) <= 0:                 # 空槽：宁可给 0 个也不塞占位符
             continue
         e = emb(keep.view(1, -1)).to(dtype=dt)
@@ -190,6 +197,8 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
     info = {"fences": fences, "used": used, "avail": avail,
             "counts": [int(c) for c in counts],
             "short": [int(u) < int(c) for u, c in zip(used, counts)]}
+    if dump:
+        info["picks"] = picks
     if not pieces:
         return None, [], info
     return torch.cat(pieces, dim=1), segs, info
@@ -301,7 +310,8 @@ def read_item(item, ctx) -> Dict[str, Any]:
         if arm not in ctx["arms"]:
             continue
         soft_r, segs_r, info_r = build_raw_soft(model, tok, item, idx, counts, dev, arm,
-                                               ctx["style"], ctx["isolate"])
+                                               ctx["style"], ctx["isolate"],
+                                               dump=bool(ctx.get("dump_picks")))
         if soft_r is None:
             res[arm] = {"pred": "", "n_soft": 0, "n_content": 0, "n_fence": 0,
                         "n_in": 0, "ms": 0.0}
@@ -324,6 +334,8 @@ def read_item(item, ctx) -> Dict[str, Any]:
                 1 for x in info_r["short"] if x)
         _run(arm, soft_r, segs_r)
         res[arm]["short"] = bool(any(info_r["short"]))
+        if "picks" in info_r:
+            res[arm]["picks"] = info_r["picks"]
     if "raw_full" in ctx["arms"]:
         soft_f, segs_f, _info_f = build_raw_soft(model, tok, item, idx, [0] * len(idx), dev,
                                                 "raw_full", ctx["style"], ctx["isolate"])
@@ -375,6 +387,36 @@ def paired(rows: List[Dict[str, Any]], a: str, b: str) -> Dict[str, Any]:
 
 def _pct(x):
     return "n/a" if x is None else f"{100 * x:.1f}"
+
+
+def print_items(rows: List[Dict[str, Any]], arms: Sequence[str], n: int) -> None:
+    """逐样本明细：预算、每臂的注入构成、预测、原生基线挑中的词。
+
+    小样本 sanity 只能看这个 —— 2 道题的总分是 0 还是 1 完全说明不了管线对不对，
+    但"每槽 4 个内容向量 / 围栏 1 个 token / 挑中的词里有 1968"这些是能核对的。
+    """
+    for r in rows[:int(n)]:
+        b = r.get("budget") or {}
+        print(f"\n--- [{r['idx']}] {r['question']}")
+        print(f"    金标答案={r['gold_ans']!r}  题型={r['ans_type']}  跳数={r['hops']}  "
+              f"证据句数={r['n_ev']}")
+        if b.get("no_evidence"):
+            print("    [无金标证据] 所有读法记为空")
+            continue
+        print(f"    金标槽位={b.get('idx')}  每槽内容向量={b.get('counts')}  "
+              f"合计内容={b.get('n_content')}  注入总token={b.get('n_soft')}  "
+              f"原文可用={b.get('n_raw_avail')}")
+        for a in arms:
+            v = r["res"].get(a)
+            if not v:
+                continue
+            print(f"    {a:<12} {'✓' if v.get('ok') else '✗'}  "
+                  f"内容={v.get('n_content')} 围栏={v.get('n_fence')} "
+                  f"prompt={v.get('n_in')} {v.get('ms', 0):.0f}ms  "
+                  f"pred={str(v.get('pred'))[:50]!r}")
+            if v.get("picks"):
+                for j, words in enumerate(v["picks"]):
+                    print(f"       槽{j + 1}: {words}")
 
 
 def print_report(rows: List[Dict[str, Any]], arms: Sequence[str]) -> Dict[str, Any]:
@@ -459,6 +501,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION)
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
+    ap.add_argument("--show-items", type=int, default=0,
+                    help="打印前 N 题的逐样本明细（预算/注入构成/预测/挑中的词）")
+    ap.add_argument("--dump-picks", action="store_true",
+                    help="逐样本记录原生基线**实际挑中的词**。小样本 sanity 必开："
+                         "只看总分看不出挑词逻辑对不对")
     ap.add_argument("--save-json", default="")
     ap.add_argument("--partial-every", type=int, default=25)
     ap.add_argument("--progress-every", type=int, default=25)
@@ -485,6 +532,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                            "max_new_tokens": args.max_new_tokens,
                            "pad_token_id": pad_id, "arms": set(arms),
                            "unit_cache": {},
+                           "dump_picks": bool(args.dump_picks),
                            "isolate": bool(int(args.slot_isolation))}
 
     if args.ckpt:
@@ -556,6 +604,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                            "partial": True, "n_done": len(rows)},
                           f, ensure_ascii=False, indent=1)
 
+    if args.show_items > 0:
+        print_items(rows, arms, args.show_items)
     rep = print_report(rows, arms)
     blob = {"config": vars(args), "n": len(rows), "rows": rows, **rep}
     if args.save_json:
