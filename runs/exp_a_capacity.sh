@@ -34,6 +34,8 @@ ARMS=${ARMS:-none,text,latent,raw_prefix,raw_salient,raw_word,raw_full}
 # 小样本 sanity：DUMP=1 打开逐样本明细 + 记录原生基线实际挑中的词
 EXTRA=""
 if [ "${DUMP:-0}" = "1" ]; then EXTRA="--dump-picks --show-items ${SHOW:-5}"; fi
+# 预算扫描（推荐）：SWEEP=4,8,16,24,32,48 求"原生整词追平潜层需要多少 token"
+if [ -n "${SWEEP:-}" ]; then EXTRA="$EXTRA --raw-budgets ${SWEEP}"; fi
 OUT=${OUT:-$B/results/$TAG}
 mkdir -p "$OUT"
 export DELTA_MEM_SCAN_IMPL=torch
