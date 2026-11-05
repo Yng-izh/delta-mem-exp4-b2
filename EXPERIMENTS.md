@@ -27,13 +27,19 @@
 按块数公式估算预算，两行不在同一道题上对齐（`KNOWN_ISSUES.md` 第 10 条），
 而且裸词向量没有围栏。
 
-六条读法：`none`（下界）/ `text`（原文写进 system，参照上界）/ `latent`（当前方法）/
-`raw_prefix`（原文前 c_j 个词向量）/ `raw_salient`（同预算按显著性挑、原序拼回）/
+七条读法：`none`（下界）/ `text`（原文写进 system，参照上界）/ `latent`（当前方法）/
+`raw_prefix`（原文前 c_j 个词向量）/ `raw_salient`（token 级显著性）/ `raw_word`（整词显著性）/
 `raw_full`（不截断，接口上限）。
 
-**为什么主看 `raw_salient`**：`raw_prefix` 是傻截断，英语事实句的核心新值常在句尾
-（`...one founded in 1838.`），18 个 token 的前缀天然把答案切掉——它测的是"截断位置
-值多少分"，不是容量。
+**为什么主看 `raw_word`**：三条理由，都是实测踩出来的。
+
+1. `raw_prefix` 是傻截断，英语事实句的核心新值常在句尾（`...one founded in 1838.`），
+   18 个 token 的前缀天然把答案切掉——它测的是"截断位置值多少分"，不是容量。
+2. `raw_salient` 在 **token 级**打分，4 个 token 的预算会全花在"大写开头的碎片"上：
+   实测挑出 `['[S','my','rna',',']`、`[' Georgia','0','0','5']`、`[' Gas','co','yne']`，
+   同一个词还会重复挑（`Robert`/`Salisbury` 各两次）。那是被人为削弱的基线。
+3. `raw_word` 按**整词**打分、同词去重、装不下就整词跳过（不截断），是同等预算下
+   原生序列的**最强公平基线**。代价是可能吃不满预算（差额记在 `used` 里）。
 
 ```bash
 CKPT=$B/ckpt/probe_base_1000.pt bash runs/exp_a_capacity.sh
@@ -41,9 +47,9 @@ CKPT=$B/ckpt/probe_base_1000.pt bash runs/exp_a_capacity.sh
 
 **判据**（配对 McNemar，同一批 200 题逐题）：
 
-- `raw_salient` ≈ `latent`（p>0.05）→ **接口/容量是主要限制**。继续优化编码器收益有限，
+- `raw_word` ≈ `latent`（p>0.05）→ **接口/容量是主要限制**。继续优化编码器收益有限，
   该动的是注入协议（槽位怎么排、围栏、token 数）。
-- `raw_salient` ≫ `latent`（p<0.05）→ **压缩确实丢了东西**，编码保真值得继续做。
+- `raw_word` ≫ `latent`（p<0.05）→ **压缩确实丢了东西**，编码保真值得继续做。
 - `raw_full` 也上不去 → 连"给足原生 token"都救不回来，问题在读出协议本身（位置/格式/
   冻结主干的注意力），与压缩无关。
 

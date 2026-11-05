@@ -30,7 +30,7 @@ PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 CKPT=${CKPT:?必须显式指定 CKPT}
 TAG=${TAG:-exp_a}
 LIMIT=${LIMIT:-200}
-ARMS=${ARMS:-none,text,latent,raw_prefix,raw_salient,raw_full}
+ARMS=${ARMS:-none,text,latent,raw_prefix,raw_salient,raw_word,raw_full}
 # 小样本 sanity：DUMP=1 打开逐样本明细 + 记录原生基线实际挑中的词
 EXTRA=""
 if [ "${DUMP:-0}" = "1" ]; then EXTRA="--dump-picks --show-items ${SHOW:-5}"; fi

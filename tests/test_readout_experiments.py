@@ -450,6 +450,7 @@ def test_budget_matching():
     ok("PA5 raw_full 不受预算限制",
        PRC.pick_ids(tok, ids, 2, "raw_full", "q").tolist() == ids.tolist())
 
+
     # 围栏文本必须与 compose_routed_soft 逐字一致：这是"骨架相同"的唯一保证。
     model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
     bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=False)
@@ -472,6 +473,41 @@ def test_budget_matching():
             for j in range(len(z))]
         ok(f"PA6 围栏 token 数与 compose 实际插入的一致（{style}/isolate={iso}）",
            runs[:len(want)] == want, extra=f"实际={runs[:len(want)]} 期望={want}")
+
+
+def test_word_units():
+    """整词切分与去重：这是 `raw_word` 相对 token 级 `raw_salient` 的全部差别。"""
+    PRC = _probe()
+
+    class _Tok:
+        """极简 BPE 替身：词首带空格，词内子词不带。"""
+        VOCAB = {0: "[", 1: " Mari", 2: "etta", 3: " Air", 4: " Force",
+                 5: " Station", 6: " is", 7: " in", 8: " Georgia",
+                 9: " Robert", 10: " Salisbury", 11: ",", 12: " 1968"}
+
+        def decode(self, ids, skip_special_tokens=True):
+            return "".join(self.VOCAB[int(i)] for i in ids)
+
+    tk = _Tok()
+    ids = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    spans = PRC._word_spans(tk, ids)
+    words = [tk.decode(ids[a:b].tolist()).strip() for a, b in spans]
+    ok("PA13 整词切分：词首空格是边界（Marietta 是一个词，Air/Force 是两个）",
+       words[:5] == ["[", "Marietta", "Air", "Force", "Station"], extra=str(words))
+    keep, picked = PRC.pick_word_ids(tk, ids, 6, "which city?")
+    ok("PA14 整词挑选不产生半截词（每个被选词都能在原句里找到完整词面）",
+       all(w in "".join(words) for w in picked), extra=str(picked))
+    def _is_subseq(sub, full):
+        it = iter(full.tolist())
+        return all(any(x == y for y in it) for x in sub.tolist())
+
+    ok("PA15 整词挑选按原文顺序拼回（结果是原序列的子序列，不是重排）",
+       _is_subseq(keep, ids), extra=str(keep.tolist()))
+    # 同一词面重复出现时只选一次（token 级没有这个保证）
+    ids2 = torch.cat([ids, torch.tensor([9, 10])])          # Robert Salisbury 再来一遍
+    _k2, picked2 = PRC.pick_word_ids(tk, ids2, 12, "q")
+    ok("PA16 同一词面只选一次（token 级会重复挑 Robert / Salisbury）",
+       len(picked2) == len(set(picked2)), extra=str(picked2))
 
 
 def test_answer_type():
@@ -616,7 +652,8 @@ def main():
     for fn in (test_lex_head_zero_init, test_lex_head_gradient_isolation,
                test_bpe_payload, test_bpe_no_truncation, test_lex_mean_unchanged,
                test_bridge_split, test_compose_split_tokens, test_hid_distill,
-               test_ckpt_roundtrip, test_budget_matching, test_answer_type,
+               test_ckpt_roundtrip, test_budget_matching, test_word_units,
+               test_answer_type,
                test_raw_skeleton_parity, test_pure_sem_guards,
                test_pure_sem_readout_identity, test_eval_stratify):
         print(f"--- {fn.__name__}")

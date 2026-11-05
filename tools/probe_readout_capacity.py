@@ -86,9 +86,11 @@ import train_latent_memory as T
 import eval_latent_table as EV
 import cmp_readout as CMP
 
-ARMS = ("none", "text", "latent", "raw_prefix", "raw_salient", "raw_full")
-RAW_ARMS = ("raw_prefix", "raw_salient")     # 与 latent **逐槽等预算**
-NEED_CKPT = ("latent", "raw_prefix", "raw_salient", "raw_full")
+ARMS = ("none", "text", "latent", "raw_prefix", "raw_salient", "raw_word", "raw_full")
+# 与 latent **逐槽等预算**的三条原生基线：raw_salient 是 token 级（朴素做法，
+# 会挑到碎片），raw_word 是整词级（判断容量主看这条）。
+RAW_ARMS = ("raw_prefix", "raw_salient", "raw_word")
+NEED_CKPT = ("latent", "raw_prefix", "raw_salient", "raw_word", "raw_full")
 
 # 题型分类**只允许有一个实现**：分层标准一旦在评测脚本和探针里各写一份，两边报的
 # "日期题 EM" 就会在某个边界（`May 2019`、`3rd`）上悄悄分到不同桶，表格之间不可比。
@@ -123,11 +125,96 @@ def _slot_ids(tok, item, i: int, dev) -> torch.Tensor:
     return LM._tokenize_no_special(tok, T.unit_encode_text(item, i), dev)[0]
 
 
+def _word_spans(tok, ids: torch.Tensor) -> List[Tuple[int, int]]:
+    """把 BPE 序列切成**整词**，返回 [(start, end)) 列表。
+
+    判据：一个 token 解码后以空格开头（Qwen/GPT 系的 byte-level BPE 用空格标记词首），
+    或者它本身全是非字母数字（标点/空白）—— 这两种都算新的一段。这样 `[' Gas','co','yne']`
+    会被合成一个词，而 `[' Station',' Mari']` 会被切开。
+
+    为什么必须做这件事：显著性打分如果落在 token 级，4 个 token 的预算会全花在
+    "大写开头的碎片"上（`Gas`/`co`/`yne` 各得 3 分），原生基线被人为削弱，
+    "原生 vs 潜层"的对照就不成立了。
+    """
+    n = int(ids.numel())
+    if n <= 0:
+        return []
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    for p in range(1, n):
+        t = str(tok.decode([int(ids[p])], skip_special_tokens=True))
+        if t.startswith(" ") or (t and not any(ch.isalnum() for ch in t)):
+            spans.append((start, p))
+            start = p
+    spans.append((start, n))
+    return spans
+
+
+def pick_word_ids(tok, ids: torch.Tensor, budget: int, question: str
+                  ) -> Tuple[torch.Tensor, List[str]]:
+    """在 budget 个 token 的预算内按**整词**挑，保持原文顺序；返回 (ids, 词面)。
+
+    与 token 级 `_salient_pick` 的区别有两条，都很关键：
+      1. 打分对象是**整个词**（拼回子词再打分），不是单个子词 —— 不会再出现
+         "大写碎片拿高分"；
+      2. 同一个词面**只选一次**（token 级没有去重，实测 `Robert`/`Salisbury` 各出现两次）。
+
+    装不下就**整词跳过**，不做半截截断（与 E2 的整词口径一致）。所以实际用掉的
+    token 数可能**少于**预算，差额记在 `used` 里 —— 这是"整词"必然要付的代价，
+    宁可少给也不给碎片。
+    """
+    spans = _word_spans(tok, ids)
+    if not spans:
+        return ids[:0], []
+    q_toks = set(T._norm_ans(question).split())
+    scored = []
+    for (a, b) in spans:
+        txt = str(tok.decode([int(t) for t in ids[a:b].tolist()], skip_special_tokens=True))
+        word = txt.strip()
+        low = word.lower()
+        sc = 0.0
+        if word[:1].isupper():
+            sc += 3.0
+        if any(ch.isdigit() for ch in word):
+            sc += 3.0
+        if len(low) >= 6:
+            sc += 1.0
+        if not low or low in T._STOPWORDS:
+            sc -= 2.0
+        if low and low not in q_toks:
+            sc += 1.0
+        scored.append((sc, a, b, word))
+    # 分数高的优先；同分按原文顺序（稳定，可复现）
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    picked: List[Tuple[int, int, str]] = []
+    seen = set()
+    room = max(0, int(budget))
+    for _sc, a, b, word in scored:
+        w = b - a
+        if w <= 0 or w > room:
+            continue                      # 整词放不下 -> 跳过，不截断
+        key = word.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append((a, b, word))
+        room -= w
+        if room <= 0:
+            break
+    picked.sort(key=lambda x: x[0])       # 按原文顺序拼回
+    if not picked:
+        return ids[:0], []
+    keep = torch.cat([ids[a:b] for a, b, _w in picked])
+    return keep, [w for _a, _b, w in picked]
+
+
 def pick_ids(tok, ids: torch.Tensor, budget: int, arm: str, question: str) -> torch.Tensor:
     """在 budget 个 token 的预算内挑词，**保持原文顺序**。
 
     raw_prefix  : 句首截断（旧行为；会把句尾的核心新值切掉）
-    raw_salient : 显著性挑词（大写/数字/长词/非停用词/问题里没出现过），再按原序排回
+    raw_salient : **token 级**显著性（大写/数字/长词/非停用词/问题里没出现过）。
+                  会挑到碎片（`Gas`/`co`/`yne`）—— 留着当"朴素做法"的对照。
+    raw_word    : **整词**显著性 + 同词去重（判断容量主看这条）
     raw_full    : 不挑，全给
     预算 >= 可用 token 数时一律全给（不能凭空造词）。
     """
@@ -138,6 +225,8 @@ def pick_ids(tok, ids: torch.Tensor, budget: int, arm: str, question: str) -> to
         return ids
     if arm == "raw_prefix":
         return ids[:int(budget)]
+    if arm == "raw_word":
+        return pick_word_ids(tok, ids, int(budget), question)[0]
     return EV._salient_pick(tok, ids, int(budget), question)
 
 
@@ -187,8 +276,12 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
         keep = pick_ids(tok, ids, int(c), arm, str(item.get("question") or ""))
         used.append(int(keep.numel()))
         if dump:
-            picks.append([str(tok.decode([int(t)], skip_special_tokens=True))
-                          for t in keep.tolist()])
+            if arm == "raw_word":
+                picks.append(pick_word_ids(tok, ids, int(c),
+                                           str(item.get("question") or ""))[1])
+            else:
+                picks.append([str(tok.decode([int(t)], skip_special_tokens=True))
+                              for t in keep.tolist()])
         if int(keep.numel()) <= 0:                 # 空槽：宁可给 0 个也不塞占位符
             continue
         e = emb(keep.view(1, -1)).to(dtype=dt)
