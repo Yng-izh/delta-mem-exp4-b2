@@ -434,6 +434,28 @@ def read_item(item, ctx) -> Dict[str, Any]:
                                                 "raw_full", ctx["style"], ctx["isolate"])
         if soft_f is not None:
             _run("raw_full", soft_f, segs_f)
+
+    # ---- 预算扫描：原生整词按**固定**每槽预算重跑，用来求"追平潜层需要多少 token" ----
+    # 潜层的注入量被结构钉死（每块 m 个向量），原生那边可以自由扫。单点比较会落在
+    # 地板上（20 个 token 谁都答不对），扫出一条曲线才能回答"潜层相当于多少个原生词"。
+    for b in ctx.get("sweep") or []:
+        arm = f"raw_word@{b}"
+        soft_s, segs_s, info_s = build_raw_soft(
+            model, tok, item, idx, [int(b)] * len(idx), dev, "raw_word",
+            ctx["style"], ctx["isolate"], dump=bool(ctx.get("dump_picks")))
+        if soft_s is None:
+            res[arm] = {"pred": "", "n_soft": 0, "n_content": 0, "n_fence": 0,
+                        "n_in": 0, "ms": 0.0}
+            continue
+        # 固定预算下**只核对围栏**：内容 token 数按设计就与 latent 不同。
+        if info_s["fences"] != lat_fences[:len(info_s["fences"])]:
+            raise RuntimeError(
+                f"围栏骨架没对齐（{arm}）：raw={info_s['fences']} vs latent={lat_fences}")
+        _run(arm, soft_s, segs_s)
+        res[arm]["short"] = bool(any(info_s["short"]))
+        res[arm]["budget_per_slot"] = int(b)
+        if "picks" in info_s:
+            res[arm]["picks"] = info_s["picks"]
     return {"res": res, "gold": sorted(gold), "budget": budget}
 
 
@@ -513,6 +535,8 @@ def print_items(rows: List[Dict[str, Any]], arms: Sequence[str], n: int) -> None
 
 
 def print_report(rows: List[Dict[str, Any]], arms: Sequence[str]) -> Dict[str, Any]:
+    # 扫描臂（`raw_word@N`）单独一张表，不混进主表，否则一行一档会把主表撑散。
+    arms = [a for a in arms if "@" not in a]
     summ = {a: _agg(rows, a) for a in arms if any(a in r["res"] for r in rows)}
     print("\n| 读法 | n | EM% | F1% | 内容token | 注入总token | prompt | ms |")
     print("|---|---|---|---|---|---|---|---|")
@@ -570,6 +594,59 @@ def print_report(rows: List[Dict[str, Any]], arms: Sequence[str]) -> Dict[str, A
     return {"summary": summ, "stratified": strat, "paired": pair}
 
 
+def print_sweep(rows: List[Dict[str, Any]], sweep: Sequence[int],
+                latent_em: Optional[float]) -> Dict[str, Any]:
+    """预算扫描表 + "追平潜层需要多少原生 token"。
+
+    为什么要有这张表：潜层的注入量被结构钉死（每块 m 个向量），在**那个点**上原生
+    词和潜层可能都在地板上（实测 20 个 token 两边都答不对），单点比较没有信息量。
+    扫出原生那条曲线，问"它在哪里穿过潜层"才有解释力：
+      - 十几个 token 就追平 => 潜层不如直接塞原词，压缩没收益；
+      - 要几十个 token 才追平 => 潜层把那些信息压进了更少的位置，压缩有收益；
+      - 整条曲线都追不上 => 潜层更好。
+    """
+    out: Dict[str, Any] = {}
+    if not sweep:
+        return out
+    print("\n### 预算扫描：原生整词要多少 token 才追平潜层")
+    print("| 每槽预算 | 每题内容token | 每题prompt | EM% | F1% | 与 latent 差 |")
+    print("|---|---|---|---|---|---|")
+    curve = []
+    for b in sweep:
+        a = _agg(rows, f"raw_word@{b}")
+        if not a.get("n"):
+            continue
+        d = (a["em"] - latent_em) * 100 if latent_em is not None else None
+        curve.append((int(b), a))
+        print(f"| {b} | {a['n_content']:.1f} | {a['n_in']:.1f} | {_pct(a['em'])} "
+              f"| {_pct(a['f1'])} | {'n/a' if d is None else f'{d:+.1f}pt'} |")
+    out["curve"] = [{"budget_per_slot": b, "n_content": a["n_content"],
+                     "n_in": a["n_in"], "em": a["em"], "f1": a["f1"]} for b, a in curve]
+    if latent_em is None or not curve:
+        return out
+    hit = [b for b, a in curve if a["em"] >= latent_em - 1e-9]
+    lat_tok = _agg(rows, "latent").get("n_content")
+    if hit:
+        b = min(hit)
+        out["breakeven_per_slot"] = int(b)
+        out["breakeven_note"] = f"每槽 {b} 个 token 即追平"
+        print(f"\n**追平点**：原生整词每槽 **{b} 个 token** 就达到潜层的水平"
+              f"（潜层每槽约 {lat_tok / max(1e-6, _n_slots(rows)):.1f} 个向量）")
+    else:
+        out["breakeven_per_slot"] = None
+        out["breakeven_note"] = "扫描范围内追不平"
+        print(f"\n**追平点**：扫描范围内（最大每槽 {max(b for b, _ in curve)} 个 token）"
+              f"原生整词**仍未追平**潜层 —— 这是压缩有收益的证据")
+    return out
+
+
+def _n_slots(rows: List[Dict[str, Any]]) -> float:
+    """每题平均几个金标槽（用来把"每题内容 token"折算成"每槽"）。"""
+    vals = [len((r.get("budget") or {}).get("counts") or []) for r in rows
+            if (r.get("budget") or {}).get("counts")]
+    return (sum(vals) / len(vals)) if vals else 1.0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="实验 A：读出接口能力上限（原生 BPE vs 潜层）")
     ap.add_argument("--ckpt", default="", help="潜层读法必需")
@@ -596,6 +673,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     default="You are a helpful assistant. Answer with the shortest exact value.")
     ap.add_argument("--show-items", type=int, default=0,
                     help="打印前 N 题的逐样本明细（预算/注入构成/预测/挑中的词）")
+    ap.add_argument("--raw-budgets", default="",
+                    help="预算扫描：逗号分隔的**每槽** token 数（如 4,8,16,24,32,48,64）。"
+                         "给原生整词固定预算重跑，用来求「追平潜层需要多少 token」")
     ap.add_argument("--dump-picks", action="store_true",
                     help="逐样本记录原生基线**实际挑中的词**。小样本 sanity 必开："
                          "只看总分看不出挑词逻辑对不对")
@@ -626,6 +706,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                            "pad_token_id": pad_id, "arms": set(arms),
                            "unit_cache": {},
                            "dump_picks": bool(args.dump_picks),
+                           "sweep": [int(x) for x in str(args.raw_budgets).split(",")
+                                     if x.strip()],
                            "isolate": bool(int(args.slot_isolation))}
 
     if args.ckpt:
@@ -700,7 +782,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.show_items > 0:
         print_items(rows, arms, args.show_items)
     rep = print_report(rows, arms)
+    lat_em = (_agg(rows, "latent") or {}).get("em") if "latent" in ctx["arms"] else None
+    rep["sweep"] = print_sweep(rows, ctx["sweep"], lat_em)
     blob = {"config": vars(args), "n": len(rows), "rows": rows, **rep}
+    if ctx["sweep"]:
+        blob["sweep_summary"] = {f"raw_word@{b}": _agg(rows, f"raw_word@{b}")
+                                 for b in ctx["sweep"]}
     if args.save_json:
         os.makedirs(os.path.dirname(os.path.abspath(args.save_json)) or ".", exist_ok=True)
         with open(args.save_json, "w", encoding="utf-8") as f:
