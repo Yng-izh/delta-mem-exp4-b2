@@ -7,8 +7,11 @@
 #
 # ---- 变量 ----
 #   OUT          产物路径（必填）
-#   MAX_UNIT     每块多少 token 才压成 m 个向量（默认 32 = 训练时的口径）
-#                32/m=4 => 8 倍压缩；8/m=4 => 2 倍压缩（每题注入 token 数随之涨 4 倍）
+#   MAX_UNIT     每块多少 token 才压成 m 个向量（默认 32）
+#   M            每块输出几个记忆位置（默认 4）
+#                压缩比 = MAX_UNIT / M：32/4 = 8 倍；8/4 = 2 倍；16/8 = 2 倍。
+#                16/8 是当前推荐档：压缩比仍是 2 倍，但 8 个位置放得下 6 token 的数字
+#                （Qwen3 一个数字一个 token，51,271 = 6 个）
 #   COV          L_cov 权重（默认 0；0.1 = 第十二轮探针那档）
 #   LEX_HEAD     1 = 独立词形选择头（E1）
 #   COMPOSE       residual（旧行为）/ split（符号位 + 关系位，实验 2 的核心）
@@ -27,6 +30,7 @@ B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
 PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 OUT=${OUT:?必须显式指定 OUT}
 MAX_UNIT=${MAX_UNIT:-32}
+M=${M:-4}
 COV=${COV:-0}
 LEX_HEAD=${LEX_HEAD:-0}
 LEX_HEAD_HIDDEN=${LEX_HEAD_HIDDEN:-0}
@@ -54,7 +58,7 @@ if [ "$RESUME" = "1" ]; then
   echo "[resume] 从 $OUT 接着训"
 fi
 
-echo "[train_arm] OUT=$OUT MAX_UNIT=$MAX_UNIT COV=$COV LEX_HEAD=$LEX_HEAD" \
+echo "[train_arm] OUT=$OUT M=$M MAX_UNIT=$MAX_UNIT COV=$COV LEX_HEAD=$LEX_HEAD" \
      "COMPOSE=$COMPOSE N_SYM=$N_SYM N_REL=$N_REL REL_MODE=$REL_MODE STEPS=$STEPS"
 $PY train_latent_memory.py --router \
   --base $B/models/Qwen3-4B-Instruct-2507 \
@@ -76,6 +80,6 @@ $PY train_latent_memory.py --router \
   --compose $COMPOSE --n-sym $N_SYM --n-rel $N_REL --rel-mode $REL_MODE \
   --alpha-max 0.5 --lex-gate-init 0.05 --diag-every 50 \
   --inject-mode user --fence-style bracket \
-  --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
+  --m $M --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \
   --max-unit-tokens $MAX_UNIT --max-slots 0 --lr 2e-4 \
   --out "$OUT" --save-every $SAVE_EVERY $RESUME_ARG
