@@ -66,7 +66,11 @@ import train_latent_memory as T
 
 METHODS = ("none", "text", "oracle", "oracle_latent", "oracle_embed",
            "oracle_embed_full", "oracle_embed_salient",
-           "oracle_lex", "oracle_sem", "bridge", "router", "fst")
+           "oracle_lex", "oracle_sem", "bridge", "router", "fst",
+           # 实验 2：混合表示的三条臂（都基于同一个 split 权重，只换"关系槽放什么"）
+           "split_full", "split_blank", "split_sym",
+           # 实验 3：Router 选出槽位后，把载荷换成同预算的原生整词
+           "router_raw")
 
 # 无压缩原生词嵌入的三条对照（同一批金标槽，只换"取哪些 token"）：
 #   prefix  旧行为：从句首截 budget 个 token —— 英语事实句的核心新值常在句尾，
@@ -507,6 +511,51 @@ def read_one(method, item, ctx):
                         "hops": item_hops(item), "oracle_addressing": True})
         meta = dict(meta)
         meta["routed"] = _idx
+    elif method in ("split_full", "split_blank", "split_sym"):
+        # 实验 2 的三条臂：**同一份 split 权重**，只换"那 n_rel 个关系位放什么"。
+        # 位置总数恒为 n_sym + n_rel = m，所以"同预算"是逐位置成立的。
+        #   split_full  关系位放 Bridge(z_sem) 连续向量（完整方法）
+        #   split_blank 关系位放无信息占位（固定伪随机方向，范数对齐）
+        #   split_sym   关系位不要了，全部 m 个位置都给符号（纯符号上界）
+        _idx = [i for i in sorted(_gs) if i < len(slot_reads)]
+        if not _idx:
+            return "", {"oracle_no_evidence": True, "mem_tokens": 0,
+                        "mem_plain_tokens": 0, "prompt_tokens": 0,
+                        "pre_ms": 0.0, "enc_ms": (t_enc - t0) * 1e3,
+                        "gen_ms": 0.0, "total_ms": (time.time() - t0) * 1e3,
+                        "n_read_units": 0, "read_ok": None, "read_all": None,
+                        "picked": [], "gold": []}
+        _z = [slot_reads[i] for i in _idx]
+        _lx = ([lex_payloads[i] for i in _idx if i < len(lex_payloads)]
+               if lex_payloads is not None else None)
+        _iso = bool(ctx.get("slot_isolation"))
+        _br, _cp = ctx["bridge"], ctx["encoder"].compressor
+        _saved = (_br.compose, _br.n_sym, _br.n_rel, _br.rel_mode, _cp.n_sym)
+        try:
+            _br.compose = "split"
+            if method == "split_sym":
+                _br.n_sym, _br.n_rel, _br.rel_mode = int(ctx["m_slots"]), 0, "latent"
+                _cp.n_sym = int(ctx["m_slots"])
+            elif method == "split_blank":
+                _br.rel_mode = "blank"
+            else:
+                _br.rel_mode = "latent"
+            soft, _seg_ids = LM.compose_routed_soft(
+                model, tok, _br, _z, dev=dev, lex_list=_lx, isolate=_iso,
+                return_segs=True, fence_style=ctx.get("fence_style"))
+        finally:
+            (_br.compose, _br.n_sym, _br.n_rel, _br.rel_mode, _cp.n_sym) = _saved
+        pred, meta = LM._emit_latent(
+            model, tok, soft, question, sysp,
+            max_new_tokens=ctx["max_new_tokens"], pad_token_id=ctx["pad_token_id"],
+            seg_ids=_seg_ids, isolate=_iso,
+            inject_mode=ctx.get("inject_mode"),
+            fence_style=ctx.get("fence_style"),
+            extra_meta={"has_payload": True, "routed": _idx,
+                        "hops": item_hops(item), "oracle_addressing": True,
+                        "oracle_branch": method})
+        meta = dict(meta)
+        meta["routed"] = _idx
     elif method in ("oracle_lex", "oracle_sem"):
         # ---- 读出分解（2026-11-04）：把"当前 oracle_latent"拆成两条腿 ----
         # oracle_lex：只用 z_lex（h0 符号直通，α 强制 0，不叠加任何语义残差）
@@ -554,6 +603,55 @@ def read_one(method, item, ctx):
                         "oracle_branch": method})
         meta = dict(meta)
         meta["routed"] = _idx
+    elif method == "router_raw":
+        # ---- 实验 3 的对照臂：**同一次寻址**，只把载荷换成同预算的原生整词 ----
+        # 先跑一遍 latent 读出拿到 router 选中的槽位（寻址过程与 `router` 逐位相同），
+        # 再用这些槽位的原文按**同样的内容 token 数**拼原生词。这样"端到端差距"
+        # 就只可能来自载荷形态，而不是"router 选得不一样"。
+        pred_lat, meta_lat = LM.generate_latent_answer(
+            model=model, tokenizer=tok, bridge=ctx["bridge"], payloads=slot_z,
+            question=question, system_prompt=sysp, q_feat=qf_ex["pooled"],
+            max_new_tokens=ctx["max_new_tokens"],
+            pad_token_id=ctx["pad_token_id"], router=router, layer=ctx["layer"],
+            hops=item_hops(item), reads=slot_reads, kfeat=kfeat,
+            q_tok=qf_ex.get("h0_tok"), lex_reads=lex_payloads,
+            topk_per_hop=int(ctx.get("topk_per_hop") or 1),
+            isolate=int(ctx.get("slot_isolation") or 0),
+            inject_mode=ctx.get("inject_mode"),
+            fence_style=ctx.get("fence_style"))
+        _picked = [int(x) for x in (meta_lat.get("routed") or [])]
+        if not _picked:
+            pred, meta = pred_lat, meta_lat
+        else:
+            sys.path.insert(0, os.path.join(HERE, "tools"))
+            import probe_readout_capacity as _PRC
+            _z = [slot_reads[i] for i in _picked]
+            _lx = ([lex_payloads[i] for i in _picked if i < len(lex_payloads)]
+                   if lex_payloads is not None else None)
+            _soft_lat, _segs_lat = LM.compose_routed_soft(
+                model, tok, ctx["bridge"], _z, dev=dev, lex_list=_lx,
+                isolate=bool(ctx.get("slot_isolation")), return_segs=True,
+                fence_style=ctx.get("fence_style"))
+            _counts = _PRC.per_slot_counts(_segs_lat, len(_picked))
+            _soft_raw, _segs_raw, _info_raw = _PRC.build_raw_soft(
+                model, tok, item, _picked, _counts, dev, "raw_word",
+                ctx["style"], bool(ctx.get("slot_isolation")),
+                dump=bool(ctx.get("dump_picks")))
+            if _soft_raw is None:
+                pred, meta = pred_lat, meta_lat
+            else:
+                pred, meta = LM._emit_latent(
+                    model, tok, _soft_raw, question, sysp,
+                    max_new_tokens=ctx["max_new_tokens"],
+                    pad_token_id=ctx["pad_token_id"], seg_ids=_segs_raw,
+                    isolate=bool(ctx.get("slot_isolation")),
+                    inject_mode=ctx.get("inject_mode"),
+                    fence_style=ctx.get("fence_style"),
+                    extra_meta={"has_payload": True, "routed": _picked,
+                                "hops": item_hops(item), "router_raw": True})
+                meta = dict(meta)
+                meta["routed"] = _picked
+                meta["raw_budget"] = [int(c) for c in _counts]
     else:
         pred, meta = LM.generate_latent_answer(
             model=model, tokenizer=tok, bridge=ctx["bridge"], payloads=slot_z,
@@ -630,13 +728,20 @@ def summarize(rows, label):
     }
     reads = [bool(r["read_ok"]) for r in rows if r.get("read_ok") is not None]
     out["read_acc"] = (sum(reads) / len(reads)) if reads else None
+    # 条件问答准确率：**只统计读全了整条证据链的样本**。
+    # 这是实验 3 的核心列 —— 端到端掉分有两种完全不同的原因（没检索到 / 检索到了
+    # 但读不出来），混在总 EM 里分不开。acc_hit 固定了"检索已成功"这个条件。
+    hit = [r for r in rows if r.get("read_all") is True]
+    out["n_hit"] = len(hit)
+    out["acc_hit"] = (sum(int(r["ok"]) for r in hit) / len(hit)) if hit else None
     # ---- HotpotQA 官方口径：EM / F1（acc 是包含匹配，必须与它们同时报） ----
     out["em"] = sum(float(r.get("em") or 0.0) for r in rows) / n
     out["f1"] = sum(float(r.get("f1") or 0.0) for r in rows) / n
     # ---- 分层 EM / F1 ----
     # 总 EM 会把"日期题全灭、实体题变好"平均成"没变化"。分层之后才能看出
     # 潜层记忆到底丢了哪一类事实（符号精确值 vs 实体名）。
-    for key, name in (("ans_type", "by_ans_type"), ("hops", "by_hops")):
+    for key, name in (("ans_type", "by_ans_type"), ("hops", "by_hops"),
+                      ("binding", "by_binding")):
         groups = {}
         for r in rows:
             groups.setdefault(str(r.get(key)), []).append(r)
@@ -739,13 +844,16 @@ def main(argv=None):
                          "这是**零训练**对照：同一份权重换一种词形编码")
     ap.add_argument("--bpe-backfill", type=int, default=-1,
                     help="bpe 模式下是否用后续候选词补空位（-1=跟随 ckpt，默认不补）")
-    ap.add_argument("--split-inject", type=int, default=-1, choices=(-1, 0, 1),
-                    help="E3：1=词形与语义分开注入（[lex...]+[sem]）；0=残差叠加；"
-                         "-1=跟随 ckpt。用残差模式训出来的权重直接开 1 只是个 sanity "
-                         "check（Bridge 末层是零初始化，方向会退回池化后的语义向量），"
-                         "真正的 E3 结论必须用独立训过的权重")
-    ap.add_argument("--split-n-lex", type=int, default=-1,
-                    help="E3：每块留给词形的 token 数（-1=跟随 ckpt）")
+    ap.add_argument("--compose", choices=("",) + tuple(LM._COMPOSE_MODES), default="",
+                    help="每块位置怎么分（留空=跟随 ckpt）：residual=残差叠加；"
+                         "split=符号位 + 关系位")
+    ap.add_argument("--n-sym", type=int, default=-1,
+                    help="split 下每块符号位置数（-1=跟随 ckpt）")
+    ap.add_argument("--n-rel", type=int, default=-1,
+                    help="split 下每块关系位置数（-1=跟随 ckpt）")
+    ap.add_argument("--rel-mode", choices=("",) + tuple(LM._REL_MODES), default="",
+                    help="关系槽放什么（留空=跟随 ckpt）：latent=连续潜向量；"
+                         "blank=无信息占位（固定随机方向，实验 2 的对照臂）")
     ap.add_argument("--slot-isolation", type=int, default=LM.LATENT_SLOT_ISOLATION,
                     help="1=尝试槽位块对角隔离（仅 eager 后端生效，否则降级并记账）")
     ap.add_argument("--train-max-slots", type=int, default=0,
@@ -759,6 +867,9 @@ def main(argv=None):
     ap.add_argument("--partial-every", type=int, default=100,
                     help="每 N 题把**当前已完成**的逐样本结果落一次盘（长跑中途崩掉不丢）")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--binding-labels", default="",
+                    help="关系绑定子集的标签 json（tools/make_binding_subset.py 的 --out-labels）。"
+                         "给了就额外报「绑定题 / 非绑定题」的 EM 与绑定错误率")
     ap.add_argument("--stratify", action="store_true",
                     help="按题型（yesno/date/number/entity）与跳数分层打印 EM/F1。"
                          "总 EM 会把\"日期题全灭 + 实体题变好\"平均成\"没变化\"")
@@ -791,7 +902,8 @@ def main(argv=None):
            "embed_budget": int(args.embed_budget)}
 
     if args.method in ("bridge", "router", "fst", "oracle_latent",
-                       "oracle_lex", "oracle_sem"):
+                       "oracle_lex", "oracle_sem",
+                       "split_full", "split_blank", "split_sym", "router_raw"):
         if not args.ckpt:
             raise SystemExit(f"--method {args.method} 必须给 --ckpt（随机权重没有任何意义）")
         reader = LM.load_latent_reader(args.ckpt, model, tok, device=dev)
@@ -860,14 +972,22 @@ def main(argv=None):
             print(f"[lex] 词形载荷口径 = ckpt 记录的 {_ck_tok}", flush=True)
         if int(args.bpe_backfill) >= 0:
             reader.compressor.bpe_backfill = int(args.bpe_backfill)
-        _ck_split = bool(reader.config.get("split_inject", False))
-        if int(args.split_inject) in (0, 1):
-            reader.bridge.split_inject = bool(int(args.split_inject))
-            print(f"[split] 分注入 {_ck_split} -> {bool(int(args.split_inject))}", flush=True)
-        else:
-            print(f"[split] 分注入 = ckpt 记录的 {_ck_split}", flush=True)
-        if int(args.split_n_lex) > 0:
-            reader.bridge.n_lex = int(args.split_n_lex)
+        # 混合表示的结构（实验 2）：默认完全跟随 ckpt；显式给了才覆盖。
+        # 覆盖只改"位置怎么分/放什么"，不改权重 —— 所以同一个 split 权重可以直接跑出
+        # split_full / split_blank / split_sym 三条臂，这才是"同预算、只换关系槽内容"。
+        print(f"[compose] ckpt 记录 compose={getattr(reader.bridge, 'compose', 'residual')} "
+              f"n_sym={int(getattr(reader.compressor, 'n_sym', -1))} "
+              f"n_rel={int(getattr(reader.bridge, 'n_rel', 0))} "
+              f"rel_mode={getattr(reader.bridge, 'rel_mode', 'latent')}", flush=True)
+        if args.compose:
+            reader.bridge.compose = str(args.compose)
+        if int(args.n_sym) >= 0:
+            reader.bridge.n_sym = int(args.n_sym)
+            reader.compressor.n_sym = int(args.n_sym)
+        if int(args.n_rel) >= 0:
+            reader.bridge.n_rel = int(args.n_rel)
+        if args.rel_mode:
+            reader.bridge.rel_mode = str(args.rel_mode)
         print(f"[lex] lex_head={'on' if getattr(reader.compressor, 'lex_scorer', None) is not None else 'off'}"
               f" split_n_lex={int(getattr(reader.bridge, 'n_lex', 0))}", flush=True)
         if args.method in ("router", "fst"):
@@ -914,6 +1034,19 @@ def main(argv=None):
               f"router 训练时从未见过这么多槽，读对槽位会被 chance 稀释；"
               f"训练侧建议 --max-slots 0", flush=True)
 
+    _binding = {}
+    if args.binding_labels:
+        with open(args.binding_labels, "r", encoding="utf-8") as f:
+            _bl = json.load(f)
+        _binding = {int(k): bool(v.get("binding"))
+                    for k, v in (dict(_bl.get("items") or {})).items()}
+        _nb = sum(1 for v in _binding.values() if v)
+        print(f"[binding] 载入 {len(_binding)} 条标签，其中绑定题 {_nb} "
+              f"（{100.0 * _nb / max(1, len(_binding)):.1f}%）", flush=True)
+
+    def _binding_of(i):
+        return _binding.get(int(i))
+
     rows = []
     _t_run = time.time()
     for i, item in enumerate(data):
@@ -928,7 +1061,8 @@ def main(argv=None):
                          pred=str(pred), ok=bool(ok), idx=i,
                          em=em_score(pred, gold), f1=f1_score(pred, gold),
                          n_ev=n_ev_of(item), hops=item_hops(item),
-                         ans_type=answer_type(gold)))
+                         ans_type=answer_type(gold),
+                         binding=_binding_of(i)))
         if args.verbose:
             print(f"  [{label}] {'✓' if ok else '✗'} q={item['question'][:50]!r} "
                   f"gold_ans={gold!r} pred={str(pred)[:40]!r}", flush=True)

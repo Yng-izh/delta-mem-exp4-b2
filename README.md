@@ -54,7 +54,10 @@ E2/E3/E4、`L_cov` 调参、独立词形头**全部暂停**（E1 已证伪"语�
 |---|---|
 | `runs/exp_a_capacity.sh` | **实验 A**：接口容量 vs 压缩损失（不训练，约 20 分钟） |
 | `runs/exp_b_pure_sem.sh` | **实验 B**：纯语义读出能不能学会（1000 步 + 自动评测） |
-| `runs/train_arm.sh` | 训练单个臂（1000 步），用环境变量换一个变量：`MAX_UNIT`/`COV`/`LEX_HEAD`/`SPLIT_INJECT` |
+| `runs/train_arm.sh` | 训练单个臂（1000 步），用环境变量换一个变量：`MAX_UNIT`/`COV`/`LEX_HEAD`/`COMPOSE`/`N_SYM`/`N_REL`/`REL_MODE` |
+| **`runs/exp1_bottleneck.sh`** | 实验 1：符号损坏 vs 连续表示不可读（BPE 对照 + 纯语义训练） |
+| **`runs/exp2_hybrid.sh`** | 实验 2（核心）：2 符号位 + 2 关系位，四臂对照 + 关系绑定子集 |
+| **`runs/exp3_e2e.sh`** | 实验 3：接回 Router 端到端，报召回与命中条件准确率 |
 | `runs/run_stage1_router.sh` | 阶段一 Router |
 | `runs/eval_stage2.sh` | 通用评测入口（`CKPT` 必填） |
 | `runs/diag_router_cache.sh` | 缓存路径与训练路径是否等价 |

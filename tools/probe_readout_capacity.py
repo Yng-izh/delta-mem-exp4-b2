@@ -150,7 +150,7 @@ def _word_spans(tok, ids: torch.Tensor) -> List[Tuple[int, int]]:
     return spans
 
 
-def pick_word_ids(tok, ids: torch.Tensor, budget: int, question: str
+def pick_word_ids(tok, ids: torch.Tensor, budget: int
                   ) -> Tuple[torch.Tensor, List[str]]:
     """在 budget 个 token 的预算内按**整词**挑，保持原文顺序；返回 (ids, 词面)。
 
@@ -166,7 +166,8 @@ def pick_word_ids(tok, ids: torch.Tensor, budget: int, question: str
     spans = _word_spans(tok, ids)
     if not spans:
         return ids[:0], []
-    q_toks = set(T._norm_ans(question).split())
+    # **Query-Agnostic**：打分只看证据本身（大写/数字/长度/停用词），
+    # 绝不看问题。写入记忆时还不知道未来会问什么，任何用到问题的信号都是泄漏。
     scored = []
     for (a, b) in spans:
         txt = str(tok.decode([int(t) for t in ids[a:b].tolist()], skip_special_tokens=True))
@@ -181,8 +182,6 @@ def pick_word_ids(tok, ids: torch.Tensor, budget: int, question: str
             sc += 1.0
         if not low or low in T._STOPWORDS:
             sc -= 2.0
-        if low and low not in q_toks:
-            sc += 1.0
         scored.append((sc, a, b, word))
     # 分数高的优先；同分按原文顺序（稳定，可复现）
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -208,7 +207,36 @@ def pick_word_ids(tok, ids: torch.Tensor, budget: int, question: str
     return keep, [w for _a, _b, w in picked]
 
 
-def pick_ids(tok, ids: torch.Tensor, budget: int, arm: str, question: str) -> torch.Tensor:
+def salient_pick_agnostic(tok, ids: torch.Tensor, budget: int) -> torch.Tensor:
+    """token 级显著性挑词，**只看证据本身**（大写/数字/长词/非停用词）。
+
+    这是"朴素做法"的对照臂：它会在 token 级挑，因此会挑到半个词（`Gas`/`co`/`yne`）。
+    保留它是因为它便宜，而且"碎片 vs 整词"本身是一个要报告的变量。
+    """
+    n = int(ids.numel())
+    if n <= 0:
+        return ids
+    budget = max(1, min(int(budget), n))
+    scored = []
+    for pos in range(n):
+        t = str(tok.decode([int(ids[pos])], skip_special_tokens=True)).strip()
+        low = t.lower()
+        sc = 0.0
+        if t[:1].isupper():
+            sc += 3.0
+        if any(ch.isdigit() for ch in t):
+            sc += 3.0
+        if len(low) >= 6:
+            sc += 1.0
+        if not low or low in T._STOPWORDS:
+            sc -= 2.0
+        scored.append((sc, pos))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    keep = sorted(p for _sc, p in scored[:budget])
+    return ids[torch.tensor(keep, dtype=torch.long)]
+
+
+def pick_ids(tok, ids: torch.Tensor, budget: int, arm: str) -> torch.Tensor:
     """在 budget 个 token 的预算内挑词，**保持原文顺序**。
 
     raw_prefix  : 句首截断（旧行为；会把句尾的核心新值切掉）
@@ -226,8 +254,8 @@ def pick_ids(tok, ids: torch.Tensor, budget: int, arm: str, question: str) -> to
     if arm == "raw_prefix":
         return ids[:int(budget)]
     if arm == "raw_word":
-        return pick_word_ids(tok, ids, int(budget), question)[0]
-    return EV._salient_pick(tok, ids, int(budget), question)
+        return pick_word_ids(tok, ids, int(budget))[0]
+    return salient_pick_agnostic(tok, ids, int(budget))
 
 
 def fence_runs(segs: Sequence[int]) -> List[int]:
@@ -273,12 +301,11 @@ def build_raw_soft(model, tok, item, idx: Sequence[int], counts: Sequence[int],
         fences.append(int(fence.shape[1]))
         ids = _slot_ids(tok, item, int(i), dev)
         avail.append(int(ids.numel()))
-        keep = pick_ids(tok, ids, int(c), arm, str(item.get("question") or ""))
+        keep = pick_ids(tok, ids, int(c), arm)
         used.append(int(keep.numel()))
         if dump:
             if arm == "raw_word":
-                picks.append(pick_word_ids(tok, ids, int(c),
-                                           str(item.get("question") or ""))[1])
+                picks.append(pick_word_ids(tok, ids, int(c))[1])
             else:
                 picks.append([str(tok.decode([int(t)], skip_special_tokens=True))
                               for t in keep.tolist()])

@@ -1254,7 +1254,11 @@ def recon_loss_units(model, tokenizer, bridge, payloads, units, rng, n_units,
             if lx is not None and torch.is_tensor(lx):
                 if lx.dim() == 2:
                     lx = lx.unsqueeze(0)
-                if tuple(lx.shape) != tuple(p.shape):
+                if str(getattr(bridge, "compose", "residual")) == "split":
+                    # split 下词形载荷只有 n_sym 行，与语义载荷的元素数**本来就不同**；
+                    # 行数归一化交给 bridge.forward_split，这里不做硬对齐。
+                    pass
+                elif tuple(lx.shape) != tuple(p.shape):
                     if int(lx.numel()) == int(p.numel()):
                         lx = lx.reshape(tuple(p.shape))
                     else:
@@ -1775,13 +1779,22 @@ def train(args):
     _tok_mode = str(getattr(args, "lex_token_mode", "ckpt"))
     if _tok_mode == "ckpt":
         _tok_mode = "mean"
+    _compose, _n_sym, _n_rel = resolve_split_budget(args)
+    if _compose == "split" and _n_sym > 0 and not bool(getattr(args, "router", False)):
+        # 符号位要的是"每槽的整词 BPE 向量"，那只有 encode_item_slots_full 才产
+        # （它按槽位返回 lex_payloads）。无 router 的训练路径走 encode_item，拿不到
+        # 逐槽直通载荷 —— 与其在 forward 里静默退回纯语义，不如开跑前说清楚。
+        raise SystemExit("[错误] --compose split 且 n_sym>0 需要 --router"
+                         "（词形载荷只在按槽编码时产生）")
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
                                num_heads=args.heads,
                                lex_skip=bool(getattr(args, "lex_skip", True)),
                                lex_head=bool(int(getattr(args, "lex_head", 0) or 0)),
                                lex_head_hidden=int(getattr(args, "lex_head_hidden", 0) or 0),
                                lex_token_mode=_tok_mode,
-                               bpe_backfill=int(getattr(args, "bpe_backfill", 0) or 0)).to(dev)
+                               bpe_backfill=int(getattr(args, "bpe_backfill", 0) or 0),
+                               n_sym=(int(args.m) if _compose != "split"
+                                      else int(_n_sym))).to(dev)
     # 软 token 的范数必须对齐真实 token embedding 的尺度，否则会变成 attention sink
     # 把真实 token 淹没（实测未约束时软 token 范数 96~159，而真实 embedding 约 1.05，
     # 结果：loss 降到 2.8 但同一批样本 200 条只答对 1~3 条，加宽 m 完全无效）。
@@ -1795,9 +1808,9 @@ def train(args):
                                                          LM.LATENT_LEX_GATE_INIT)),
                              alpha_max=float(getattr(args, "alpha_max",
                                                      LM.LATENT_ALPHA_MAX)),
-                             split_inject=bool(int(getattr(args, "split_inject", 0) or 0)),
-                             split_n_lex=int(getattr(args, "split_n_lex",
-                                                     LM.LATENT_SPLIT_N_LEX) or 3)).to(dev)
+                             compose=str(getattr(args, "compose", "residual")),
+                             n_sym=int(_n_sym), n_rel=int(_n_rel),
+                             rel_mode=str(getattr(args, "rel_mode", "latent"))).to(dev)
     print(f"[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 {target_norm:.4f}"
           f"（可学习，夹在 [{LM.LatentBridge.NORM_MIN}, {LM.LatentBridge.NORM_MAX}] 倍）；"
           f"h0 直通 lex_skip={bool(getattr(args, 'lex_skip', True))} "
@@ -1950,9 +1963,14 @@ def train(args):
         # 这里提前给出能看懂的报错，而不是让人对着 state_dict 报错猜。
         _ckcfg = dict(_rb.get("config") or {})
         _struct = {"lex_head": bool(_ckcfg.get("lex_head", False)),
-                   "split_inject": bool(_ckcfg.get("split_inject", False))}
+                   "compose": str(_ckcfg.get("compose", "residual")),
+                   "n_sym": int(_ckcfg.get("n_sym", _ckcfg.get("n_slots", 0))),
+                   "n_rel": int(_ckcfg.get("n_rel", 0)),
+                   "rel_mode": str(_ckcfg.get("rel_mode", "latent"))}
         _cli_struct = {"lex_head": bool(int(getattr(args, "lex_head", 0) or 0)),
-                       "split_inject": bool(int(getattr(args, "split_inject", 0) or 0))}
+                       "compose": str(_compose),
+                       "n_sym": int(_n_sym), "n_rel": int(_n_rel),
+                       "rel_mode": str(getattr(args, "rel_mode", "latent"))}
         _bad = {k: (v, _cli_struct[k]) for k, v in _struct.items()
                 if v != _cli_struct[k]}
         if _bad:
@@ -1960,7 +1978,7 @@ def train(args):
                 "[resume][错误] 结构与 ckpt 不一致：" +
                 "；".join(f"{k}: ckpt={v[0]} 命令行={v[1]}" for k, v in _bad.items()) +
                 "。结构开关决定参数集合，不能用命令行改；续训请带上与原来一致的开关"
-                "（例如 --lex-head 1 --split-inject 1）")
+                "（例如 --lex-head 1 --compose split --n-sym 2 --n-rel 2）")
         if str(_ckcfg.get("lex_token_mode", "mean")) != str(
                 getattr(args, "lex_token_mode", "ckpt")) and str(
                 getattr(args, "lex_token_mode", "ckpt")) != "ckpt":
@@ -2064,8 +2082,10 @@ def train(args):
                 "lex_head": bool(getattr(comp, "lex_scorer", None) is not None),
                 "lex_token_mode": str(getattr(comp, "lex_token_mode", "mean")),
                 "bpe_backfill": int(getattr(comp, "bpe_backfill", 0) or 0),
-                "split_inject": bool(getattr(bridge, "split_inject", False)),
-                "split_n_lex": int(getattr(bridge, "n_lex", LM.LATENT_SPLIT_N_LEX)),
+                "compose": str(getattr(bridge, "compose", "residual")),
+                "n_sym": int(getattr(comp, "n_sym", args.m)),
+                "n_rel": int(getattr(bridge, "n_rel", 0)),
+                "rel_mode": str(getattr(bridge, "rel_mode", "latent")),
                 "hid_weight": float(getattr(args, "hid_weight", 0.0) or 0.0),
                 "hid_layer": str(getattr(args, "hid_layer", "last")),
                 "inject_mode": str(getattr(args, "inject_mode", LM.LATENT_INJECT_MODE)),
@@ -2677,7 +2697,17 @@ def train(args):
         print(f"[cov-check] L_cov 进入优化步 {_cov_seen[0]} 次，"
               f"cov_targets={int(getattr(args, 'cov_targets', 0) or 0)}"
               f"（0=自动取槽数）", flush=True)
-    if not all(v for k, v in grad_ok.items() if k != "model_has_no_grad"):
+    # 纯符号臂（split + n_rel=0）没有可训练的读出路径：符号位是**原样复制**的
+    # 词表向量，Bridge 的 net 一次都不参与，选词又是硬 argmax（不可微）。
+    # 这不是 bug，而是这条臂的定义 —— 它只训 router。blank 臂同理，唯一的可训练
+    # 参数是那个占位向量本身。
+    _pure_sym = (_compose == "split" and int(_n_rel) == 0)
+    _blank_only = (_compose == "split" and str(getattr(args, "rel_mode", "latent")) == "blank")
+    if _pure_sym or _blank_only:
+        print(f"[grad-check] 纯符号/占位臂：读出端没有可训练的语义路径"
+              f"（compose={_compose} n_rel={_n_rel} rel_mode="
+              f"{getattr(args, 'rel_mode', 'latent')}），跳过梯度回传检查", flush=True)
+    elif not all(v for k, v in grad_ok.items() if k != "model_has_no_grad"):
         raise RuntimeError(
             "梯度没有回传到 Compressor/Bridge —— 检查是否误把 student 前向放进了 "
             "torch.no_grad()，或 z 被提前 detach。")
@@ -2716,16 +2746,18 @@ def train(args):
                                      lex_head=bool(_bcfg.get("lex_head", False)),
                                      lex_head_hidden=int(_bcfg.get("lex_head_hidden", 0) or 0),
                                      lex_token_mode=str(_bcfg.get("lex_token_mode", "mean")),
-                                     bpe_backfill=int(_bcfg.get("bpe_backfill", 0) or 0)).to(dev)
+                                     bpe_backfill=int(_bcfg.get("bpe_backfill", 0) or 0),
+                                     n_sym=int(_bcfg.get("n_sym", _bcfg["n_slots"]))).to(dev)
         _bridge2 = LM.LatentBridge(LM._model_hidden_size(model),
                                    bottleneck=_bcfg["bottleneck"],
                                    target_norm=float(_bcfg["target_norm"]),
                                    lex_skip=bool(_bcfg.get("bridge_lex_skip", _lex2)),
                                    alpha_max=float(_bcfg.get("bridge_alpha_max",
                                                             LM.LATENT_ALPHA_MAX)),
-                                   split_inject=bool(_bcfg.get("split_inject", False)),
-                                   split_n_lex=int(_bcfg.get("split_n_lex",
-                                                            LM.LATENT_SPLIT_N_LEX))).to(dev)
+                                   compose=str(_bcfg.get("compose", "residual")),
+                                   n_sym=int(_bcfg.get("n_sym", _bcfg["n_slots"])),
+                                   n_rel=int(_bcfg.get("n_rel", 0)),
+                                   rel_mode=str(_bcfg.get("rel_mode", "latent"))).to(dev)
         _comp2.load_state_dict(_blob["compressor"]); _bridge2.load_state_dict(_blob["bridge"])
         _comp2.eval(); _bridge2.eval()
         _router2 = None
@@ -3167,7 +3199,8 @@ def train_fst(args):
 
     comp = LM.LatentCompressor(hidden, n_slots=args.m, inner_dim=args.inner_dim,
                                num_heads=args.heads,
-                               lex_skip=bool(getattr(args, "lex_skip", True))).to(dev)
+                               lex_skip=bool(getattr(args, "lex_skip", True)),
+                               n_sym=int(args.m)).to(dev)
     with torch.no_grad():
         _emb_w = model.get_input_embeddings().weight
         target_norm = float(_emb_w.float().norm(dim=-1).mean())
@@ -3617,12 +3650,18 @@ def parse_args(argv=None):
     ap.add_argument("--bpe-backfill", type=int, default=LM.LATENT_BPE_BACKFILL,
                     help="bpe 模式下放不下的词是否用后面的候选词补空位（默认 0=不补，"
                          "保持'同一套选词、只换编码方式'这个对照口径）")
-    ap.add_argument("--split-inject", type=int, default=LM.LATENT_SPLIT_INJECT,
-                    help="E3：1=词形与语义**分开注入**（[lex_1..lex_k] + [sem]，总预算"
-                         " k+1）；0=残差叠加（现行为）。split 模式下 Bridge 末层不做零"
-                         "初始化（零输出等于往序列里塞全零向量）")
-    ap.add_argument("--split-n-lex", type=int, default=LM.LATENT_SPLIT_N_LEX,
-                    help="E3：每块留给词形的 token 数（1~m）。默认 3 = 3 词形 + 1 语义")
+    ap.add_argument("--compose", choices=LM._COMPOSE_MODES, default=LM.LATENT_COMPOSE,
+                    help="每块的固定位置怎么分：residual=全部位置放 "
+                         "z_lex + tanh(α)·Bridge(z_sem)（旧行为）；split=前 n_sym 个位置"
+                         "放符号（原生 BPE 整词）、后 n_rel 个位置放关系（连续潜向量），"
+                         "n_sym + n_rel 必须等于 --m")
+    ap.add_argument("--n-sym", type=int, default=-1,
+                    help="split 下每块的符号位置数（-1 = 跟随 --m，即全部给符号）")
+    ap.add_argument("--n-rel", type=int, default=-1,
+                    help="split 下每块的关系位置数（-1 = 跟随 --m - n_sym）")
+    ap.add_argument("--rel-mode", choices=LM._REL_MODES, default=LM.LATENT_REL_MODE,
+                    help="关系槽放什么：latent=连续潜向量（Bridge(z_sem)）；"
+                         "blank=全局共享的可学习占位（无信息对照臂，实验 2 用）")
     ap.add_argument("--hid-weight", type=float, default=0.0,
                     help="E4：隐状态蒸馏权重（0=关闭）。只在**最后一层、答案生成前那一个"
                          "位置**上做余弦对齐，teacher=明文上下文、student=潜层上下文。"
@@ -3716,8 +3755,9 @@ def validate_lex_config(args) -> None:
         bad.append("--lex-head 1（独立词形头只在 lex_skip=True 时注册，会被静默丢弃）")
     if float(getattr(args, "cov_weight", 0.0) or 0.0) > 0:
         bad.append("--cov-weight > 0（L_cov 依赖词级选词，没有直通时目标恒为空）")
-    if int(getattr(args, "split_inject", 0) or 0):
-        bad.append("--split-inject 1（分开注入需要词形载荷，缺了会退回残差路径）")
+    if str(getattr(args, "compose", "residual")) == "split" and int(
+            getattr(args, "n_sym", 0) or 0) > 0:
+        bad.append("--compose split 且 --n-sym > 0（符号槽需要词形载荷，缺了没有东西可放）")
     if bad:
         raise SystemExit(
             "[错误] --no-lex-skip（纯语义读出）与下列开关冲突，它们会静默不生效：\n  - "
@@ -3727,6 +3767,34 @@ def validate_lex_config(args) -> None:
         print("[warn] --no-lex-skip 下 --recon-lex 1 没有词形载荷可用，重建会退化成"
               "只用 z_sem（建议显式 --recon-lex 0，让两轮实验的重建口径一致）",
               flush=True)
+
+
+def resolve_split_budget(args):
+    """把 `--compose/--n-sym/--n-rel` 解析成确定的 (compose, n_sym, n_rel)。
+
+    为什么要硬校验：split 的**全部意义**是"位置总数不变、只换每个位置放什么"。
+    n_sym + n_rel 少一个位置会让"同预算"不成立，多一个位置会让注入 token 数悄悄变多，
+    两种都会让实验 2 的三臂对照失去意义 —— 所以这里直接报错，不自动补齐、不静默降级。
+    """
+    compose = str(getattr(args, "compose", "residual")).lower()
+    n_sym = int(getattr(args, "n_sym", -1))
+    n_rel = int(getattr(args, "n_rel", -1))
+    m = int(args.m)
+    if compose != "split":
+        return compose, m, 0
+    if n_sym < 0 and n_rel < 0:
+        raise SystemExit("[错误] --compose split 需要显式给 --n-sym / --n-rel"
+                         "（例如 2+2 或 4+0）")
+    if n_sym < 0:
+        n_sym = m - n_rel
+    if n_rel < 0:
+        n_rel = m - n_sym
+    if n_sym + n_rel != m:
+        raise SystemExit(f"[错误] split 的位置预算必须等于 --m={m}："
+                         f"n_sym={n_sym} + n_rel={n_rel} = {n_sym + n_rel}")
+    if n_sym > 0 and not bool(getattr(args, "lex_skip", True)):
+        raise SystemExit("[错误] split 且 n_sym > 0 需要词形直通（不要 --no-lex-skip）")
+    return compose, n_sym, n_rel
 
 
 def main(argv=None):

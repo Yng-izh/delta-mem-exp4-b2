@@ -250,65 +250,95 @@ def test_lex_mean_unchanged():
 
 
 # =====================================================================
-# S. E3：词形与语义分开注入
+# S. 混合表示（实验 2）：n_sym 个符号位 + n_rel 个关系位，总位置数不变
 # =====================================================================
-def test_bridge_split():
+def test_bridge_hybrid():
     torch.manual_seed(0)
     d, m, tn = 32, 4, 1.05
     br = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
-                         split_inject=True, split_n_lex=3)
+                         compose="split", n_sym=2, n_rel=2)
     B = 2
     z = torch.randn(B, m, d) * 0.4
-    lex = torch.randn(B, m, d)
+    lex = torch.randn(B, 2, d)
     lex = lex / lex.norm(dim=-1, keepdim=True) * tn
-    lex[1, 2] = 0.0                              # 造一个空槽
-    out = br.forward_separate(z, lex)
-    ok("S1 输出形状 = [B, n_lex+1, d]", tuple(out.shape) == (B, 4, d),
-       extra=str(tuple(out.shape)))
-    sem = out[:, 3, :]
-    ok("S2 语义行的**整向量 L2 范数**对齐到 target_norm",
-       torch.allclose(sem.norm(dim=-1), torch.full((B,), tn), atol=1e-4),
-       extra=str([round(float(v), 4) for v in sem.detach().norm(dim=-1)]))
-    ok("S3 语义范数不是 RMSNorm×常数的量级（≈target·√d）",
-       float(sem.detach().norm(dim=-1).max()) < tn * 3.0,
-       extra=f"max={float(sem.detach().norm(dim=-1).max()):.3f} 上界={tn * 3.0:.3f}")
-    ok("S4 词形行原样复制（不做任何残差混合）",
-       torch.allclose(out[0, :3, :], lex[0, :3, :]),
-       extra=str(float((out[0, :3, :] - lex[0, :3, :]).abs().max())))
-    ok("S5 空槽的词形行用语义向量兜底（不是全零向量）",
-       torch.allclose(out[1, 2, :], sem[1], atol=1e-6))
-    # split 模式下 Bridge 末层**不能**零初始化（否则语义 token 恒为零向量）
-    ok("S6 split 模式不零初始化末层",
-       float(br.net[-1].weight.abs().sum()) > 0.0)
+    out = br.forward_split(z, lex)
+    ok("S1 输出形状 = [B, n_sym+n_rel, d]（总位置数与残差模式相同）",
+       tuple(out.shape) == (B, 4, d), extra=str(tuple(out.shape)))
+    ok("S2 符号位**原样复制**词形向量（不做任何混合）",
+       torch.allclose(out[:, :2, :], lex, atol=1e-6),
+       extra=str(float((out[:, :2, :] - lex).abs().max())))
+    sem = out[:, 2:, :]
+    ok("S3 关系位的**整向量 L2 范数**对齐到 target_norm",
+       torch.allclose(sem.norm(dim=-1), torch.full((B, 2), tn), atol=1e-4),
+       extra=str([round(float(v), 4) for v in sem.detach().norm(dim=-1).flatten()[:4]]))
+    ok("S4 关系范数不是 RMSNorm×常数的量级（≈target·√d）",
+       float(sem.detach().norm(dim=-1).max()) < tn * 3.0)
+    # 纯符号臂：n_rel=0
+    br_sym = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
+                             compose="split", n_sym=4, n_rel=0)
+    lex4 = torch.randn(B, 4, d)
+    lex4 = lex4 / lex4.norm(dim=-1, keepdim=True) * tn
+    out_sym = br_sym.forward_split(z, lex4)
+    ok("S5 n_rel=0 时输出就是 4 个符号位（纯符号臂）",
+       tuple(out_sym.shape) == (B, 4, d)
+       and torch.allclose(out_sym, lex4, atol=1e-6), extra=str(tuple(out_sym.shape)))
+    # 无信息占位：关系位与输入无关、且每块每位置都相同
+    br_blank = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
+                               compose="split", n_sym=2, n_rel=2, rel_mode="blank")
+    o1 = br_blank.forward_split(z, lex)
+    o2 = br_blank.forward_split(torch.randn(B, m, d) * 3.0, lex)
+    ok("S6 占位模式的关系位与输入内容无关（换一份语义载荷结果不变）",
+       torch.allclose(o1[:, 2:, :], o2[:, 2:, :], atol=1e-6))
+    ok("S7 占位模式的关系位在块/位置之间完全相同，但范数仍对齐 target_norm",
+       torch.allclose(o1[:, 2:, :], o1[:, 2:3, :].expand_as(o1[:, 2:, :]), atol=1e-6)
+       and abs(float(o1[0, 2].norm()) - tn) < 1e-3,
+       extra=str(round(float(o1[0, 2].norm()), 4)))
+    # 结构校验
+    ok("S8 n_rel 超过语义槽数时直接报错（不能静默少给位置）",
+       _raises(lambda: br.forward_split(z, lex, n_sym=2, n_rel=9)))
+    ok("S9 n_sym>0 但没给词形载荷时直接报错（不能静默变成纯语义）",
+       _raises(lambda: br.forward_split(z, None)))
+    ok("S10 forward() 在 split 模式下自动分派（漏一处就会静默退回残差）",
+       tuple(br(z, lex).shape) == (B, 4, d))
     torch.manual_seed(0)
-    br2 = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
-                          split_inject=False)
-    ok("S7 残差模式仍然零初始化末层（第 0 步 E=z_lex 这个不变量不能破）",
-       float(br2.net[-1].weight.abs().sum()) == 0.0)
+    br_res = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
+                             compose="residual")
+    ok("S11 残差模式仍然零初始化末层（第 0 步 E=z_lex 这个不变量不能破）",
+       float(br_res.net[-1].weight.abs().sum()) == 0.0)
+    torch.manual_seed(0)
+    br_sp = LM.LatentBridge(d, bottleneck=8, target_norm=tn, lex_skip=True,
+                            compose="split", n_sym=2, n_rel=2)
+    ok("S12 split 模式不零初始化（零输出等于往序列里塞全零向量）",
+       float(br_sp.net[-1].weight.abs().sum()) > 0.0)
 
 
-def test_compose_split_tokens():
-    """compose 在 split 模式下每槽的 content token 数 = k+1（k=词形行数）。"""
+def test_compose_hybrid_tokens():
+    """compose 在 split 模式下每块的**位置数必须仍等于 m**（同预算的硬约束）。"""
     model = T.SmokeModel(vocab_size=256, hidden_size=32, n_layers=2, n_heads=2)
     tok = T.StubTok(vocab_size=256)
-    bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True,
-                             split_inject=True, split_n_lex=3)
     z = [torch.randn(1, 4, 32)]
-    lex = [torch.randn(1, 4, 32)]
-    soft_split, segs_split = LM.compose_routed_soft(
-        model, tok, bridge, z, lex_list=lex, isolate=True, return_segs=True,
-        fence_style="bracket")
-    bridge.split_inject = False
-    soft_res, _segs_res = LM.compose_routed_soft(
-        model, tok, bridge, z, lex_list=lex, isolate=True, return_segs=True,
-        fence_style="bracket")
-    n_split = int(soft_split.shape[1])
-    n_res = int(soft_res.shape[1])
-    ok("S9 两种模式的 token 总数相同（4 content/槽，预算没变）",
-       n_split == n_res, extra=f"split={n_split} residual={n_res}")
-    ok("S10 split 模式下 z_lex 为空时退回残差路径（oracle_sem 不能被改口径）",
-       int(LM.compose_routed_soft(model, tok, bridge, z, lex_list=None,
-                                  fence_style="bracket").shape[1]) > 0)
+    lex = [torch.randn(1, 2, 32)]
+    br_res = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True,
+                             compose="residual")
+    soft_res, _ = LM.compose_routed_soft(model, tok, br_res, z, lex_list=[torch.randn(1, 4, 32)],
+                                         isolate=True, return_segs=True, fence_style="bracket")
+    br_sp = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True,
+                            compose="split", n_sym=2, n_rel=2)
+    soft_sp, segs_sp = LM.compose_routed_soft(model, tok, br_sp, z, lex_list=lex,
+                                              isolate=True, return_segs=True,
+                                              fence_style="bracket")
+    ok("S13 split(2+2) 与 residual(4) 的注入 token 总数相同",
+       int(soft_sp.shape[1]) == int(soft_res.shape[1]),
+       extra=f"split={int(soft_sp.shape[1])} residual={int(soft_res.shape[1])}")
+    ok("S14 每槽内容 token 数仍是 4（2 符号 + 2 关系）",
+       sum(1 for v in segs_sp if int(v) > 0) == 4,
+       extra=str([int(v) for v in segs_sp]))
+    ok("S15 纯语义臂（n_sym=0）不要求词形载荷",
+       int(LM.compose_routed_soft(
+           model, tok,
+           LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True,
+                           compose="split", n_sym=0, n_rel=4),
+           z, lex_list=None, fence_style="bracket").shape[1]) > 0)
 
 
 # =====================================================================
@@ -374,9 +404,10 @@ def test_ckpt_roundtrip():
     tok = T.StubTok(vocab_size=256)
     torch.manual_seed(0)
     comp = LM.LatentCompressor(32, n_slots=4, inner_dim=16, num_heads=2, lex_skip=True,
-                              lex_head=True, lex_token_mode="bpe", bpe_backfill=1)
+                              lex_head=True, lex_token_mode="bpe", bpe_backfill=1,
+                              n_sym=2)
     bridge = LM.LatentBridge(32, bottleneck=8, target_norm=1.05, lex_skip=True,
-                            split_inject=True, split_n_lex=3)
+                            compose="split", n_sym=2, n_rel=2)
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "rt.pt")
         LM.save_latent_checkpoint(path, comp, bridge, {"n_slots": 4, "inner_dim": 16,
@@ -385,8 +416,12 @@ def test_ckpt_roundtrip():
         ok("C1 lex_scorer 被还原", getattr(rd.compressor, "lex_scorer", None) is not None)
         ok("C2 词形载荷口径被还原", rd.compressor.lex_token_mode == "bpe")
         ok("C3 bpe_backfill 被还原", int(rd.compressor.bpe_backfill) == 1)
-        ok("C4 split_inject 被还原", bool(rd.bridge.split_inject) is True)
-        ok("C5 split_n_lex 被还原", int(rd.bridge.n_lex) == 3)
+        ok("C4 compose 模式被还原", str(rd.bridge.compose) == "split",
+           extra=str(rd.bridge.compose))
+        ok("C5 n_sym / n_rel 被还原（压缩器侧也要还原，否则符号位数量会变）",
+           int(rd.bridge.n_sym) == 2 and int(rd.bridge.n_rel) == 2
+           and int(rd.compressor.n_sym) == 2,
+           extra=f"{rd.bridge.n_sym}+{rd.bridge.n_rel} comp={rd.compressor.n_sym}")
         # 权重逐位一致（strict=True 已经保证键集合；这里再核一次数值）
         ok("C6 词形头权重逐位一致",
            torch.equal(rd.compressor.lex_scorer.net[-1].weight,
@@ -398,8 +433,9 @@ def test_ckpt_roundtrip():
         wgt = torch.tensor([[3.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.0, 0.0]])
         _z, _zl, info = rd.compressor.forward_split(
             h0, h18, mask, word_ids=wid, word_penalty=pen, word_weight=wgt, want_cov=True)
-        ok("C7 还原后的压缩器前向正常（bpe 载荷形状不变）",
-           tuple(_zl.shape) == (1, 4, 32), extra=str(tuple(_zl.shape)))
+        # n_sym=2：词形载荷只保留 2 行（其余位置留给关系槽），这就是 split 的定义
+        ok("C7 还原后的压缩器前向正常（词形载荷 = n_sym 行）",
+           tuple(_zl.shape) == (1, 2, 32), extra=str(tuple(_zl.shape)))
         ok("C8 还原后的路径仍能算 L_cov",
            info.get("cov_loss") is not None)
         ok("C9 口径标记随 info 出来（诊断/日志要靠它归因）",
@@ -438,17 +474,17 @@ def test_budget_matching():
        extra=str(PRC.per_slot_counts([0, 1, 1, 1, 0, 2, 2], 2)))
     ids = torch.tensor([10, 11, 12, 13, 14, 15, 16])
     tok = T.StubTok(vocab_size=256)
-    pre = PRC.pick_ids(tok, ids, 3, "raw_prefix", "q")
+    pre = PRC.pick_ids(tok, ids, 3, "raw_prefix")
     ok("PA2 raw_prefix 是原序前缀（不是乱序挑）",
        pre.tolist() == [10, 11, 12], extra=str(pre.tolist()))
-    sal = PRC.pick_ids(tok, ids, 3, "raw_salient", "q")
+    sal = PRC.pick_ids(tok, ids, 3, "raw_salient")
     ok("PA3 raw_salient 结果按原文顺序单调递增（拼回原序，不打乱句子）",
        sal.tolist() == sorted(sal.tolist()) and len(set(sal.tolist())) == len(sal),
        extra=str(sal.tolist()))
     ok("PA4 预算 >= 可用 token 时全给（不能凭空造词）",
-       PRC.pick_ids(tok, ids, 99, "raw_prefix", "q").tolist() == ids.tolist())
+       PRC.pick_ids(tok, ids, 99, "raw_prefix").tolist() == ids.tolist())
     ok("PA5 raw_full 不受预算限制",
-       PRC.pick_ids(tok, ids, 2, "raw_full", "q").tolist() == ids.tolist())
+       PRC.pick_ids(tok, ids, 2, "raw_full").tolist() == ids.tolist())
 
 
     # 围栏文本必须与 compose_routed_soft 逐字一致：这是"骨架相同"的唯一保证。
@@ -494,7 +530,7 @@ def test_word_units():
     words = [tk.decode(ids[a:b].tolist()).strip() for a, b in spans]
     ok("PA13 整词切分：词首空格是边界（Marietta 是一个词，Air/Force 是两个）",
        words[:5] == ["[", "Marietta", "Air", "Force", "Station"], extra=str(words))
-    keep, picked = PRC.pick_word_ids(tk, ids, 6, "which city?")
+    keep, picked = PRC.pick_word_ids(tk, ids, 6)
     ok("PA14 整词挑选不产生半截词（每个被选词都能在原句里找到完整词面）",
        all(w in "".join(words) for w in picked), extra=str(picked))
     def _is_subseq(sub, full):
@@ -505,7 +541,7 @@ def test_word_units():
        _is_subseq(keep, ids), extra=str(keep.tolist()))
     # 同一词面重复出现时只选一次（token 级没有这个保证）
     ids2 = torch.cat([ids, torch.tensor([9, 10])])          # Robert Salisbury 再来一遍
-    _k2, picked2 = PRC.pick_word_ids(tk, ids2, 12, "q")
+    _k2, picked2 = PRC.pick_word_ids(tk, ids2, 12)
     ok("PA16 同一词面只选一次（token 级会重复挑 Robert / Salisbury）",
        len(picked2) == len(set(picked2)), extra=str(picked2))
 
@@ -626,6 +662,33 @@ def test_pure_sem_readout_identity():
        and [int(v) for v in seg_none] == [int(v) for v in seg_lex])
 
 
+def test_split_budget():
+    """实验 2 的「同预算」是硬约束：n_sym + n_rel 必须正好等于 m。"""
+    def _a(*extra):
+        return T.parse_args(["--data", "x.jsonl"] + list(extra))
+
+    ok("S16 split 2+2 解析成 (2,2)",
+       T.resolve_split_budget(_a("--compose", "split", "--n-sym", "2", "--n-rel", "2"))
+       == ("split", 2, 2))
+    ok("S17 split 4+0（纯符号臂）解析成 (4,0)",
+       T.resolve_split_budget(_a("--compose", "split", "--n-sym", "4", "--n-rel", "0"))
+       == ("split", 4, 0))
+    ok("S18 只给 n-sym 时 n-rel 自动补到 m",
+       T.resolve_split_budget(_a("--compose", "split", "--n-sym", "1"))
+       == ("split", 1, 3))
+    ok("S19 位置总数不等于 m 直接报错（否则同预算不成立）",
+       _raises(lambda: T.resolve_split_budget(
+           _a("--compose", "split", "--n-sym", "2", "--n-rel", "1"))))
+    ok("S20 split 且没给任何位置数直接报错",
+       _raises(lambda: T.resolve_split_budget(_a("--compose", "split"))))
+    ok("S21 split + n_sym>0 + --no-lex-skip 直接报错（符号槽没有东西可放）",
+       _raises(lambda: T.resolve_split_budget(
+           _a("--compose", "split", "--n-sym", "2", "--no-lex-skip"))))
+    ok("S22 residual 模式忽略 n-sym/n-rel，位置数恒为 m",
+       T.resolve_split_budget(_a("--compose", "residual", "--n-sym", "2"))
+       == ("residual", 4, 0))
+
+
 def test_eval_stratify():
     """评测侧的分层统计：总 EM 会把"日期题全灭 + 实体题变好"平均成"没变化"。"""
     import eval_latent_table as EVM
@@ -651,11 +714,12 @@ def test_eval_stratify():
 def main():
     for fn in (test_lex_head_zero_init, test_lex_head_gradient_isolation,
                test_bpe_payload, test_bpe_no_truncation, test_lex_mean_unchanged,
-               test_bridge_split, test_compose_split_tokens, test_hid_distill,
+               test_bridge_hybrid, test_compose_hybrid_tokens, test_hid_distill,
                test_ckpt_roundtrip, test_budget_matching, test_word_units,
                test_answer_type,
                test_raw_skeleton_parity, test_pure_sem_guards,
-               test_pure_sem_readout_identity, test_eval_stratify):
+               test_pure_sem_readout_identity, test_split_budget,
+               test_eval_stratify):
         print(f"--- {fn.__name__}")
         fn()
     print("=" * 70)

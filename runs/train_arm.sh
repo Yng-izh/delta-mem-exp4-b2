@@ -11,7 +11,9 @@
 #                32/m=4 => 8 倍压缩；8/m=4 => 2 倍压缩（每题注入 token 数随之涨 4 倍）
 #   COV          L_cov 权重（默认 0；0.1 = 第十二轮探针那档）
 #   LEX_HEAD     1 = 独立词形选择头（E1）
-#   SPLIT_INJECT 1 = 词形与语义分开注入（E3）
+#   COMPOSE       residual（旧行为）/ split（符号位 + 关系位，实验 2 的核心）
+#   N_SYM / N_REL split 下每块的符号位 / 关系位数，两者之和必须等于 m（默认 4）
+#   REL_MODE      latent（连续关系向量）/ blank（无信息占位，实验 2 的对照臂）
 #   STEPS        训练步数（默认 1000）
 #   RESUME=1     从 OUT 续训
 #
@@ -29,7 +31,10 @@ COV=${COV:-0}
 LEX_HEAD=${LEX_HEAD:-0}
 LEX_HEAD_HIDDEN=${LEX_HEAD_HIDDEN:-0}
 LEX_TOKEN_MODE=${LEX_TOKEN_MODE:-mean}
-SPLIT_INJECT=${SPLIT_INJECT:-0}
+COMPOSE=${COMPOSE:-residual}
+N_SYM=${N_SYM:--1}
+N_REL=${N_REL:--1}
+REL_MODE=${REL_MODE:-latent}
 STEPS=${STEPS:-1000}
 SAVE_EVERY=${SAVE_EVERY:-100}
 EVAL_EVERY=${EVAL_EVERY:-500}
@@ -50,7 +55,7 @@ if [ "$RESUME" = "1" ]; then
 fi
 
 echo "[train_arm] OUT=$OUT MAX_UNIT=$MAX_UNIT COV=$COV LEX_HEAD=$LEX_HEAD" \
-     "SPLIT=$SPLIT_INJECT STEPS=$STEPS"
+     "COMPOSE=$COMPOSE N_SYM=$N_SYM N_REL=$N_REL REL_MODE=$REL_MODE STEPS=$STEPS"
 $PY train_latent_memory.py --router \
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
@@ -67,7 +72,8 @@ $PY train_latent_memory.py --router \
   --ent-weight 5.0 --stop-weight 0.2 --recon-corrupt 0.5 \
   --cov-weight $COV --cov-targets 0 \
   --lex-head $LEX_HEAD --lex-head-hidden $LEX_HEAD_HIDDEN \
-  --lex-token-mode $LEX_TOKEN_MODE --split-inject $SPLIT_INJECT \
+  --lex-token-mode $LEX_TOKEN_MODE \
+  --compose $COMPOSE --n-sym $N_SYM --n-rel $N_REL --rel-mode $REL_MODE \
   --alpha-max 0.5 --lex-gate-init 0.05 --diag-every 50 \
   --inject-mode user --fence-style bracket \
   --m 4 --layer 18 --inner-dim 1024 --heads 8 --bottleneck 512 \

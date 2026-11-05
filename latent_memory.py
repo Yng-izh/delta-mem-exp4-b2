@@ -190,19 +190,28 @@ LATENT_LEX_TOKEN_MODE  = _env_str("LATENT_LEX_TOKEN_MODE", "mean").lower()
 # bpe 模式下放不下的词是否回退填后面的候选词（0=不回退，与实验设计一致）
 LATENT_BPE_BACKFILL    = _env_int("LATENT_BPE_BACKFILL", 0)
 
-# ---- E3：词形与语义**分开注入**（3 词形 + 1 语义，总预算仍 = n_slots）----
-# 残差叠加 `E = z_lex + tanh(α)·Bridge(z_sem)` 把两种信息压在**同一个位置**上，
-# 语义残差只能以很小的 α≈0.12 存在（再大就偏离词表流形）。改成序列拼接后，
-# 语义 token 可以独立占据一个位置、用自己的范数（整向量 L2 对齐到 target_norm）。
-#   0（默认）= 残差叠加，旧行为
-#   1        = 分开注入：[lex_1..lex_k] + [sem]，k = LATENT_SPLIT_N_LEX
-LATENT_SPLIT_INJECT    = _env_int("LATENT_SPLIT_INJECT", 0)
-# 每块留给词形的 token 数（总预算仍是 n_slots，剩下的给语义）
-LATENT_SPLIT_N_LEX     = _env_int("LATENT_SPLIT_N_LEX", 3)
+# ---- 混合潜层表示：每块的固定位置预算怎么**分给符号与关系** ----
+# 每块仍然是 n_slots 个位置（默认 4），差别只在"这些位置放什么"：
+#   residual（旧行为）= 全部位置放 `z_lex + tanh(α)·Bridge(z_sem)`，两种信息挤在同一处
+#   split           = 前 n_sym 个位置放**符号**（原生 BPE 整词向量，精确内容），
+#                     后 n_rel 个位置放**关系**（连续潜向量，n_sym + n_rel == n_slots）
+# 为什么要有 split：残差形式下语义只能以很小的 α 存在（α 一大就偏离词表流形），
+# 于是"关系绑定"这件事实际上没有位置可用。分开之后关系槽拿到独立位置和完整范数。
+# 判据见 EXPERIMENTS.md 实验 2：符号+关系（2+2）必须显著超过"符号槽 + 无信息占位"。
+LATENT_COMPOSE         = _env_str("LATENT_COMPOSE", "residual").lower()
+LATENT_N_SYM           = _env_int("LATENT_N_SYM", 0)     # split 下每块符号位置数
+LATENT_N_REL           = _env_int("LATENT_N_REL", 0)     # split 下每块关系位置数
+# 关系槽放什么：latent = Bridge(z_sem) 的连续向量；blank = **无信息占位**
+# （一个全局共享的可学习向量，与内容无关）。blank 是实验 2 的对照臂：
+# 它占掉同样的位置、同样的范数，但不携带任何事实信息 —— 于是"符号槽 + 占位"
+# 与"符号槽 + 关系槽"之间的差，就是连续关系表示的净贡献。
+LATENT_REL_MODE        = _env_str("LATENT_REL_MODE", "latent").lower()
 
 _INJECT_MODES = ("user", "system", "between")
 _FENCE_STYLES = ("bracket", "verbose")
 _LEX_TOKEN_MODES = ("mean", "bpe")
+_COMPOSE_MODES = ("residual", "split")
+_REL_MODES = ("latent", "blank")
 
 
 def _check_inject_cfg(inject_mode: Any = None, fence_style: Any = None) -> Tuple[str, str]:
@@ -253,8 +262,10 @@ def latent_config() -> Dict[str, Any]:
         "fence_style": str(LATENT_FENCE_STYLE),
         "lex_head": int(LATENT_LEX_HEAD),
         "lex_token_mode": str(LATENT_LEX_TOKEN_MODE),
-        "split_inject": int(LATENT_SPLIT_INJECT),
-        "split_n_lex": int(LATENT_SPLIT_N_LEX),
+        "compose": str(LATENT_COMPOSE),
+        "n_sym": int(LATENT_N_SYM),
+        "n_rel": int(LATENT_N_REL),
+        "rel_mode": str(LATENT_REL_MODE),
     }
 
 
@@ -419,7 +430,8 @@ class LatentCompressor(nn.Module):
                  lex_head: bool = bool(LATENT_LEX_HEAD),
                  lex_head_hidden: int = LATENT_LEX_HEAD_HIDDEN,
                  lex_token_mode: str = LATENT_LEX_TOKEN_MODE,
-                 bpe_backfill: int = LATENT_BPE_BACKFILL):
+                 bpe_backfill: int = LATENT_BPE_BACKFILL,
+                 n_sym: int = -1):
         super().__init__()
         if int(hidden_size) <= 0:
             raise ValueError(f"hidden_size 必须为正，得到 {hidden_size}")
@@ -437,6 +449,12 @@ class LatentCompressor(nn.Module):
         # 下游 bridge 行为与 v3 逐位一致（旧 checkpoint 因此可以原样加载）。
         self.lex_skip = bool(lex_skip)
         self.lex_tau = float(lex_tau)   # 直通分支选通温度（见 LATENT_LEX_TAU）
+        # 符号行数：split 模式下每块只有前 n_sym 个位置放符号，其余位置留给关系槽。
+        # 仍然**选 n_slots 个词**（选词数量决定覆盖面，与"留几个位置给符号"是两件事），
+        # 只是词形载荷只保留前 n_sym 行。-1 表示跟随 n_slots（残差模式的旧行为）。
+        self.n_sym = int(n_slots if int(n_sym) < 0 else n_sym)
+        if not (0 <= self.n_sym <= self.n_slots):
+            raise ValueError(f"n_sym={self.n_sym} 必须在 [0, n_slots={self.n_slots}] 内")
         self.input_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.hidden_proj = nn.Linear(self.hidden_size, self.inner_dim)
         self.queries = nn.Parameter(torch.randn(self.n_slots, self.inner_dim) * 0.02)
@@ -746,7 +764,11 @@ class LatentCompressor(nn.Module):
         _packed_ids = None
         if str(token_mode or "mean").lower() == "bpe":
             z_lex, n_rows, n_kept_words, _packed_ids = self._pack_bpe_rows(
-                h0d, mask_w, pick, score, int(backfill))
+                h0d, mask_w, pick, score, int(backfill),
+                capacity=int(self.n_sym),
+                # 容量 < n_slots 时（split 模式）按**分数**铺，让有限的符号位放最要紧的词；
+                # 容量 = n_slots 时保持原文顺序（E2 的口径：同样的选词、换一种编码）。
+                order=("score" if int(self.n_sym) < int(self.n_slots) else "text"))
         else:
             pick_safe = pick.clamp_min(0)
             sel = mask_w.gather(1, pick_safe.unsqueeze(-1).expand(-1, -1, L)).float()
@@ -755,6 +777,12 @@ class LatentCompressor(nn.Module):
             z_lex = torch.einsum("bml,bld->bmd", (sel / denom).to(dtype=wd), h0d.to(dtype=wd))
             n_rows = (pick >= 0).sum(dim=1)
             n_kept_words = n_rows
+        # split 模式：只有前 n_sym 行是符号槽，其余行交给关系槽（形状必须真的缩下来，
+        # 否则 bridge 会以为还有符号行可放，位置预算就悄悄变成 n_slots + n_rel）。
+        if int(self.n_sym) < int(self.n_slots):
+            z_lex = z_lex[:, : self.n_sym, :]
+            n_rows = torch.clamp(n_rows, max=int(self.n_sym))
+            n_kept_words = torch.clamp(n_kept_words, max=int(self.n_sym))
         z_lex = torch.nan_to_num(z_lex, nan=0.0, posinf=0.0, neginf=0.0)
         # score 是**乘过 pen、未 argmax** 的选择分数 —— 旧路径下它仍连着计算图，
         # L_cov 就建在它上面；E1 路径下只有词形头那一支带梯度。
@@ -770,7 +798,7 @@ class LatentCompressor(nn.Module):
 
     def _pack_bpe_rows(self, h0d: torch.Tensor, mask_w: torch.Tensor,
                        pick: torch.Tensor, score: Optional[torch.Tensor],
-                       backfill: int = 0):
+                       backfill: int = 0, capacity: int = -1, order: str = "text"):
         """把选中词的**完整 BPE 向量**按原文顺序铺进 m 行（E2 的 B 组）。
 
         规则（刻意保守，避免把"多给了 token"混进结论）：
@@ -780,7 +808,10 @@ class LatentCompressor(nn.Module):
             默认口径必须能解释成"同样的选词 + 换一种载荷编码"）。
         放不满的行留零向量 —— 下游 bridge 把全零行当空槽，退回语义残差。
         """
-        B, m, d = int(pick.shape[0]), int(pick.shape[1]), int(h0d.shape[-1])
+        B, m0, d = int(pick.shape[0]), int(pick.shape[1]), int(h0d.shape[-1])
+        m = int(m0 if int(capacity) < 0 else capacity)
+        if m > m0:
+            raise ValueError(f"capacity={m} 超过选中的词数 {m0}：符号位不可能多于选词数")
         dev = h0d.device
         z = torch.zeros((B, m, d), dtype=h0d.dtype, device=dev)
         n_rows = torch.zeros((B,), dtype=torch.long, device=dev)
@@ -794,7 +825,16 @@ class LatentCompressor(nn.Module):
         for b in range(B):
             picked = [int(v) for v in pick[b].tolist()]
             cand = [v for v in dict.fromkeys(picked) if 0 <= v < W]
-            cand.sort()                                                  # 原文顺序
+            if str(order) == "score":
+                # 按选词分数降序：符号位有限时先放最要紧的词（顺序在写回时会保留，
+                # 因为每个词的子词是按 mask_w 的列号连续铺的，不乱序）。
+                if score is not None:
+                    sc = score.detach().max(dim=1).values[b]
+                    cand.sort(key=lambda v: -float(sc[v]))
+                else:
+                    cand.sort()
+            else:
+                cand.sort()                                              # 原文顺序
             if rank is not None:
                 order = torch.argsort(rank[b], descending=True).tolist()
                 for v in order:
@@ -1243,8 +1283,10 @@ class LatentBridge(nn.Module):
                  lex_skip: bool = bool(LATENT_LEX_SKIP),
                  lex_gate_init: float = LATENT_LEX_GATE_INIT,
                  alpha_max: float = LATENT_ALPHA_MAX,
-                 split_inject: bool = bool(LATENT_SPLIT_INJECT),
-                 split_n_lex: int = LATENT_SPLIT_N_LEX):
+                 compose: str = LATENT_COMPOSE,
+                 n_sym: int = LATENT_N_SYM,
+                 n_rel: int = LATENT_N_REL,
+                 rel_mode: str = LATENT_REL_MODE):
         super().__init__()
         if int(hidden_size) <= 0 or int(bottleneck) <= 0:
             raise ValueError(f"hidden_size/bottleneck 必须为正：{hidden_size}/{bottleneck}")
@@ -1266,11 +1308,19 @@ class LatentBridge(nn.Module):
         # 注意零初始化**必须**搭配非零 α 初值（见 LATENT_LEX_GATE_INIT 的注释）：
         # α 也恰好为 0 时语义分支与门控同时失去梯度，会死锁在"永远只有 z_lex"。
         #
-        # E3 的 split 模式**不能**零初始化：那时语义 token 不是残差而是独立的
-        # 一个位置，零输出等于往序列里塞一个全零向量（Qwen 会把它当成极低范数
-        # token，比什么都不给更糟）。所以 split 模式下保持默认随机初始化。
-        self.split_inject = bool(split_inject)
-        self.n_lex = max(1, int(split_n_lex))
+        # split 模式**不能**零初始化：那时关系 token 不是残差而是独立的占位，
+        # 零输出等于往序列里塞一个全零向量（Qwen 会把它当成极低范数 token，
+        # 比什么都不给更糟）。所以 split 模式下保持默认随机初始化。
+        self.compose = str(compose or "residual").lower()
+        if self.compose not in _COMPOSE_MODES:
+            raise ValueError(f"compose={compose!r} 非法；可选 {_COMPOSE_MODES}")
+        self.rel_mode = str(rel_mode or "latent").lower()
+        if self.rel_mode not in _REL_MODES:
+            raise ValueError(f"rel_mode={rel_mode!r} 非法；可选 {_REL_MODES}")
+        self.n_sym = max(0, int(n_sym))
+        self.n_rel = max(0, int(n_rel))
+        if self.compose == "split" and self.n_sym + self.n_rel <= 0:
+            raise ValueError("compose=split 时 n_sym + n_rel 必须 > 0")
         self.lex_skip = bool(lex_skip)
         # 末层零初始化的**前提是有一个锚**：残差模式下 E = z_lex + α·res，res=0 意味着
         # "第 0 步输出逐位等于 z_lex"，这是想要的行为。
@@ -1279,11 +1329,19 @@ class LatentBridge(nn.Module):
         # 更糟；而且 soft token 的范数本该对齐真实 embedding（≈1.09），从 0 起步要花
         # 好几步才能长回来。所以纯语义模式保持默认随机初始化（输出立刻是满范数）。
         # 同理 split 模式也不能零初始化：语义 token 在那里是独立占位，不是残差。
-        if not self.split_inject and self.lex_skip:
+        if self.compose == "residual" and self.lex_skip:
             nn.init.zeros_(self.net[-1].weight)
             nn.init.zeros_(self.net[-1].bias)
         # 可学习但受限的尺度；初值取真实 token embedding 的每向量范数
         self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
+        # split + rel_mode=blank 时的**无信息占位**：一个全局共享的可学习向量，
+        # 所有块、所有关系槽都用它。它占掉同样的位置、对齐同样的范数，但不携带
+        # 任何与内容有关的信息 —— 这是实验 2 的对照臂，用来把"多给两个位置"
+        # 与"这两个位置真的装了关系"分开。
+        if self.compose == "split" and self.rel_mode == "blank":
+            self.blank = nn.Parameter(torch.randn(self.hidden_size) * 0.02)
+        else:
+            self.blank = None
         # ---- v4：h0 直通的**方向**门控 ----
         # 为什么是"方向混合"而不是"范数相加"：这个类存在的唯一理由是让软 token 的
         # 每向量范数与真实 embedding 对齐（1.05）；直接 `out + α·LN(z_lex)` 会把范数
@@ -1325,7 +1383,17 @@ class LatentBridge(nn.Module):
         return torch.tanh(self.lex_gate).clamp(-self.alpha_max, self.alpha_max)
 
     def forward(self, z: torch.Tensor, z_lex: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Z [B,m,d]（+ 可选 z_lex [B,m,d]）-> soft tokens [B,m,d]，范数对齐真实 embedding。"""
+        """Z [B,m,d]（+ 可选 z_lex）-> soft tokens，范数对齐真实 embedding。
+
+        两条路径：
+          compose=residual -> [B, m, d]，`z_lex + tanh(α)·Bridge(z_sem)`（旧行为）
+          compose=split    -> [B, n_sym+n_rel, d]，符号位原样 + 关系位独立（见 forward_split）
+        分派放在这里而不是让每个调用点自己判断：训练/重建/推理有五六处都会直接调
+        `bridge(...)`，只要漏掉一处就会静默退回残差路径，而那种错误不会报错、只会让
+        实验 2 的三臂对照变成同一个东西。
+        """
+        if self.compose == "split":
+            return self.forward_split(z, z_lex)
         z = _as_3d(z, "z")
         if z.shape[-1] != self.hidden_size:
             raise ValueError(f"z 的最后一维 {z.shape[-1]} != hidden_size={self.hidden_size}")
@@ -1388,52 +1456,100 @@ class LatentBridge(nn.Module):
         return res
 
 
-    def forward_separate(self, z: torch.Tensor, z_lex: Optional[torch.Tensor],
-                         n_lex: Optional[int] = None) -> torch.Tensor:
-        """E3：**词形与语义分开注入** —— [lex_1..lex_k] + [sem]，总预算 k+1。
+    def forward_split(self, z: torch.Tensor, z_lex: Optional[torch.Tensor],
+                      n_sym: Optional[int] = None, n_rel: Optional[int] = None,
+                      rel_mode: Optional[str] = None) -> torch.Tensor:
+        """混合表示：每块 `n_sym` 个**符号位置** + `n_rel` 个**关系位置**（总预算不变）。
 
-        与 `forward()` 的唯一区别是"语义放在哪"：
-            forward()          语义作为**残差**叠在词形向量上（α≤0.5，且大了就偏离
-                               词表流形）—— 两种信息挤在同一个位置；
-            forward_separate() 语义**独立占一个位置**，自己带完整范数，
-                               词形 token 原样复制、不做任何混合。
-        语义 token 的范数用**整个向量的 L2 范数**对齐到 target_norm（=真实 embedding
-        每向量范数 ≈1.087），不是 RMSNorm 之后再乘常数 —— 后者会把范数推到
-        ≈1.087·√d（几千倍），直接退回"软 token 变 attention sink"那个坑。
+        这是本阶段的核心机制（见 EXPERIMENTS.md 实验 2）。与 `forward()` 的区别：
 
-        输入 z / z_lex 都是 [..., m, d]；输出 [..., k+1, d]（最后一行为语义）。
-        z_lex 里全零的行（空槽）用语义向量兜底，与残差路径"空槽退回语义"一致。
+            forward()       全部位置放 `z_lex + tanh(α)·Bridge(z_sem)` —— 两种信息挤在
+                            同一个向量里，语义只能以很小的 α 存在（α 一大就偏离词表
+                            流形），于是"关系绑定"实际上没有位置可用。
+            forward_split() 前 n_sym 个位置**原样复制**词形向量（原生 BPE 整词，
+                            内容精确、不做任何混合）；后 n_rel 个位置放连续关系向量，
+                            各自带完整范数。总位置数 = n_sym + n_rel = n_slots，
+                            所以"同预算"是逐位置成立的，不是平均值对齐。
+
+        关系槽的范数用**整向量 L2**对齐到 target_norm（=真实 embedding 每向量范数
+        ≈1.087），不是 RMSNorm 之后再乘常数 —— 后者会把范数推到 ≈1.087·√d（几千倍），
+        直接退回"软 token 变 attention sink"那个坑。
+
+        rel_mode=blank 时关系槽换成**全局共享的可学习占位向量**：位置、范数都一样，
+        但不携带任何内容。这是实验 2 的对照臂 —— "符号槽 + 占位" 与 "符号槽 + 关系槽"
+        之间的差，就是连续关系表示的净贡献。
+
+        输入 z [..., m, d]（语义槽）、z_lex [..., n_sym, d]（词形载荷，可为 None）；
+        输出 [..., n_sym + n_rel, d]。
         """
         z = _as_3d(z, "z")
-        if z_lex is None:
-            raise ValueError("forward_separate 需要 z_lex（词形载荷）")
-        lex = _as_3d(z_lex, "z_lex")
-        if tuple(lex.shape) != tuple(z.shape):
-            if int(lex.numel()) == int(z.numel()):
-                lex = lex.reshape(tuple(z.shape))
-            else:
-                raise ValueError(f"z_lex 形状 {tuple(lex.shape)} 必须与 z {tuple(z.shape)} 一致")
         if z.shape[-1] != self.hidden_size:
             raise ValueError(f"z 的最后一维 {z.shape[-1]} != hidden_size={self.hidden_size}")
+        k = int(self.n_sym if n_sym is None else n_sym)
+        m_eff = k + int(self.n_rel if n_rel is None else n_rel)
+        # 载荷有两种来路：`[k 块, m, d]`（pack_slot_reads 的产出）和展平后的
+        # `[k*m, d]`（encode_item 的产出）。按"每块 m 行"归一化，否则 [1, k*m, d]
+        # 会被当成"一块里有 k*m 个位置"，关系槽就会取到错的行。
+        if m_eff > 0 and z.shape[1] != m_eff and z.shape[1] % m_eff == 0:
+            z = z.reshape(-1, m_eff, z.shape[-1])
+        j = int(self.n_rel if n_rel is None else n_rel)
+        mode = str(rel_mode or self.rel_mode).lower()
+        if mode not in _REL_MODES:
+            raise ValueError(f"rel_mode={mode!r} 非法；可选 {_REL_MODES}")
+        if k < 0 or j < 0:
+            raise ValueError(f"n_sym/n_rel 不能为负：{k}/{j}")
+        m = int(z.shape[1])
+        if j > m:
+            raise ValueError(f"n_rel={j} 超过语义槽数 m={m}")
         p = next(self.parameters())
-        k = int(self.n_lex if n_lex is None else n_lex)
-        k = max(1, min(k, int(z.shape[1])))
-        zp = z.to(device=p.device, dtype=p.dtype)
-        # 语义：一个块只出 1 个向量 -> 该块的 m 个语义向量取均值再走 Bridge
-        out = self.net(zp.mean(dim=1, keepdim=True))
-        out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-        n = out.norm(dim=-1, keepdim=True)
-        scale = self.scale().to(device=out.device, dtype=out.dtype)
-        # 零初始化残留（用残差模式的 ckpt 直接跑 split 评测）时的兜底：
-        # 方向退回"池化后的语义向量本身"，仍然做完整的 L2 对齐，不会产生零向量。
-        fallback = zp.mean(dim=1, keepdim=True).to(dtype=out.dtype)
-        fn = fallback.norm(dim=-1, keepdim=True)
-        sem = torch.where(n > 1e-6, out / n.clamp_min(1.0), fallback / fn.clamp_min(1.0))
-        sem = sem * scale
-        lx = lex.to(device=sem.device, dtype=sem.dtype)[:, :k, :]
-        valid = lx.norm(dim=-1, keepdim=True) > 1e-6
-        lx = torch.where(valid, lx, sem.expand_as(lx))
-        return torch.cat([lx, sem], dim=1)
+        dev, dt = p.device, p.dtype
+        scale = self.scale().to(device=dev, dtype=dt)
+        pieces: List[torch.Tensor] = []
+
+        # ---- 符号位置：原样复制，不混合、不改范数 ----
+        if k > 0:
+            if z_lex is None:
+                raise ValueError("forward_split 需要 z_lex（n_sym > 0 时必须有词形载荷）")
+            lex = _as_3d(z_lex, "z_lex")
+            if k > 0 and lex.shape[1] != k and lex.shape[1] % k == 0:
+                lex = lex.reshape(-1, k, lex.shape[-1])
+            if int(lex.shape[1]) < k:
+                raise ValueError(f"z_lex 只有 {int(lex.shape[1])} 行，不够 n_sym={k}")
+            if int(lex.shape[0]) != int(z.shape[0]) and int(lex.shape[0]) == 1:
+                lex = lex.expand(int(z.shape[0]), -1, -1)
+            pieces.append(lex[:, :k, :].to(device=dev, dtype=dt))
+
+        # ---- 关系位置 ----
+        if j > 0:
+            if mode == "blank":
+                if self.blank is not None:
+                    b = self.blank.to(device=dev, dtype=dt)
+                else:
+                    # 用**关系模式**训出来的权重做评测期消融：没有可学习的占位参数。
+                    # 用一个固定的伪随机方向代替（由 hidden_size 决定、与内容无关），
+                    # 范数仍对齐 target_norm。它不携带任何事实信息，正是这条对照臂
+                    # 要的性质；换成全零反而会引入"极低范数 token"这个额外变量。
+                    g = torch.Generator(device="cpu").manual_seed(20261105 + int(self.hidden_size))
+                    b = torch.randn(self.hidden_size, generator=g).to(device=dev, dtype=dt)
+                bn = b.norm().clamp_min(1e-6)
+                rel = (b / bn * scale).view(1, 1, -1).expand(z.shape[0], j, -1)
+                pieces.append(rel)
+            else:
+                zp = z.to(device=dev, dtype=dt)[:, :j, :]
+                out = self.net(zp)
+                out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+                n = out.norm(dim=-1, keepdim=True)
+                # 零初始化残留（用残差模式训出来的 ckpt 直接跑 split 评测）的兜底：
+                # 方向退回"语义槽本身"，仍做完整 L2 对齐，不会产生零向量。
+                fb = zp.to(dtype=out.dtype)
+                fn = fb.norm(dim=-1, keepdim=True)
+                unit = torch.where(n > 1e-6, out / n.clamp_min(1.0),
+                                   fb / fn.clamp_min(1.0))
+                pieces.append(unit * scale)
+        if not pieces:
+            raise ValueError("n_sym + n_rel == 0：没有任何位置可输出")
+        return torch.cat(pieces, dim=1)
+
 
 def relay_bridge_tokens(h0_slot: torch.Tensor, mask_slot: Any = None,
                         q_tok: Optional[torch.Tensor] = None,
@@ -2250,16 +2366,23 @@ def compose_routed_soft(model: Any, tokenizer: Any, bridge: "LatentBridge",
             # 两种打包口径必须对齐：读出载荷有时是 [k*m, d]（块已展平，见 pack_slot_reads），
             # 直通载荷是 [k, m, d]。元素数与顺序都一致（k 为外层），reshape 是恒等映射；
             # 不 reshape 就会在 bridge 的形状校验里炸掉（实测 2/4/2560 vs 1/8/2560）。
-            if tuple(zl.shape) != tuple(zj.shape):
-                if int(zl.numel()) != int(zj.numel()):
+            if str(getattr(bridge, "compose", "residual")) == "split":
+                # split 下词形载荷只有 n_sym 行，形状**本来就与语义载荷不同**，
+                # 不能按元素数硬对齐；块数/行数的归一化统一在 forward_split 里做
+                # （载荷可能是 [k,m,d]，也可能是展平后的 [k*m,d]，两种都要认）。
+                pass
+            elif tuple(zl.shape) != tuple(zj.shape):
+                if int(zl.numel()) == int(zj.numel()):
+                    zl = zl.reshape(tuple(zj.shape))
+                else:
                     raise ValueError(f"第 {j} 槽直通载荷元素数 {int(zl.numel())} 与语义载荷 "
                                      f"{int(zj.numel())} 不一致，无法对齐")
-                zl = zl.reshape(tuple(zj.shape))
-        # E3：分开注入时走 forward_separate（[lex...]+[sem]），否则走残差叠加。
-        # 只在真的有词形载荷时才分 —— oracle_sem 这类"只给语义"的读法必须保持原样，
-        # 否则两边的 token 数就不同了，读出来的差没法归因。
-        if bool(getattr(bridge, "split_inject", False)) and zl is not None:
-            s = bridge.forward_separate(zj, zl)
+        # 两种组合方式：
+        #   residual = 全部位置放 `z_lex + tanh(α)·Bridge(z_sem)`（旧行为）
+        #   split    = [n_sym 个符号位] + [n_rel 个关系位]，总位置数不变
+        # split 下 n_sym=0 时 zl 可以为 None（纯语义），残差模式仍然要求"有 lex 才叠"。
+        if str(getattr(bridge, "compose", "residual")) == "split":
+            s = bridge.forward_split(zj, zl)
         else:
             s = bridge(zj, zl)
         if s.dim() == 2:
@@ -3712,7 +3835,7 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
     lex_skip = bool(cfg.get("lex_skip", False))
     # E1/E2/E3 的结构开关必须从 ckpt 还原：lex_scorer 存在与否会改变
     # state_dict 的键集合（strict=True 下漏还原就报 Missing/Unexpected keys），
-    # 而 split_inject / lex_token_mode 决定"同一个权重读出来是什么"。
+    # 而 compose / n_sym / n_rel / rel_mode / lex_token_mode 决定"同一个权重读出来是什么"。
     comp = LatentCompressor(hs, n_slots=int(cfg["n_slots"]),
                             inner_dim=int(cfg["inner_dim"]),
                             num_heads=int(cfg.get("num_heads", LATENT_N_HEADS)),
@@ -3720,15 +3843,17 @@ def load_latent_reader(checkpoint: str, model: Any, tokenizer: Any,
                             lex_head=bool(cfg.get("lex_head", False)),
                             lex_head_hidden=int(cfg.get("lex_head_hidden", 0) or 0),
                             lex_token_mode=str(cfg.get("lex_token_mode", "mean")),
-                            bpe_backfill=int(cfg.get("bpe_backfill", 0) or 0))
+                            bpe_backfill=int(cfg.get("bpe_backfill", 0) or 0),
+                            n_sym=int(cfg.get("n_sym", cfg["n_slots"])))
     bridge = LatentBridge(hs, bottleneck=int(cfg["bottleneck"]),
                           target_norm=float(cfg.get("target_norm", LATENT_TARGET_NORM)),
                           lex_skip=bool(cfg.get("bridge_lex_skip", lex_skip)),
                           alpha_max=float(cfg.get("bridge_alpha_max",
                                                   LATENT_ALPHA_MAX)),
-                          split_inject=bool(cfg.get("split_inject", False)),
-                          split_n_lex=int(cfg.get("split_n_lex",
-                                                  LATENT_SPLIT_N_LEX)))
+                          compose=str(cfg.get("compose", "residual")),
+                          n_sym=int(cfg.get("n_sym", 0)),
+                          n_rel=int(cfg.get("n_rel", 0)),
+                          rel_mode=str(cfg.get("rel_mode", "latent")))
     comp.load_state_dict(blob["compressor"], strict=strict)
     bridge.load_state_dict(blob["bridge"], strict=strict)
     comp.to(dev).eval()
@@ -3815,8 +3940,10 @@ def save_latent_checkpoint(path: str, compressor: LatentCompressor, bridge: Late
         cfg["lex_head_hidden"] = int(compressor.lex_scorer.hidden)
     cfg["lex_token_mode"] = str(getattr(compressor, "lex_token_mode", "mean"))
     cfg["bpe_backfill"] = int(getattr(compressor, "bpe_backfill", 0))
-    cfg["split_inject"] = bool(getattr(bridge, "split_inject", False))
-    cfg["split_n_lex"] = int(getattr(bridge, "n_lex", LATENT_SPLIT_N_LEX))
+    cfg["compose"] = str(getattr(bridge, "compose", "residual"))
+    cfg["n_sym"] = int(getattr(compressor, "n_sym", getattr(bridge, "n_sym", 0)))
+    cfg["n_rel"] = int(getattr(bridge, "n_rel", 0))
+    cfg["rel_mode"] = str(getattr(bridge, "rel_mode", "latent"))
     if bool(cfg["lex_skip"]) != bool(cfg["bridge_lex_skip"]):
         raise ValueError(f"压缩器 lex_skip={cfg['lex_skip']} 与 bridge lex_skip="
                          f"{cfg['bridge_lex_skip']} 不一致：直通载荷生成端与消费端必须同时开或同时关")
