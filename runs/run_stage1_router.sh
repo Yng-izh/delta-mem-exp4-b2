@@ -3,7 +3,7 @@
 # 目的：先把"召回率"从 15.6% 拉到 45%+，再谈读出。跑不动 45% 就不进阶段二。
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
 export HF_HOME=$B/hf_home HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false

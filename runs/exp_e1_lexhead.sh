@@ -1,7 +1,7 @@
 #!/bin/bash
 # E1：解耦 Attention —— L_cov 只更新**独立词形选择头**，不碰语义注意力。
 #
-# 背景（results/2026-11-04_readout_probe/）：共享注意力下 `--cov-weight 0.1` 把
+# 背景（RESULTS.md「L_cov 探针」）：共享注意力下 `--cov-weight 0.1` 把
 # oracle_sem 从 14.0% 打到 7.0%（配对 McNemar p=0.0013），oracle_lex 基本不动。
 # E1 把选词分数拆成 `mass.detach() + lex_scorer(w.detach(), x.detach())`：
 #   - lex_scorer 零初始化 => 第 0 步选择与旧实现**逐位相同**；
@@ -20,7 +20,7 @@
 #   续训：  RESUME=1 bash runs/exp_e1_lexhead.sh
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 OUT=${OUT:-$B/ckpt/probe_e1_lexhead.pt}
 COV=${COV:-0.1}
 LEX_HEAD=${LEX_HEAD:-1}

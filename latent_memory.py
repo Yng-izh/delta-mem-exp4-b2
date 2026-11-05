@@ -142,7 +142,7 @@ LATENT_EVIDENCE_HEADER = _env_str("LATENT_EVIDENCE_HEADER", "Evidence:")
 # 现状（同一 ckpt 实测）：4 个 z_lex 槽位里 28.2% 落在停用词/标点上，完整答案覆盖率
 # 24.5%，数字覆盖率 8.3%。根因不是"停用词权重没调好"，而是**选择器本身拿不到梯度**：
 # 重建/QA 的梯度只经由 argmax 选中的那个词回流，而 argmax 不可微，于是
-# queries / input_proj / hidden_proj 全程没有有效信号（KNOWN_ISSUES 第 5 条）。
+# queries / input_proj / hidden_proj 全程没有有效信号（KNOWN_ISSUES 第 4 条）。
 # L_cov 直接在**未 argmax 的注意力质量** mass 上算"重要词有没有被 m 个槽覆盖"，
 # 把梯度送回选择器，让它学会优先保存实体和数字。
 #
@@ -166,7 +166,7 @@ LATENT_COV_EPS         = _env_float("LATENT_COV_EPS", 1e-6)
 LATENT_COV_TARGETS     = _env_int("LATENT_COV_TARGETS", 0)
 
 # ---- E1（2026-11-05）：**独立词形选择头**，把 L_cov 的梯度关在选词分支里 ----
-# 1000 步探针的读出分解（results/2026-11-04_readout_probe/）实测：共享注意力下
+# 1000 步探针的读出分解（RESULTS.md「L_cov 探针」）实测：共享注意力下
 # `--cov-weight 0.1` 把 oracle_sem 从 14.0% 打到 7.0%（配对 McNemar p=0.0013），
 # 而 oracle_lex 基本不动。原因不是"覆盖率指标没用"，而是 L_cov 的梯度沿着
 # `mass` 直接更新了**语义**注意力（queries / attn / output_proj）—— 覆盖目标要求

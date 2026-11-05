@@ -84,7 +84,9 @@ python tools/prep_mab.py --src <Conflict_Resolution-*.parquet> --out $B/synth/ma
 GPU=0 bash runs/run_stage1_router.sh
 
 # 阶段二：固定阶段一 Router，只训 Compressor + Bridge（KL 蒸馏 + 重建 + 抗噪）
-GPU=0 bash runs/run_stage2_bridge.sh
+#   现有可用的两个训练臂（超参逐字相同，只差读出结构）：
+GPU=1 bash runs/exp_e1_lexhead.sh    # 词形直通 + L_cov + 独立词形头（E1）
+GPU=1 bash runs/exp_b_pure_sem.sh    # 纯语义读出（实验 B，训练/评测同构）
 ```
 
 断点续训：两条命令加 `--resume <ckpt>`（权重 + 优化器动量 + step/epoch 位置 + RNG 全部恢复）。
@@ -151,7 +153,7 @@ python eval_latent_table.py --data $B/synth/hotpot_val500.jsonl --limit 500 \
 
 ```bash
 GPU=0 bash runs/diag_router_cache.sh      # 缓存路径 vs 训练路径逐题对拍（P0）
-GPU=0 bash runs/diag_readout.sh           # 五种读法分解：注入 / 词形 / 语义 / 压缩（P0）
+GPU=1 CKPT=<ckpt> bash runs/exp_a_capacity.sh   # 接口容量 vs 压缩损失（实验 A，逐槽等预算）
 GPU=0 bash runs/diag_symbol_fidelity.sh   # 压缩器选中的词 vs 答案实体（P1）
 GPU=0 bash runs/overfit_probe.sh          # 64 题过拟合 + 三种目标函数对照（P1）
 ```

@@ -1,27 +1,0 @@
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 38.0G
-Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s]Loading checkpoint shards:  33%|███▎      | 1/3 [00:01<00:02,  1.25s/it]Loading checkpoint shards:  67%|██████▋   | 2/3 [00:02<00:01,  1.26s/it]Loading checkpoint shards: 100%|██████████| 3/3 [00:02<00:00,  1.17it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-[compat] transformers 无 smollm3 子包，已注入占位模块（deltamem.core 顶层 import 需要；本实验只用 Qwen3，不涉及 SmolLM3）
-[adapter] 校验通过：324/324 个张量与模型参数一一对应
-[warn] --max-unit-tokens=64 与 ckpt 训练时的 32 不一致：预算对比会失真，已按 ckpt 的值运行
-[slots] 评测集 units 中位=23 max=97；训练侧 --max-slots=不设上限；金标证据句数>2 的样本 64/200（32.0%，固定 2 跳读出的覆盖上限）
-/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.7` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
-  warnings.warn(
-/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.8` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
-  warnings.warn(
-/data/zhangjiayang/miniconda3/envs/flux/lib/python3.11/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
-  warnings.warn(
-[progress] 25/200 acc=0.2000 elapsed=71s eta=498s
-[progress] 50/200 acc=0.1200 elapsed=145s eta=435s
-[progress] 75/200 acc=0.1333 elapsed=214s eta=356s
-[progress] 100/200 acc=0.1100 elapsed=291s eta=291s
-[progress] 125/200 acc=0.1040 elapsed=372s eta=223s
-[progress] 150/200 acc=0.1133 elapsed=454s eta=151s
-[progress] 175/200 acc=0.1143 elapsed=532s eta=76s
-[progress] 200/200 acc=0.1050 elapsed=615s eta=0s
-| 方法 | n | acc% | EM% | F1% | 读对槽位% | 完整证据%(≤2句) | pair% | update% | hist% | 记忆token | prompt总token | 查询ms |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| diag-oracle_sem | 200 | 10.5 | 10.5 | 19.4 | 100.0 | 100.0 | n/a | n/a | n/a | 64.5 | 112.8 | 2141 | 934 | 3075 |
-{"label": "diag-oracle_sem", "n": 200, "acc": 0.105, "pair_acc": null, "pair_n": 0, "mem_tokens": 64.47, "mem_plain_tokens": 0.0, "prompt_tokens": 112.815, "enc_ms_mean": 2141.1522, "gen_ms_mean": 933.8305, "ms_mean": 3074.9829, "ms_p50": 3028.2009, "pre_ms_mean": 2141.1522, "read_acc": 1.0, "em": 0.105, "f1": 0.1937, "full_recall": 1.0, "n_leq2": 136, "full_recall_leq2": 1.0, "n_h2": 200, "acc_h2": 0.105, "read_acc_h2": 1.0}
-[out] -> /data/zhangjiayang/yyz3/results/diag_readout_200/oracle_sem.json

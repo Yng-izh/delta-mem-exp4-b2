@@ -6,7 +6,7 @@
 # 三条曲线在同一步数上的差值 = "重建目标有没有在拖主任务"的直接证据。
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 CKPT=${CKPT:?必须显式指定 CKPT（没有默认权重了）}
 OUT=${OUT:-$B/results/overfit_probe.json}
 export DELTA_MEM_SCAN_IMPL=torch

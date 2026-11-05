@@ -4,7 +4,7 @@
 # 不满足则非零退出 —— 不要"差一点也算过"。
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 CKPT=${CKPT:?必须显式指定 CKPT（没有默认权重了）}
 OUT=${OUT:-$B/results/diag_router_cache.json}
 # ENC_BATCH=1 时两条路径都逐条编码：用来判定 picks 差异是否纯粹来自分批数值抖动

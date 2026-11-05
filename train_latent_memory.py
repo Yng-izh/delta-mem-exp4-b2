@@ -3601,7 +3601,7 @@ def parse_args(argv=None):
                     help="每块最多监督几个词（0=自动取槽数 m）。设得比槽数大就是"
                          "'要求覆盖超过容量'，损失会留一个下不去的常数底")
     # ---- 读出结构三轮递进实验（2026-11-05）----
-    # 见 results/2026-11-04_readout_probe/：共享注意力下 L_cov 把 oracle_sem 打到 7.0%。
+    # 见 RESULTS.md「L_cov 探针」：共享注意力下 L_cov 把 oracle_sem 打到 7.0%。
     # 下面这些开关彼此独立，一次只应该动一个。
     ap.add_argument("--lex-head", type=int, default=LM.LATENT_LEX_HEAD,
                     help="E1：1=独立词形选择头（L_cov 的梯度只进这个头，语义注意力不再"

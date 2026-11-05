@@ -3,7 +3,7 @@
 # 金标句、答案实体是否命中、Bridge 的 α / 残差比 / 输出范数 / 末层权重范数。
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 CKPT=${CKPT:?必须显式指定 CKPT（没有默认权重了）}
 OUT=${OUT:-$B/results/diag_symbol_fidelity.json}
 export DELTA_MEM_SCAN_IMPL=torch
