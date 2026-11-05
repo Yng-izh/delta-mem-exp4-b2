@@ -24,7 +24,7 @@
 #   只训练：EVAL=0 bash runs/exp_b_pure_sem.sh
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 OUT=${OUT:-$B/ckpt/probe_b_puresem.pt}
 RES=${RES:-$B/results/exp_b_puresem}
 RESUME=${RESUME:-0}

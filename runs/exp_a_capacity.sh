@@ -26,7 +26,7 @@
 #   ARMS=latent,raw_salient LIMIT=50 bash runs/exp_a_capacity.sh   # 先跑小样本
 set -uo pipefail
 B=/data/zhangjiayang/yyz3; R=$B/delta-mem-exp4
-PY=/data/zhangjiayang/miniconda3/envs/flux/bin/python
+PY=${PY:-/data/zhangjiayang/miniconda3/envs/flux/bin/python}
 CKPT=${CKPT:?必须显式指定 CKPT}
 TAG=${TAG:-exp_a}
 LIMIT=${LIMIT:-200}
