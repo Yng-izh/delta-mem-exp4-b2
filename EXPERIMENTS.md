@@ -35,30 +35,42 @@
 ## 实验 A：验证读取接口（不压缩）
 
 **做什么**：记忆 = 金标证据的**逐 token 隐藏状态**（100~200 个位置，不压缩）；
-只训一个轻量 **Query-conditioned Reader**（逐 token 的问题条件化变换 + 整向量 L2 对齐）。
+训一个轻量 **Query-conditioned Reader**（输入 LayerNorm + 逐 token 问题条件化投影 +
+整向量 L2 对齐）。训练目标 `L = L_QA + λ·L_fact_recon`。
 
 ```bash
-bash runs/exp_a_reader.sh
-STEPS=2000 bash runs/exp_a_reader.sh        # 加长训练
+bash runs/exp_a_reader.sh                       # 改进版（默认）
+FACT_RECON=0 bash runs/exp_a_reader.sh          # 基线 A：只训 QA
 ```
 
-**四个对照（缺一不可）**
+**两组对照（判断"是不是训练不足"）**
+
+| 臂 | Reader | 训练目标 |
+|---|---|---|
+| A：基线 | 原实现（残差 + 零初始化） | QA |
+| B：改进 | 输入 LayerNorm + 直接投影 | QA + 事实重建 |
+
+**五个读出（缺一不可）**
 
 | 模式 | 记忆 | 回答的问题 |
 |---|---|---|
-| `none` | 不给 | 冻结模型靠参数知识能到多少（下界） |
-| `shuffle` | 给，但**打乱 token 顺序** | Reader 到底有没有在用记忆内容 |
-| `full` | 给完整记忆 | 这条读取通路的上限 |
-| `oracle_text` | 明文原文进 system | 参照上界（与 Reader 无关） |
+| `none` | 不给 | 参数知识下界 |
+| `shuffle` | 给，打乱 token 顺序 | 顺序/绑定是否被用到 |
+| **`wrong`** | 给**别的样本**的记忆 | **主反事实**：问题对、记忆错 |
+| `full` | 完整记忆 | 这条通路的上限 |
+| `oracle_text` | 明文原文 | 参照上界 |
 
-**判据**
+**判据（主看第一条）**
 
-1. `full` 明显高于 `none` → Reader 确实把记忆送进去了。
-2. **`full` 明显高于 `shuffle` → 用的是记忆内容**。这一条是整个实验的命门：
-   如果两者差不多，Reader 只是在给模型加"有信息量的噪声"，后面的压缩实验无从谈起。
-3. `full` 接近 `oracle_text` → 这条通路接近明文上界，值得往下做压缩。
+1. **`full ≫ wrong`** —— 这是"确实在读这段记忆"的硬证据。
+   为什么不用 `shuffle` 当主判据：第 18 层隐藏状态本身编码了上下文，打乱 token
+   顺序后"这是哪条事实"的信息未必消失，所以 `full ≈ shuffle` 不能证明模型没在用记忆。
+2. `full` 明显高于 `none`。
+3. `full` 接近 `oracle_text`。
 
----
+**注意**：如果这次仍然 `full ≈ wrong ≈ none`，就不要再加损失或加步数了 ——
+下一步应该改注入层级（把第 18 层当中间层记忆，用 Cross-Attention/KV 读取模块与冻结
+主干交互），而不是继续把第 18 层翻译回第 0 层词向量。
 
 ## 实验 B：验证潜层压缩（固定 Reader）
 

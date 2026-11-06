@@ -20,6 +20,8 @@ BOTTLENECK=${BOTTLENECK:-256}
 LR=${LR:-2e-4}
 EVAL_EVERY=${EVAL_EVERY:-250}
 EVAL_LIMIT=${EVAL_LIMIT:-40}
+FACT_RECON=${FACT_RECON:-0.5}     # 0 = 基线 A（只训 QA）；0.5 = 改进版 B
+RECON_CORRUPT=${RECON_CORRUPT:-0.5}
 OUT=${OUT:-$B/ckpt/reader_full_${STEPS}.pt}
 export DELTA_MEM_SCAN_IMPL=torch
 export PYTHONPATH=$B/nodns:$R:$B/delta-Mem
@@ -39,7 +41,8 @@ echo "[expA $(date '+%F %T')] 完整记忆 + Reader -> $OUT"
   --base $B/models/Qwen3-4B-Instruct-2507 \
   --adapter $B/models/delta-mem_qwen3_4b_instruct \
   --inject-mode user --fence-style bracket \
+  --fact-recon-weight $FACT_RECON --recon-corrupt $RECON_CORRUPT \
   --out "$OUT" \
-  > "$B/logs/$(date +%F)/expA_reader_${STEPS}.log" 2>&1
+  > "$B/logs/$(date +%F)/expA_reader_${STEPS}_recon${FACT_RECON}.log" 2>&1
 echo "[expA $(date '+%F %T')] rc=$? -> $OUT"
-tail -20 "$B/logs/$(date +%F)/expA_reader_${STEPS}.log"
+tail -20 "$B/logs/$(date +%F)/expA_reader_${STEPS}_recon${FACT_RECON}.log"
