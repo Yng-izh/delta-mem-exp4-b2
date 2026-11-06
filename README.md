@@ -55,7 +55,9 @@ E2/E3/E4、`L_cov` 调参、独立词形头**全部暂停**（E1 已证伪"语�
 | `runs/exp_a_capacity.sh` | **实验 A**：接口容量 vs 压缩损失（不训练，约 20 分钟） |
 | `runs/exp_b_pure_sem.sh` | **实验 B**：纯语义读出能不能学会（1000 步 + 自动评测） |
 | `runs/train_arm.sh` | 训练单个臂（1000 步），用环境变量换一个变量：`MAX_UNIT`/`COV`/`LEX_HEAD`/`COMPOSE`/`N_SYM`/`N_REL`/`REL_MODE` |
-| **`runs/exp1_bottleneck.sh`** | 实验 1：符号损坏 vs 连续表示不可读（BPE 对照 + 纯语义训练） |
+| **`runs/exp_a_reader.sh`** | **实验 A**：完整隐藏状态当记忆，只训 Query-conditioned Reader（4 个对照） |
+| **`runs/exp_b_compress.sh`** | **实验 B**：固定 Reader，把记忆压成 8 / 4 个潜槽 |
+| `runs/exp1_bottleneck.sh` | 历史：符号损坏 vs 连续表示不可读（已结案） |
 | **`runs/exp2_hybrid.sh`** | 实验 2（核心）：2 符号位 + 2 关系位，四臂对照 + 关系绑定子集 |
 | **`runs/exp3_e2e.sh`** | 实验 3：接回 Router 端到端，报召回与命中条件准确率 |
 | `runs/run_stage1_router.sh` | 阶段一 Router |
@@ -72,7 +74,9 @@ E2/E3/E4、`L_cov` 调参、独立词形头**全部暂停**（E1 已证伪"语�
 | `train_latent_memory.py` | 阶段二训练 + 评测（`--fst` 分支为动态更新场景，不在主线） |
 | `eval_latent_table.py` | 统一评测入口（`none/text/oracle/oracle_latent/oracle_lex/oracle_sem/oracle_embed/bridge/router/fst`） |
 | `tools/train_router_stage1.py` | 阶段一：只训 Router，训完直接报召回 |
-| `tools/probe_readout_capacity.py` | 实验 A：逐槽等预算下原生 BPE vs 潜层 |
+| `reader_memory.py` | 实验 A/B：Query-conditioned Reader + 完整/槽记忆构建 + shuffle 对照 |
+| `train_reader.py` | 实验 A/B 的训练与评测（none / shuffle / full / oracle_text） |
+| `tools/probe_readout_capacity.py` | 逐槽等预算下原生 BPE vs 潜层（实验 B 的基线来源） |
 | `tools/cmp_readout.py` | 两份 eval 产出逐题配对比较（McNemar 精确二项） |
 | `tools/diag_router_cache.py` | 缓存路径与训练路径逐题对拍（kfeat / picks / 召回） |
 | `tools/diag_symbol_fidelity.py` | 压缩器选中的词 vs 答案实体，附 Bridge 的 α / 残差比 |
