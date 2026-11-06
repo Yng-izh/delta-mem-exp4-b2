@@ -13,14 +13,29 @@
         Reader 初始化，可选 --freeze-reader 只训压缩器）。判据是"同读取预算下超过
         Query-Agnostic 原生 Token 基线，同时保持关系绑定准确率"。
 
-为什么用 QA 交叉熵而不是生成式评测来训练：训练集 10k 条，答案都很短，逐 token 的
-teacher-forcing 交叉熵是最省也最稳的信号；生成式只在评测时用（EM/F1）。
+训练目标：`L = L_QA + λ · L_fact_recon`
 
-评测固定跑四条（缺一不可）：
+只靠 QA 损失是不够的 —— 答案通常只有一两个 token，要它去学"把 2560 维的第 18 层
+隐藏状态翻译成输入词向量空间"这种大跨度映射，信号既稀又高方差（实测 750 步、
+`full` 一直贴着 `none` 的 17.5%）。所以加一条**密集的事实重建损失**：
+
+  - 让模型用记忆复述证据原文，但**只在事实关键位算损失**（数字 / 实体 / 关系词），
+    见 `reader_memory.key_span_flags`。整句重建会把梯度花在可预测的功能词上，
+    Reader 学到的与"记住事实"无关 —— 旧实验里"重建 tokF1 涨了但 QA 不涨"可能就是
+    这个原因。
+  - 前缀随机破坏（`--recon-corrupt`）：Teacher Forcing 下模型能靠已给的金标前缀
+    自回归猜出下一个词，不破坏前缀的话重建会退化成语言模型练习。
+
+评测固定跑五条（缺一不可）：
     none      不给记忆                    —— 冻结模型的参数知识下界
-    shuffle   给记忆但打乱 token 顺序      —— **Reader 到底有没有在用记忆内容**
+    shuffle   给记忆但打乱 token 顺序      —— 顺序/绑定是否被用到
+    wrong     给**别的样本**的记忆          —— **主反事实**：问题对、记忆错
     full      给完整记忆                  —— 这条读取通路的上限
     oracle_text 明文原文进 system          —— 参照上界（与 Reader 无关）
+
+为什么主反事实是 `wrong` 而不是 `shuffle`：第 18 层隐藏状态本身编码了上下文，
+打乱 token 顺序之后"这是哪条事实"的信息未必消失。所以 `full ≈ shuffle` 不能证明
+模型没在用记忆；只有 `full ≫ wrong` 才是"确实在读这段记忆"的硬证据。
 """
 from __future__ import annotations
 
@@ -65,6 +80,12 @@ def parse_args(argv=None):
     ap.add_argument("--eval-every", type=int, default=250)
     ap.add_argument("--eval-limit", type=int, default=40)
     ap.add_argument("--log-every", type=int, default=10)
+    ap.add_argument("--fact-recon-weight", type=float, default=0.5,
+                    help="事实重建损失的权重（0=关闭，退回纯 QA 基线 A）")
+    ap.add_argument("--recon-corrupt", type=float, default=0.5,
+                    help="重建时随机破坏输入侧前缀的概率（防止靠已知前缀自回归猜答案）")
+    ap.add_argument("--recon-max-tokens", type=int, default=96,
+                    help="重建目标最多取多少 token（省显存，不影响方法定义）")
     ap.add_argument("--shuffle-train", choices=("none", "tokens"), default="none",
                     help="训练时是否打乱记忆。默认不打乱；把它当正则/鲁棒性对照时再开")
     ap.add_argument("--init", default="", help="从已有 reader（+压缩器）ckpt 初始化")
@@ -125,6 +146,67 @@ def query_vec(model, tokenizer, item, args) -> torch.Tensor:
     pooled = qf["pooled"]
     d = int(pooled.shape[-1]) // 2
     return pooled[:, d:]
+
+
+# ---------------------------------------------------------------------
+# 事实重建损失（密集监督）
+# ---------------------------------------------------------------------
+def fact_recon_loss(args, model, tokenizer, reader, mem, q, rng) -> torch.Tensor:
+    """用记忆复述证据原文，**只在事实关键位上算损失**。
+
+    返回标量张量；没有可监督位置时返回 0（不抛错 —— 有些样本全是功能词，属正常）。
+
+    三个防作弊设计，缺一个这条损失就会退化成语言模型练习：
+      1. 目标文本**不在输入里**（输入只有 soft tokens + 一句固定指令）；
+      2. 只监督关键位（数字/实体/关系词），功能词不给分；
+      3. 以 `--recon-corrupt` 的概率把输入侧的答案前缀换成随机词表 token，
+         否则 Teacher Forcing 下模型能靠已知前缀自回归猜出下一个词。
+    """
+    texts = list(mem.get("texts") or [])
+    if not texts:
+        return torch.zeros((), device=q.device)
+    recon = " ".join(str(t) for t in texts)
+    ids = tokenizer(recon, add_special_tokens=False)["input_ids"][0].tolist()
+    if int(args.recon_max_tokens) > 0:
+        ids = ids[: int(args.recon_max_tokens)]
+    if not ids:
+        return torch.zeros((), device=q.device)
+    token_texts = [tokenizer.decode([int(i)]) for i in ids]
+    flags = RM.key_span_flags(token_texts)
+    if not any(flags):
+        return torch.zeros((), device=q.device)
+    recon_trunc = tokenizer.decode([int(i) for i in ids], skip_special_tokens=True)
+
+    soft = reader(mem["h"], mem["mask"], q)
+    embeds, labels, n_ans = T.build_student_inputs(
+        model, tokenizer, soft, args.system_prompt,
+        "Repeat the memory verbatim.", recon_trunc, inject_mode=args.inject_mode)
+    # labels 覆盖"答案 token + EOS"；把非关键位抹成 -100
+    lab = labels.clone()
+    if n_ans > 0:
+        f = torch.zeros((n_ans,), dtype=torch.bool, device=lab.device)
+        k = min(int(len(flags)), int(n_ans))
+        f[:k] = torch.tensor(flags[:k], dtype=torch.bool, device=lab.device)
+        region = lab[0, lab.shape[1] - n_ans:]
+        region[~f] = -100
+    if not bool((lab != -100).any()):
+        return torch.zeros((), device=q.device)
+    if float(args.recon_corrupt) > 0.0 and n_ans > 1 and \
+            float(torch.rand((), generator=rng)) < float(args.recon_corrupt):
+        first = int(embeds.shape[1]) - int(n_ans)
+        n_rep = int(n_ans) - 1
+        vocab = int(getattr(model.config, "vocab_size", 0) or 0)
+        if vocab > 0 and n_rep > 0:
+            rand_ids = torch.randint(0, vocab, (1, n_rep), generator=rng).to(embeds.device)
+            repl = model.get_input_embeddings()(rand_ids).to(embeds.dtype)
+            embeds = embeds.clone()
+            embeds[:, first:first + n_rep] = repl
+    with LM.delta_write_disabled(model):
+        logits = model(inputs_embeds=embeds,
+                       attention_mask=torch.ones(embeds.shape[:2], dtype=torch.long,
+                                                 device=embeds.device),
+                       use_cache=False).logits
+    return T.qa_loss(logits, lab)
 
 
 # ---------------------------------------------------------------------
@@ -210,7 +292,11 @@ def train(args) -> int:
                                attention_mask=torch.ones(embeds.shape[:2],
                                                          dtype=torch.long, device=embeds.device),
                                use_cache=False).logits
-            loss = T.qa_loss(logits, labels) / max(1, int(args.accum))
+            loss_qa = T.qa_loss(logits, labels)
+            loss_rec = torch.zeros((), device=loss_qa.device)
+            if float(args.fact_recon_weight) > 0.0:
+                loss_rec = fact_recon_loss(args, model, tokenizer, reader, mem, q, rng)
+            loss = (loss_qa + float(args.fact_recon_weight) * loss_rec) / max(1, int(args.accum))
             loss.backward()
             micro += 1
             seen += 1
@@ -221,7 +307,8 @@ def train(args) -> int:
                 step += 1
                 if step % int(args.log_every) == 0:
                     el = time.time() - t0
-                    print(f"[step {step}] loss_qa={float(loss) * int(args.accum):.4f} "
+                    print(f"[step {step}] loss_qa={float(loss_qa):.4f} "
+                          f"loss_recon={float(loss_rec):.4f} "
                           f"mem_tokens={int(mem['n'])} elapsed={el:.0f}s "
                           f"({el / max(1, step):.2f}s/step)", flush=True)
                 if int(args.eval_every) > 0 and step % int(args.eval_every) == 0:
@@ -260,15 +347,28 @@ def run_eval(args, model, tokenizer, reader, compressor, val, step, dev) -> Dict
     if compressor is not None:
         compressor.eval()
     lim = int(args.eval_limit or len(val))
+    items = list(val[:lim])
     rows: List[Dict[str, Any]] = []
     rng = torch.Generator().manual_seed(int(args.seed) + 7)
-    for i, item in enumerate(val[:lim]):
-        mem = build_memory(args, model, tokenizer, compressor, item)
+    # 先把所有记忆建好：wrong-memory 对照要拿**别的样本**的记忆，必须预先把整批建出来
+    mems = [build_memory(args, model, tokenizer, compressor, it) for it in items]
+    n_i = len(items)
+    for i, item in enumerate(items):
+        mem = mems[i]
+        wrong = mems[(i + 1) % n_i] if n_i > 1 else mems[i]
         q = query_vec(model, tokenizer, item, args)
         out: Dict[str, Any] = {"idx": i, "gold": str(item["answer"])}
-        for mode in ("none", "shuffle", "full"):
-            m = None if mode == "none" else (
-                RM.shuffle_memory(mem, "tokens", rng=rng) if mode == "shuffle" else mem)
+        for mode in ("none", "shuffle", "wrong", "full"):
+            if mode == "none":
+                m = None
+            elif mode == "shuffle":
+                m = RM.shuffle_memory(mem, "tokens", rng=rng)
+            elif mode == "wrong":
+                # 主反事实：**问题对、记忆错**。若 full 与它没有明显差距，
+                # 说明模型根本没在用这段记忆的内容。
+                m = wrong
+            else:
+                m = mem
             pred, _meta = RM.reader_generate(
                 model, tokenizer, reader, m, item["question"], args.system_prompt,
                 q_vec=q, max_new_tokens=16, inject_mode=args.inject_mode,
@@ -284,16 +384,20 @@ def run_eval(args, model, tokenizer, reader, compressor, val, step, dev) -> Dict
         out["oracle_text"] = str(pred_t)
         rows.append(out)
     summary: Dict[str, Any] = {"step": int(step), "n": len(rows)}
-    for mode in ("none", "shuffle", "full", "oracle_text"):
+    for mode in ("none", "shuffle", "wrong", "full", "oracle_text"):
         hit = sum(1 for r in rows if T._norm_ans(r[mode]) == T._norm_ans(r["gold"]))
         summary[mode] = hit / len(rows)
-    # **关键量**：full 比 shuffle 高多少。等于 0 说明 Reader 没在用记忆内容。
+    # **关键量**：full 与 wrong 的差（问题对、记忆错）。这是"确实在读这段记忆"的硬证据；
+    # full-shuffle 只说明"顺序/绑定有没有被用到"，打乱后上下文信息未必消失，所以只作参考。
     summary["full_minus_shuffle"] = summary["full"] - summary["shuffle"]
+    summary["full_minus_wrong"] = summary["full"] - summary["wrong"]
     summary["full_minus_none"] = summary["full"] - summary["none"]
     print(f"[eval] step={step} n={len(rows)} "
           f"none={summary['none']:.3f} shuffle={summary['shuffle']:.3f} "
-          f"full={summary['full']:.3f} oracle_text={summary['oracle_text']:.3f} "
-          f"| full-shuffle={summary['full_minus_shuffle']:+.3f} "
+          f"wrong={summary['wrong']:.3f} full={summary['full']:.3f} "
+          f"oracle_text={summary['oracle_text']:.3f} "
+          f"| **full-wrong={summary['full_minus_wrong']:+.3f}** "
+          f"full-shuffle={summary['full_minus_shuffle']:+.3f} "
           f"full-none={summary['full_minus_none']:+.3f}", flush=True)
     reader.train()
     if compressor is not None:

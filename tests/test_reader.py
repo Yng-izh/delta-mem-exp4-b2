@@ -67,10 +67,18 @@ def test_reader_basic():
     ok("R3 范数不是 RMSNorm×常数的量级（≈target·√d）",
        float(out.detach().norm(dim=-1).max()) < tn * 3.0,
        extra=str(float(out.detach().norm(dim=-1).max())))
-    # 末层零初始化：delta=0 => 输出方向 == 原记忆方向（只是范数被对齐）
+    # 去掉了残差：输出是 MLP 直接投影出来的，**不再是恒等映射**。
+    # 这一条是 2026-11-06 的修正：恒等（=原样隐藏状态）实测只有 10%，等于无记忆。
     cos = torch.nn.functional.cosine_similarity(out[0], h[0], dim=-1)
-    ok("R4 零初始化时输出方向等于原记忆（第 0 步不改记忆内容）",
-       float(cos.min()) > 0.999, extra=str([round(float(v), 4) for v in cos[:3]]))
+    ok("R4 输出不再是原记忆的恒等映射（残差已去掉）",
+       float(cos.max()) < 0.99, extra=f"max_cos={float(cos.max()):.3f}")
+    # 输入先过 LayerNorm：把记忆整体乘 100，输出应当几乎不变
+    with torch.no_grad():
+        o1 = rd(h, None, q)
+        o2 = rd(h * 100.0, None, q)
+    ok("R4b 输入尺度被 LayerNorm 吸收（乘 100 后输出基本不变）",
+       float((o1 - o2).abs().max()) < 1e-3,
+       extra=f"max_diff={float((o1 - o2).abs().max()):.2e}")
 
 
 def test_reader_query_conditioned():
@@ -135,6 +143,23 @@ def test_shuffle():
 
 
 # =====================================================================
+# K. 事实关键位（Masked Evidence Reconstruction 的监督掩码）
+# =====================================================================
+def test_key_spans():
+    flags = RM.key_span_flags(["The", " city", " was", " founded", " in", " 1998",
+                               " by", " Alice", ".", " He", " served", " as"])
+    ok("K1 关系词被标为关键位（founded / served）",
+       flags[3] and flags[10], extra=str(flags))
+    ok("K2 数字被标为关键位（1998）", flags[5], extra=str(flags))
+    ok("K3 实体（大写、非句首虚词）被标为关键位（Alice）", flags[7], extra=str(flags))
+    ok("K4 句首虚词不算关键位（The / He 也大写但不是实体）",
+       not flags[0] and not flags[9], extra=str(flags))
+    ok("K5 功能词与标点不算关键位",
+       not flags[1] and not flags[2] and not flags[4] and not flags[6] and not flags[8])
+    ok("K6 空 token 不算关键位", RM.key_span_flags([""]) == [False])
+
+
+# =====================================================================
 # M. 记忆构建
 # =====================================================================
 def test_memory_build():
@@ -158,6 +183,14 @@ def test_memory_build():
     sm = RM.build_slot_memory(model, tok, comp, item, [0, 1], max_tokens=100, layer=1)
     ok("M5 槽记忆的长度 == K × 块数（K=4 的整数倍）",
        int(sm["n"]) > 0 and int(sm["n"]) % 4 == 0, extra=str(sm["n"]))
+    # 实验 B 要训压缩器：build_slot_memory **不能**带 no_grad，否则梯度被掐断
+    comp.zero_grad(set_to_none=True)
+    sm2 = RM.build_slot_memory(model, tok, comp, item, [0, 1], max_tokens=100, layer=1)
+    sm2["h"].sum().backward()
+    ok("M6 槽记忆对压缩器保留梯度（不能包 @torch.no_grad，否则实验 B 训不动）",
+       comp.queries.grad is not None and float(comp.queries.grad.abs().sum()) > 0.0,
+       extra="None" if comp.queries.grad is None else
+       f"{float(comp.queries.grad.abs().sum()):.2e}")
 
 
 # =====================================================================
@@ -186,7 +219,7 @@ def test_ckpt_roundtrip():
 
 def main():
     for fn in (test_reader_basic, test_reader_query_conditioned, test_reader_mask,
-               test_shuffle, test_memory_build, test_ckpt_roundtrip):
+               test_shuffle, test_key_spans, test_memory_build, test_ckpt_roundtrip):
         print(f"--- {fn.__name__}")
         fn()
     print("=" * 70)

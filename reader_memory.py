@@ -63,6 +63,43 @@ READER_LAYER = LM._env_int("READER_LAYER", 18)
 READER_BOTTLENECK = LM._env_int("READER_BOTTLENECK", 256)
 # 完整记忆最多保留多少 token：只用于防显存爆，不参与方法定义
 READER_MEM_MAX = LM._env_int("READER_MEM_MAX", 320)
+# 事实重建的监督词表：关系动词/名物化词。判"哪些 token 是事实关键位"时用，
+# 只监督这些位置 —— 功能词（the/of/is）模型靠语法就能猜，监督它们等于白送分。
+RELATION_WORDS = frozenset(
+    "founded established born died married divorced directed produced written located "
+    "served held became released published created member part appointed elected joined "
+    "led owned designed built named known worked studied graduated awarded won lost "
+    "replaced succeeded preceded attended represented signed defeated beat".split())
+# 句首常见词：它们也大写，但不是实体（不排除的话"每句第一个词"全被算成事实关键位）
+_SENT_START = frozenset(
+    "the a an it he she they we you i his her their its this that these those there "
+    "however after before during in on at as by for from with while when where which "
+    "who whom whose what how also both each other some many most more than then thus".split())
+
+
+def key_span_flags(token_texts: Sequence[str]) -> List[bool]:
+    """逐 token 标记"是否属于事实关键位"：数字 / 实体（大写且不是句首虚词）/ 关系词。
+
+    为什么要这个掩码：整句重建会把大量梯度花在可预测的功能词上（Teacher Forcing 下
+    模型只靠语法就能猜 " of the "），Reader 学到的东西与"记住事实"无关 —— 这正是
+    旧实验里"重建 tokF1 涨了但 QA 不涨"的一个可能解释。只监督关键位，信号才对准
+    实体、数值、关系这三类真正必须从记忆里取的内容。
+    """
+    flags: List[bool] = []
+    for t in token_texts:
+        raw = str(t)
+        w = raw.strip()
+        if not w:
+            flags.append(False)
+            continue
+        low = w.lower().strip(".,;:!?\"'()[]{}").strip()
+        is_num = any(ch.isdigit() for ch in w)
+        is_cap = raw.lstrip()[:1].isupper() and low not in _SENT_START
+        is_rel = low in RELATION_WORDS
+        flags.append(bool(is_num or is_cap or is_rel))
+    return flags
+
+
 # 记忆来源：full=完整隐藏状态；slotsK=压缩器 K 个潜槽（实验 B）
 READER_MEM_MODES = ("full", "slots8", "slots4", "slots2")
 # 打乱方式：tokens=同一段记忆里打乱 token 顺序；wrong=换成别的样本的记忆
@@ -92,15 +129,26 @@ class QueryCondReader(nn.Module):
         self.tau = float(tau)
         # 门控：问题向量与记忆 token 的内积 -> 每个 token 一个"该看多重"的标量。
         # 用低秩投影（d -> bottleneck）而不是 d×d，参数量从 6.5M 降到 1.3M。
+        # 输入归一化：第 18 层隐藏状态的每向量范数实测均值 262、最大 5984，而目标输出
+        # 范数只有 1.087。不归一化时 MLP 的输入尺度比权重尺度大两个数量级，门控 sigmoid
+        # 直接饱和、梯度又被 L2 归一化的 1/||out|| 削弱。LayerNorm 把记忆与问题两个输入
+        # 都拉到 O(√d) 的良性区间，输出侧再统一对齐到注入接口要求。
+        self.mem_ln = nn.LayerNorm(self.hidden_size)
+        self.q_ln = nn.LayerNorm(self.hidden_size)
         self.q_proj = nn.Linear(self.hidden_size, self.bottleneck, bias=False)
         self.h_proj = nn.Linear(self.hidden_size, self.bottleneck, bias=False)
         # 变换：输入是 [h_i ; 门控后的低秩特征]，输出回 hidden_size 的**残差**
         self.mlp1 = nn.Linear(self.hidden_size + self.bottleneck, self.bottleneck)
         self.mlp2 = nn.Linear(self.bottleneck, self.hidden_size)
         self.gate_bias = nn.Parameter(torch.zeros(1))
-        # 末层零初始化：第 0 步输出逐位等于原始隐藏状态（"不改记忆"的起点），
-        # 与 Bridge 的零初始化同一个理由 —— 让训练从"什么都不做"开始长。
-        nn.init.zeros_(self.mlp2.weight)
+        # **不再零初始化，也不再走残差**（2026-11-06 修正）：
+        #   - 残差 `out = h + Δ` 的前提是 h 已经在词向量空间（旧的 z_lex 满足，所以那边
+        #     用残差是对的）。这里 h 是第 18 层的上下文化表示，和输入词向量不是同一个
+        #     空间，需要的是**整体搬过去**，不是小修正。实测：残差版跑 750 步，
+        #     full 一直贴着 none（17.5%），就是"残差长不到能改方向的量级"。
+        #   - 零初始化同理：恒等映射本身只有 10%（= 无记忆），没有值得保留的起点。
+        # 所以输出由 MLP 直接产生，用小随机初始化（不能为零，否则 L2 归一化得到零向量）。
+        nn.init.normal_(self.mlp2.weight, std=0.02)
         nn.init.zeros_(self.mlp2.bias)
         # 范数对齐：真实 token embedding 的每向量范数（可学习、有硬上下界）
         self.out_norm = nn.Parameter(torch.tensor(float(target_norm)))
@@ -122,24 +170,29 @@ class QueryCondReader(nn.Module):
             raise ValueError(f"mem_h 最后一维 {int(mem_h.shape[-1])} != hidden={self.hidden_size}")
         B, N, d = int(mem_h.shape[0]), int(mem_h.shape[1]), int(mem_h.shape[2])
         p = next(self.parameters())
-        h = mem_h.to(device=p.device, dtype=p.dtype)
+        h_raw = mem_h.to(device=p.device, dtype=p.dtype)
+        h = self.mem_ln(h_raw)                                # 归一化后再进 MLP
         hb = self.h_proj(h)                                   # [B,N,b]
         if q_vec is None:
             gate = torch.ones((B, N, 1), device=p.device, dtype=p.dtype)
             feat = hb
         else:
             q = q_vec.to(device=p.device, dtype=p.dtype).reshape(B, -1)[:, :d]
+            q = self.q_ln(q)
             qb = self.q_proj(q).unsqueeze(1)                  # [B,1,b]
             # 除以 √b 是标准缩放：不除的话点积随瓶颈宽度线性增长，sigmoid 会饱和成 0/1
             gate = torch.sigmoid((hb * qb).sum(dim=-1, keepdim=True)
                                  / (self.bottleneck ** 0.5) + self.gate_bias)
             feat = hb * gate
-        delta = self.mlp2(F.silu(self.mlp1(torch.cat([h, feat], dim=-1))))
-        out = h + delta
+        # 直接投影（无残差）：见 __init__ 里"为什么不能用残差"的说明
+        out = self.mlp2(F.silu(self.mlp1(torch.cat([h, feat], dim=-1))))
         out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-        # 整向量 L2 对齐（**不是** RMSNorm×常数：那会把范数推到 ≈target·√d）
+        # 整向量 L2 对齐（**不是** RMSNorm×常数：那会把范数推到 ≈target·√d）。
+        # 这里的下限是 1e-3 而不是 Bridge 用的 1.0：Bridge 要的是"残差从零开始长"，
+        # 所以 ‖out‖<1 时不放大；Reader 恰恰相反 —— 它必须**从第 0 步就输出 embedding
+        # 尺度的向量**，否则注入的东西范数只有 0.1，模型读不到。1e-3 只是防除零。
         n = out.norm(dim=-1, keepdim=True)
-        unit = out / n.clamp_min(1.0)
+        unit = out / n.clamp_min(1e-3)
         out = unit * self.scale().to(device=out.device, dtype=out.dtype)
         if mem_mask is not None:
             m = mem_mask.to(device=p.device).to(dtype=out.dtype).unsqueeze(-1)
@@ -150,8 +203,8 @@ class QueryCondReader(nn.Module):
                     "scale": float(self.scale()),
                     "out_norm": float(out.norm(dim=-1).mean()),
                     "gate_mean": float(gate.mean()),
-                    "delta_ratio": float(delta.norm(dim=-1).mean()
-                                         / n.clamp_min(1e-6).mean()),
+                    "mem_norm_in": float(h_raw.norm(dim=-1).mean()),
+                    "out_norm_raw": float(n.mean()),
                     "w_last": float(self.mlp2.weight.norm()),
                 }
         return out
@@ -202,7 +255,6 @@ def build_full_memory(model, tokenizer, item, unit_idx: Sequence[int],
             "n": N, "texts": texts}
 
 
-@torch.no_grad()
 def build_slot_memory(model, tokenizer, compressor, item, unit_idx: Sequence[int],
                       max_tokens: int = READER_MEM_MAX,
                       layer: int = READER_LAYER) -> Dict[str, Any]:
@@ -210,6 +262,9 @@ def build_slot_memory(model, tokenizer, compressor, item, unit_idx: Sequence[int
 
     与实验 A 的接口**完全一致**（都是 [N, d] 的隐藏状态序列），所以 Reader 一行不用改。
     这也是"固定 Reader、只换记忆长度"这个要求的实现方式。
+
+    **这里不能加 `@torch.no_grad()`**：实验 B 要训压缩器，加了就等于把压缩器的梯度掐断
+    （主干本身冻结，`encode_latent_units` 内部自带 no_grad，不需要外层再包一次）。
     """
     dev = LM._model_device(model)
     texts = [T.unit_encode_text(item, int(i)) for i in unit_idx]
@@ -242,6 +297,10 @@ def shuffle_memory(mem: Dict[str, Any], mode: str = "tokens",
       这是最严格的一条：如果 Reader 真的在用"哪个词挨着哪个词"，打乱就该掉分；
       如果它只是在做词袋式的加权，打乱几乎不掉分 —— 那"关系绑定"这个卖点就不成立。
     `wrong`：换成**别的样本**的记忆（由调用方负责替换），这里只做校验。
+      为什么 `wrong` 比 `shuffle` 更关键：第 18 层的隐藏状态本身就编码了上下文，
+      把 token 顺序打乱之后，"哪条事实"这个信息未必消失（相邻 token 的语义还在）。
+      所以 `full ≈ shuffle` 不能证明模型没用事实绑定；`full ≫ wrong`（问题对、记忆错）
+      才是"确实在读这段记忆"的硬证据。
 
     注意：`h` 是 [1,N,d]，`mask` 全 1 时重排才等价于"只换顺序"；有 padding 时只重排
     有效位，避免把 padding 的零向量搬到前面（那会变成"多给了一堆空位"，是另一个变量）。
