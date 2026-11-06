@@ -990,6 +990,17 @@ def main(argv=None):
             reader.bridge.n_rel = int(args.n_rel)
         if args.rel_mode:
             reader.bridge.rel_mode = str(args.rel_mode)
+        if args.method == "split_sym":
+            # 纯符号臂要 8 个符号位，**词形载荷必须在编码前就按 8 行铺**。
+            # 只在 read_one 里临时改 bridge 是没用的：lex_payloads 在那之前就已经
+            # 按 ckpt 的 n_sym=4 生成好了（实测报 "z_lex 只有 4 行，不够 n_sym=8"）。
+            _m = int(reader.config.get("n_slots", 4))
+            reader.compressor.n_sym = _m
+            reader.bridge.compose = "split"
+            reader.bridge.n_sym = _m
+            reader.bridge.n_rel = 0
+            print(f"[split] split_sym 臂：n_sym={_m} n_rel=0"
+                  f"（压缩器按 {_m} 行铺词形载荷）", flush=True)
         print(f"[lex] lex_head={'on' if getattr(reader.compressor, 'lex_scorer', None) is not None else 'off'}"
               f" split_n_lex={int(getattr(reader.bridge, 'n_lex', 0))}", flush=True)
         if args.method in ("router", "fst"):
