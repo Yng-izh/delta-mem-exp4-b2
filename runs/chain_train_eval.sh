@@ -38,13 +38,17 @@ if [ "$SZ" -lt 100000000 ]; then
   exit 2
 fi
 
+EXP=${EXP:-1}
+SMOKE_MODE=${SMOKE_MODE:-oracle_lex}
+if [ "$EXP" = "2" ]; then SMOKE_MODE=split_full; fi
+
 # ---- 闸门 2：2 题 smoke ----
-say "smoke：$SMOKE_N 题，模式 oracle_lex（mean 编码）"
-GPU=${GPU:-1} LIMIT=$SMOKE_N TAG=chain_smoke MODES="oracle_lex" \
-  CKPT="$CKPT" OUT="$OUT/smoke" bash "$R/runs/eval_stage2.sh" > "$OUT/smoke.out" 2>&1
+say "smoke：$SMOKE_N 题，模式 $SMOKE_MODE（实验 $EXP）"
+GPU=${GPU:-1} LIMIT=$SMOKE_N TAG=chain_smoke MODES="$SMOKE_MODE" \
+  CKPT="$CKPT" bash "$R/runs/eval_stage2.sh" > "$OUT/smoke.out" 2>&1
 SMOKE_RC=$?
 say "smoke rc=$SMOKE_RC"
-SMOKE_JSON="$B/results/chain_smoke_oracle_lex_${SMOKE_N}.json"
+SMOKE_JSON="$B/results/chain_smoke_${SMOKE_MODE}_${SMOKE_N}.json"
 [ -f "$SMOKE_JSON" ] || SMOKE_JSON=$(ls -t "$B"/results/chain_smoke_*_${SMOKE_N}.json 2>/dev/null | head -1)
 
 VERDICT=$("$PY" - "$SMOKE_JSON" "$SMOKE_N" <<'PY'
@@ -81,6 +85,33 @@ case "$VERDICT" in
   PASS*) : ;;
   *) say "[FAIL] smoke 没通过 —— 不跑正式评测。看 $OUT/smoke.out"; exit 3 ;;
 esac
+
+if [ "$EXP" = "2" ]; then
+  # ---- 实验 2：三条混合臂（同一份权重，只换关系槽内容）+ 原生整词基线 ----
+  say "正式评测：$LIMIT 题，实验 2（split_full / split_blank / split_sym + raw_word）"
+  GPU=${GPU:-1} LIMIT="$LIMIT" SKIP_TRAIN=1 CKPT="$CKPT" OUT="$OUT/exp2" SWEEP=4,8,16,32 \
+    bash "$R/runs/exp2_hybrid.sh" > "$OUT/exp2.out" 2>&1
+  say "实验 2 rc=$?"
+  say "===== 汇总（实验 2）====="
+  "$PY" - "$OUT/exp2" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+def p(x):
+    return "n/a" if x is None else "%.1f" % (100 * x)
+for name in ("split_full", "split_blank", "split_sym"):
+    f = os.path.join(root, name + ".json")
+    if not os.path.isfile(f):
+        continue
+    s = json.load(open(f)).get("summary") or {}
+    by = s.get("by_ans_type") or {}
+    print("%-12s EM=%s%% F1=%s%% date=%s%% number=%s%% 注入=%.1f"
+          % (name, p(s.get("em")), p(s.get("f1")),
+             p((by.get("date") or {}).get("em")),
+             p((by.get("number") or {}).get("em")), s.get("mem_tokens") or 0))
+PY
+  say "全部完成 -> $OUT"
+  exit 0
+fi
 
 # ---- 正式评测：实验 1A（mean vs bpe）+ 完整方法参照 ----
 say "正式评测：$LIMIT 题，实验 1A（oracle_lex mean vs bpe）+ oracle_latent"
