@@ -166,21 +166,27 @@ def fact_recon_loss(args, model, tokenizer, reader, mem, q, rng) -> torch.Tensor
     if not texts:
         return torch.zeros((), device=q.device)
     recon = " ".join(str(t) for t in texts)
-    ids = tokenizer(recon, add_special_tokens=False)["input_ids"][0].tolist()
+    # 截断按 token 数：先用 tensor 形态拿到 id（单字符串的 list 形态返回的是扁平 list，
+    # 直接 [0] 会拿到一个 int —— 这里踩过一次，所以统一走 return_tensors="pt"）
+    ids = tokenizer(recon, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
     if int(args.recon_max_tokens) > 0:
         ids = ids[: int(args.recon_max_tokens)]
-    if not ids:
+    if int(ids.numel()) <= 0:
         return torch.zeros((), device=q.device)
-    token_texts = [tokenizer.decode([int(i)]) for i in ids]
-    flags = RM.key_span_flags(token_texts)
-    if not any(flags):
-        return torch.zeros((), device=q.device)
-    recon_trunc = tokenizer.decode([int(i) for i in ids], skip_special_tokens=True)
+    recon_trunc = tokenizer.decode(ids.tolist(), skip_special_tokens=True)
 
     soft = reader(mem["h"], mem["mask"], q)
     embeds, labels, n_ans = T.build_student_inputs(
         model, tokenizer, soft, args.system_prompt,
         "Repeat the memory verbatim.", recon_trunc, inject_mode=args.inject_mode)
+    # 关键位掩码必须与 `build_student_inputs` **用同一次分词**（否则长度差一两个
+    # token，掩码就会错位，损失监督到错的位置上）。
+    ans_ids = tokenizer(recon_trunc, return_tensors="pt",
+                        add_special_tokens=False)["input_ids"][0].tolist()
+    flags = RM.key_span_flags([tokenizer.decode([int(i)]) for i in ans_ids])
+    flags.append(False)                      # EOS 不是事实关键位
+    if not any(flags):
+        return torch.zeros((), device=q.device)
     # labels 覆盖"答案 token + EOS"；把非关键位抹成 -100
     lab = labels.clone()
     if n_ans > 0:
