@@ -17,8 +17,8 @@ CKPT=${CKPT:?必须给目标 ckpt 路径}
 LIMIT=${LIMIT:-200}
 SMOKE_N=${SMOKE_N:-2}
 OUT=${OUT:-$B/results/chain_$(basename "$CKPT" .pt)}
-mkdir -p "$OUT" "$B/logs/2026-11-05"
-LOG=${LOG:-$B/logs/2026-11-05/chain_$(basename "$CKPT" .pt).log}
+mkdir -p "$OUT" "$B/logs/$(date +%F)"
+LOG=${LOG:-$B/logs/$(date +%F)/chain_$(basename "$CKPT" .pt).log}
 exec > >(tee -a "$LOG") 2>&1
 say() { echo "[chain $(date '+%F %T')] $*"; }
 
