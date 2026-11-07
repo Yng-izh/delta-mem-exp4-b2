@@ -1,312 +1,0 @@
-[train_arm] OUT=/data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt MAX_UNIT=8 COV=0 LEX_HEAD=0 SPLIT=0 STEPS=1000
-[cfg] stage=a m=4 layer=18 inner=1024 heads=8 bottleneck=512 max_unit_tokens=8 lr=0.0002 accum=4 kl=1.0 recon=0.5 readout=mixed teacher=gold recon_lex=1 alpha_max=0.5 cov=0.0(targets=4) lex_skip=True smoke=False dry_run=False
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 38.0G
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:01<08:00,  1.21s/it]Loading weights:   2%|▏         | 9/398 [00:01<00:42,  9.12it/s]Loading weights:   4%|▍         | 16/398 [00:01<00:22, 16.74it/s]Loading weights:   8%|▊         | 31/398 [00:01<00:09, 37.07it/s]Loading weights:  12%|█▏        | 47/398 [00:01<00:06, 58.47it/s]Loading weights:  15%|█▍        | 59/398 [00:01<00:05, 67.14it/s]Loading weights:  18%|█▊        | 70/398 [00:02<00:06, 53.93it/s]Loading weights:  20%|█▉        | 79/398 [00:02<00:05, 56.89it/s]Loading weights:  22%|██▏       | 87/398 [00:02<00:07, 39.17it/s]Loading weights:  23%|██▎       | 93/398 [00:02<00:08, 34.48it/s]Loading weights:  26%|██▌       | 102/398 [00:02<00:07, 41.16it/s]Loading weights:  27%|██▋       | 108/398 [00:03<00:07, 36.26it/s]Loading weights:  28%|██▊       | 113/398 [00:03<00:07, 38.27it/s]Loading weights:  30%|██▉       | 118/398 [00:03<00:09, 29.96it/s]Loading weights:  31%|███       | 124/398 [00:03<00:08, 31.62it/s]Loading weights:  33%|███▎      | 130/398 [00:03<00:07, 36.25it/s]Loading weights:  37%|███▋      | 147/398 [00:03<00:04, 60.48it/s]Loading weights:  41%|████      | 163/398 [00:04<00:02, 81.45it/s]Loading weights:  45%|████▌     | 180/398 [00:04<00:02, 98.82it/s]Loading weights:  49%|████▉     | 196/398 [00:04<00:01, 113.15it/s]Loading weights:  53%|█████▎    | 212/398 [00:04<00:01, 124.80it/s]Loading weights:  57%|█████▋    | 226/398 [00:04<00:01, 125.28it/s]Loading weights:  61%|██████    | 243/398 [00:04<00:01, 135.29it/s]Loading weights:  65%|██████▍   | 258/398 [00:05<00:02, 60.43it/s] Loading weights:  68%|██████▊   | 269/398 [00:05<00:02, 62.99it/s]Loading weights:  70%|███████   | 279/398 [00:05<00:01, 67.14it/s]Loading weights:  73%|███████▎  | 290/398 [00:05<00:01, 73.63it/s]Loading weights:  76%|███████▌  | 302/398 [00:05<00:01, 81.36it/s]Loading weights:  80%|████████  | 319/398 [00:05<00:00, 100.43it/s]Loading weights:  84%|████████▎ | 333/398 [00:05<00:00, 106.25it/s]Loading weights:  89%|████████▉ | 356/398 [00:06<00:00, 132.34it/s]Loading weights:  94%|█████████▍| 376/398 [00:06<00:00, 145.57it/s]Loading weights:  98%|█████████▊| 392/398 [00:06<00:00, 109.64it/s]Loading weights: 100%|██████████| 398/398 [00:06<00:00, 61.98it/s] 
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-/data/zhangjiayang/yyz3/delta-mem-exp4/train_latent_memory.py:1657: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-  ckpt = torch.load(path, map_location="cpu")
-[adapter] 校验通过：324/324 个张量与模型参数一一对应
-[freeze] 冻结参数 4027.9M（Delta 写入同时关闭）
-[bridge] 软 token 目标范数 = 真实 embedding 每向量范数 1.0873（可学习，夹在 [0.25, 4.0] 倍）；h0 直通 lex_skip=True α0=0.050（上限 0.50）
-[router] 已载入阶段一权重 /data/zhangjiayang/yyz3/ckpt/router_stage1_8slot.pt (missing=0, unexpected=0)
-[router] 已冻结：阶段二只训 Compressor + Bridge
-[router] LatentRouter 启用：d_key=256 τ0=0.0685 addr_weight=1.0
-[params] 可训练 26.702M (compressor=12.077M, bridge=2.630M, router=11.996M)
-[data] /data/zhangjiayang/yyz3/synth/hotpot_train_10k.jsonl: train=9997 val=120 hops={2: 9997} 平均记忆单元=23.6 槽位中位=23 max=108
-[data] 例：units=["Arthur's Magazine (1844–1846) was an American literary periodical published in Philadelphia in the 19th century.", 'Edited by T.S. Arthur, it featured work by Edgar A. Poe, J.H. Ingraham, Sarah Josepha Hale, Thomas G. Spear, and others.', 'In May 1846 it was merged into "Godey\'s Lady\'s Book".'] q="Which magazine was started first Arthur's Magazine or First for Women?" a="Arthur's Magazine"
-[transformers] The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
-[teacher-probe] teacher 自由生成 acc：memory(全量)=0.5625 gold-only=0.625 (n=16，其中 0 条找不到证据已退回 full)
-[readout] mode=mixed：前 2499/4998 个优化步走金标（预热），之后 mixed 以 0.50 概率走 router 自选分布；teacher_scope=gold recon_lex=1
-[pack] kl_weight>0：teacher 会按同一套打包规则一起前向（答案位置对齐）
-[pack] 每 4 条样本合成一次 4B 前反向（修 GPU 空转）
-  [eval@0] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
-  [eval@0] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
-  [eval@0] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='New York'
-  [eval@0] ✗ q='Where is the company that Sachin Warrier worked for as a software engineer headquartered?' gold='Mumbai' pred='Unknown'
-  [eval@0] ✗ q='A medieval fortress in Dirleton, East Lothian, Scotland borders on the south side of what coastal area?' gold='Yellowcraig' pred='The coastal area is the **East Lothian coast**.'
-  [eval@0] ✗ q='What type of forum did a former Soviet statesman initiate?' gold='Organizations could come together to address global issues' pred='Peace Nobel forum'
-  [eval@0] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='The provided evidence does not contain a clear, verifiable y'
-  [eval@0] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
-  [eval@0] ✓ q='Are both Cypress and Ajuga genera?' gold='no' pred='No'
-  [eval@0] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?' gold='Adeline Virginia Woolf' pred='Virginia Woolf was born earlier than Emma Bull.'
-  [eval@0] ✗ q='What was the Roud Folk Song Index of the nursery rhyme inspiring What Are Little Girls Made Of?' gold='821' pred='5'
-  [eval@0] ✓ q='What is the name of the singer who\'s song was released as the lead single from the album "Confessions", and that had popular song stuck behind for eight consecutive weeks?' gold='Usher' pred='Usher'
-  [eval@0] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='The 2017–18 Wigan Athletic F.C. season'
-  [eval@0] ✗ q='What is the inhabitant of the city where  122nd SS-Standarte was formed in2014' gold='276,170 inhabitants' pred='The 122nd SS-Standarte was not formed in 2'
-  [eval@0] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no known 1996 loose adaptation of William Shakespea'
-  [eval@0] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?' gold='Apalachees' pred='The evidence provided does not clearly identify the specific'
-  [eval@0] ✓ q='What nationality were social anthropologists Alfred Gell and Edmund Leach?' gold='British' pred='British'
-  [eval@0] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='The county seat of Sullivan County, where East Lempster, New'
-  [eval@0] ✓ q='What was the name of a woman from the book titled "Their Lives: The Women Targeted by the Clinton Machine " and was also a former white house intern?' gold='Monica Lewinsky' pred='Monica Lewinsky'
-  [eval@0] ✓ q='What occupation do Chris Menges and Aram Avakian share?' gold='director' pred='director'
-  [eval@0] ✗ q='Which American film director hosted the 18th Independent Spirit Awards in 2002?' gold='John Waters' pred='There is no evidence in the provided text indicating which A'
-  [eval@0] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrative region to China based?' gold='Beijing' pred='Rabat'
-  [eval@0] ✗ q='Where did the descendants of the group of black Indians associated with the Seminole people settle?' gold='Coahuila, Mexico' pred='Florida and Oklahoma'
-  [eval@0] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?' gold='North Avenue at Techwood Drive' pred='Atlanta, Georgia'
-  [eval@0] ✗ q='Over how many centuries were the "dwelling place of the dead" built?' gold='three centuries' pred='The evidence does not specify the number of centuries over w'
-  [eval@0] ✗ q='What major truck road is located in Backford Cross?' gold='The A41' pred='None of the provided evidence clearly identifies a major tru'
-  [eval@0] ✓ q='In which role did Caroline Carver played in a 1999 Hallmark Entertainment made-for-TV fantasy movie?' gold='Princess Jessica' pred='Princess Jessica'
-  [eval@0] ✗ q="What's the name of the fantasy film starring Sarah Bolger, featuring a New England family who discover magical creatures around their estate?" gold='The Spiderwick Chronicles' pred='The name of the fantasy film is *The Wick Chronicles*.'
-  [eval@0] ✗ q='Maxeda has been owned since 2004 by which American multinational equity firm?' gold='KKR & Co' pred='The evidence provided does not contain accurate or coherent '
-  [eval@0] ✗ q='Where is the Bubblegum Alley, that is similar to Gum Wall, located in California?' gold='San Luis Obispo, California' pred='Luis San Gum California'
-  [eval@0] ✗ q="Which board game was published most recently, Pirate's Cove or Catan?" gold="Pirate's Cove" pred="Pirate's Cove was published most recently."
-  [eval@0] ✗ q='Which Eminem album included vocals from a singer who had an album titled "Unapologetic"?' gold='"The Marshall Mathers LP 2"' pred='"Unapologetic" is an album by Beyoncé, not a singer'
-  [eval@0] ✓ q='This American crime film set in South Los Angeles was written and directed by the same director and writer of screenwriter of "Street Kings", "End of Watch", "Sabotage", "Fury" and what other film?' gold='Suicide Squad' pred='Suicide Squad'
-  [eval@0] ✗ q='SuperMansion starred the actress who had a recurring role as whom on Workaholics?' gold='Jillian Belk' pred='None of the provided evidence mentions SuperMansion or a con'
-  [eval@0] ✗ q='Both Truth in Science and Discovery embrace what campaign?' gold='"Teach the Controversy" campaign' pred='Intelligent Design campaign'
-  [eval@0] ✗ q='What is the name of the Isles who were led by Aonghus Mór and covered a total land area of over 8300 km2?' gold='Kingdom of the Isles' pred='The name of the Isles who were led by Aonghus Mór and covere'
-  [eval@0] ✗ q='Which song was behind the third single on the album  "A Lot About Livin\' (And a Little \'bout Love)" for two weeks on the country charts?' gold='"We\'ll Burn That Bridge"' pred='"Love\'s a Battlefield"'
-  [eval@0] ✓ q='What football club plays in the area between the old tool gates: Brook Bar and Trafford bar?' gold='Manchester United' pred='Manchester United'
-  [eval@0] ✗ q='Who held the record for the longest service in the Australian Parliament for a woman, and was surpassed by  a former Australian politician who was the 29th Speaker of the House of Representatives?' gold='Kathryn Jean Martin' pred='Kathy Sullivan'
-  [eval@0] ✗ q='Which man who presented the Australia 2022 FIFA World Cup bid was born on October 22, 1930?' gold='Frank Lowy' pred='None of the listed individuals match the birth date of Octob'
-[eval@0] pair-acc=9/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval] step=0 full-match=0.225 (n=40)
-[grad-group] step=1 queries=0.000e+00 attn=0.000e+00 input_proj=0.000e+00 output_proj=0.000e+00 lex_scorer=0.000e+00 bridge=1.500e+05
-[grad][warn] step=0 裁剪前总范数 1.500e+05（comp=0.000e+00 bridge=1.500e+05 router=0.000e+00）远超 grad_clip=1.0，coef=6.67e-06；若长期如此，有效学习率实际上由这条病态分支决定
-  [eval@0] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
-  [eval@0] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
-  [eval@0] ✓ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='New York City'
-  [eval@0] ✗ q='Where is the company that Sachin Warrier worked for as a software engineer headquartered?' gold='Mumbai' pred='Unknown'
-  [eval@0] ✗ q='A medieval fortress in Dirleton, East Lothian, Scotland borders on the south side of what coastal area?' gold='Yellowcraig' pred='The coastal area is the **North Sea**.'
-  [eval@0] ✗ q='What type of forum did a former Soviet statesman initiate?' gold='Organizations could come together to address global issues' pred='Nobel Peace Forum'
-  [eval@0] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='The evidence provided is fragmented, contains errors, and do'
-  [eval@0] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
-  [eval@0] ✓ q='Are both Cypress and Ajuga genera?' gold='no' pred='No'
-  [eval@0] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?' gold='Adeline Virginia Woolf' pred='Virginia Woolf was born earlier than Emma Bull.'
-  [eval@0] ✗ q='What was the Roud Folk Song Index of the nursery rhyme inspiring What Are Little Girls Made Of?' gold='821' pred='2'
-  [eval@0] ✗ q='What is the name of the singer who\'s song was released as the lead single from the album "Confessions", and that had popular song stuck behind for eight consecutive weeks?' gold='Usher' pred='Justin Timberlake'
-  [eval@0] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='The 2017–18 Wigan Athletic F.C. season'
-  [eval@0] ✗ q='What is the inhabitant of the city where  122nd SS-Standarte was formed in2014' gold='276,170 inhabitants' pred='The 122nd SS-Standarte was not formed in 2'
-  [eval@0] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no known 1996 loose adaptation of William Shakespea'
-  [eval@0] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?' gold='Apalachees' pred='The evidence provided does not clearly identify the specific'
-  [eval@0] ✓ q='What nationality were social anthropologists Alfred Gell and Edmund Leach?' gold='British' pred='British'
-  [eval@0] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='The county seat of Sullivan County, where East Lempster, New'
-  [eval@0] ✓ q='What was the name of a woman from the book titled "Their Lives: The Women Targeted by the Clinton Machine " and was also a former white house intern?' gold='Monica Lewinsky' pred='Monica Lewinsky'
-  [eval@0] ✓ q='What occupation do Chris Menges and Aram Avakian share?' gold='director' pred='director'
-  [eval@0] ✗ q='Which American film director hosted the 18th Independent Spirit Awards in 2002?' gold='John Waters' pred='The provided evidence does not contain information about an '
-  [eval@0] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrative region to China based?' gold='Beijing' pred='Rabat'
-  [eval@0] ✗ q='Where did the descendants of the group of black Indians associated with the Seminole people settle?' gold='Coahuila, Mexico' pred='Florida and Oklahoma'
-  [eval@0] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?' gold='North Avenue at Techwood Drive' pred='Atlanta, Georgia'
-  [eval@0] ✗ q='Over how many centuries were the "dwelling place of the dead" built?' gold='three centuries' pred='The "dwelling place of the dead" was built over **three cent'
-  [eval@0] ✗ q='What major truck road is located in Backford Cross?' gold='The A41' pred='None of the provided evidence clearly identifies a major tru'
-  [eval@0] ✓ q='In which role did Caroline Carver played in a 1999 Hallmark Entertainment made-for-TV fantasy movie?' gold='Princess Jessica' pred='Princess Jessica'
-  [eval@0] ✗ q="What's the name of the fantasy film starring Sarah Bolger, featuring a New England family who discover magical creatures around their estate?" gold='The Spiderwick Chronicles' pred='The name of the fantasy film is *The Wick Chronicles*.'
-  [eval@0] ✗ q='Maxeda has been owned since 2004 by which American multinational equity firm?' gold='KKR & Co' pred='The evidence provided contains errors and inconsistencies, s'
-  [eval@0] ✗ q='Where is the Bubblegum Alley, that is similar to Gum Wall, located in California?' gold='San Luis Obispo, California' pred='Luis San Gum, California'
-  [eval@0] ✗ q="Which board game was published most recently, Pirate's Cove or Catan?" gold="Pirate's Cove" pred="Pirate's Cove was published most recently."
-  [eval@0] ✗ q='Which Eminem album included vocals from a singer who had an album titled "Unapologetic"?' gold='"The Marshall Mathers LP 2"' pred='"Unapologetic" is an album by Beyoncé, not a singer'
-  [eval@0] ✓ q='This American crime film set in South Los Angeles was written and directed by the same director and writer of screenwriter of "Street Kings", "End of Watch", "Sabotage", "Fury" and what other film?' gold='Suicide Squad' pred='Suicide Squad'
-  [eval@0] ✗ q='SuperMansion starred the actress who had a recurring role as whom on Workaholics?' gold='Jillian Belk' pred='None of the provided evidence mentions SuperMansion or a con'
-  [eval@0] ✗ q='Both Truth in Science and Discovery embrace what campaign?' gold='"Teach the Controversy" campaign' pred='Intelligent Design campaign'
-  [eval@0] ✗ q='What is the name of the Isles who were led by Aonghus Mór and covered a total land area of over 8300 km2?' gold='Kingdom of the Isles' pred='The Isles led by Aonghus Mór and covering a total land area '
-  [eval@0] ✗ q='Which song was behind the third single on the album  "A Lot About Livin\' (And a Little \'bout Love)" for two weeks on the country charts?' gold='"We\'ll Burn That Bridge"' pred='"Love\'s a Battlefield"'
-  [eval@0] ✓ q='What football club plays in the area between the old tool gates: Brook Bar and Trafford bar?' gold='Manchester United' pred='Manchester United'
-  [eval@0] ✗ q='Who held the record for the longest service in the Australian Parliament for a woman, and was surpassed by  a former Australian politician who was the 29th Speaker of the House of Representatives?' gold='Kathryn Jean Martin' pred='Kathryn Sullivan'
-  [eval@0] ✗ q='Which man who presented the Australia 2022 FIFA World Cup bid was born on October 22, 1930?' gold='Frank Lowy' pred='None of the listed individuals match the birth date of Octob'
-[eval@0] pair-acc=9/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval] step=0 full-match=0.225 (n=40) gnorm_comp=0.000e+00 gnorm_bridge=1.500e+05 gnorm_router=0.000e+00
-[grad][warn] step=1 裁剪前总范数 1.200e+03（comp=nan bridge=nan router=nan）远超 grad_clip=1.0，coef=8.33e-04；若长期如此，有效学习率实际上由这条病态分支决定
-[step 10] loss_qa=4.0938 loss_kl=2.1533 loss_addr=2.4334 soft_tokens=79 compress=0.535885 gnorm_comp=5.799e-01 gnorm_bridge=7.166e+00 gnorm_router=0.000e+00 gnorm_pre=7.189e+00 clip_coef=1.39e-01 readout=router:0/40(0%) full=0/1 peakmem=17500MiB (150s)
-[step 20] loss_qa=5.3750 loss_kl=4.2425 loss_addr=3.8740 soft_tokens=42 compress=0.549389 gnorm_comp=7.018e-01 gnorm_bridge=7.989e+00 gnorm_router=0.000e+00 gnorm_pre=8.019e+00 clip_coef=1.25e-01 readout=router:0/80(0%) full=0/1 peakmem=17500MiB (188s)
-[step 30] loss_qa=2.7344 loss_kl=1.5366 loss_addr=3.1272 soft_tokens=46 compress=0.537181 gnorm_comp=3.892e-01 gnorm_bridge=5.268e+00 gnorm_router=0.000e+00 gnorm_pre=5.283e+00 clip_coef=1.89e-01 readout=router:0/120(0%) full=0/1 peakmem=19108MiB (225s)
-[step 40] loss_qa=3.7969 loss_kl=3.0062 loss_addr=3.5260 soft_tokens=54 compress=0.538389 gnorm_comp=7.164e+00 gnorm_bridge=1.312e+01 gnorm_router=0.000e+00 gnorm_pre=1.495e+01 clip_coef=6.69e-02 readout=router:0/160(0%) full=0/1 peakmem=19108MiB (262s)
-[step 50] loss_qa=2.5469 loss_kl=2.3635 loss_addr=2.3973 soft_tokens=54 compress=0.546858 gnorm_comp=3.962e-02 gnorm_bridge=4.774e+00 gnorm_router=0.000e+00 gnorm_pre=4.774e+00 clip_coef=2.09e-01 readout=router:0/200(0%) full=0/1 peakmem=19108MiB (299s)
-[step 60] loss_qa=2.1562 loss_kl=1.1080 loss_addr=2.9587 soft_tokens=50 compress=0.537428 gnorm_comp=1.488e-02 gnorm_bridge=9.564e-01 gnorm_router=0.000e+00 gnorm_pre=9.565e-01 clip_coef=1.00e+00 readout=router:0/240(0%) full=0/1 peakmem=19257MiB (337s)
-[step 70] loss_qa=2.6250 loss_kl=2.3347 loss_addr=3.6459 soft_tokens=62 compress=0.54409 gnorm_comp=9.408e-02 gnorm_bridge=3.085e+00 gnorm_router=0.000e+00 gnorm_pre=3.086e+00 clip_coef=3.24e-01 readout=router:0/280(0%) full=0/1 peakmem=19257MiB (375s)
-[step 80] loss_qa=3.1406 loss_kl=1.7322 loss_addr=2.9245 soft_tokens=58 compress=0.560209 gnorm_comp=6.527e-02 gnorm_bridge=2.456e+00 gnorm_router=0.000e+00 gnorm_pre=2.457e+00 clip_coef=4.07e-01 readout=router:0/320(0%) full=0/1 peakmem=19257MiB (414s)
-[step 90] loss_qa=5.0312 loss_kl=2.1004 loss_addr=4.2731 soft_tokens=104 compress=0.549815 gnorm_comp=6.196e-02 gnorm_bridge=3.007e+00 gnorm_router=0.000e+00 gnorm_pre=3.008e+00 clip_coef=3.32e-01 readout=router:0/360(0%) full=0/1 peakmem=19257MiB (453s)
-[ckpt] step 100 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 100] loss_qa=5.3125 loss_kl=3.8391 loss_addr=3.6076 soft_tokens=70 compress=0.53405 gnorm_comp=1.206e-01 gnorm_bridge=4.986e+00 gnorm_router=0.000e+00 gnorm_pre=4.988e+00 clip_coef=2.00e-01 readout=router:0/400(0%) full=0/1 peakmem=19257MiB (492s)
-[step 110] loss_qa=5.0938 loss_kl=3.0706 loss_addr=2.8886 soft_tokens=104 compress=0.548673 gnorm_comp=2.496e-01 gnorm_bridge=1.168e+01 gnorm_router=0.000e+00 gnorm_pre=1.168e+01 clip_coef=8.56e-02 readout=router:0/440(0%) full=0/1 peakmem=19257MiB (529s)
-[step 120] loss_qa=4.4375 loss_kl=1.3482 loss_addr=2.0300 soft_tokens=46 compress=0.535585 gnorm_comp=9.520e-02 gnorm_bridge=2.442e+00 gnorm_router=0.000e+00 gnorm_pre=2.444e+00 clip_coef=4.09e-01 readout=router:0/480(0%) full=0/1 peakmem=19257MiB (568s)
-[step 130] loss_qa=7.7500 loss_kl=4.6604 loss_addr=2.4232 soft_tokens=94 compress=0.541717 gnorm_comp=2.171e-01 gnorm_bridge=1.681e+01 gnorm_router=0.000e+00 gnorm_pre=1.681e+01 clip_coef=5.95e-02 readout=router:0/520(0%) full=0/1 peakmem=19257MiB (607s)
-[step 140] loss_qa=1.9688 loss_kl=1.0698 loss_addr=3.4023 soft_tokens=95 compress=0.542797 gnorm_comp=1.068e-02 gnorm_bridge=2.204e+00 gnorm_router=0.000e+00 gnorm_pre=2.204e+00 clip_coef=4.54e-01 readout=router:0/560(0%) full=0/1 peakmem=19257MiB (647s)
-[step 150] loss_qa=1.8984 loss_kl=2.1873 loss_addr=2.4742 soft_tokens=62 compress=0.526316 gnorm_comp=1.972e-01 gnorm_bridge=9.744e+00 gnorm_router=0.000e+00 gnorm_pre=9.746e+00 clip_coef=1.03e-01 readout=router:0/600(0%) full=0/1 peakmem=19257MiB (687s)
-[step 160] loss_qa=2.5938 loss_kl=1.3619 loss_addr=1.8901 soft_tokens=42 compress=0.55102 gnorm_comp=2.028e-02 gnorm_bridge=8.166e+00 gnorm_router=0.000e+00 gnorm_pre=8.166e+00 clip_coef=1.22e-01 readout=router:0/640(0%) full=0/1 peakmem=19257MiB (726s)
-[step 170] loss_qa=1.5938 loss_kl=1.6676 loss_addr=2.7358 soft_tokens=46 compress=0.550044 gnorm_comp=1.791e-02 gnorm_bridge=4.126e+00 gnorm_router=0.000e+00 gnorm_pre=4.126e+00 clip_coef=2.42e-01 readout=router:0/680(0%) full=0/1 peakmem=19257MiB (764s)
-[step 180] loss_qa=2.3594 loss_kl=1.9362 loss_addr=2.5555 soft_tokens=58 compress=0.546112 gnorm_comp=2.759e-02 gnorm_bridge=5.695e+00 gnorm_router=0.000e+00 gnorm_pre=5.696e+00 clip_coef=1.76e-01 readout=router:0/720(0%) full=0/1 peakmem=19257MiB (803s)
-[step 190] loss_qa=2.9219 loss_kl=3.6869 loss_addr=1.7754 soft_tokens=78 compress=0.54485 gnorm_comp=2.463e-02 gnorm_bridge=8.726e+00 gnorm_router=0.000e+00 gnorm_pre=8.726e+00 clip_coef=1.15e-01 readout=router:0/760(0%) full=0/1 peakmem=19257MiB (842s)
-[ckpt] step 200 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 200] loss_qa=3.0938 loss_kl=2.5805 loss_addr=3.9114 soft_tokens=46 compress=0.544715 gnorm_comp=1.514e-02 gnorm_bridge=1.662e+00 gnorm_router=0.000e+00 gnorm_pre=1.662e+00 clip_coef=6.02e-01 readout=router:0/800(0%) full=0/1 peakmem=19257MiB (880s)
-[step 210] loss_qa=3.5312 loss_kl=1.3541 loss_addr=3.4496 soft_tokens=66 compress=0.549495 gnorm_comp=1.244e-02 gnorm_bridge=2.939e+00 gnorm_router=0.000e+00 gnorm_pre=2.939e+00 clip_coef=3.40e-01 readout=router:0/840(0%) full=0/1 peakmem=19257MiB (920s)
-[step 220] loss_qa=2.6094 loss_kl=1.2354 loss_addr=4.0286 soft_tokens=38 compress=0.548549 gnorm_comp=3.910e-02 gnorm_bridge=6.235e+00 gnorm_router=0.000e+00 gnorm_pre=6.235e+00 clip_coef=1.60e-01 readout=router:0/880(0%) full=0/1 peakmem=19257MiB (957s)
-[step 230] loss_qa=4.0625 loss_kl=4.5355 loss_addr=3.6522 soft_tokens=50 compress=0.552577 gnorm_comp=8.495e-02 gnorm_bridge=4.437e+00 gnorm_router=0.000e+00 gnorm_pre=4.438e+00 clip_coef=2.25e-01 readout=router:0/920(0%) full=0/1 peakmem=19257MiB (995s)
-[step 240] loss_qa=1.3984 loss_kl=0.5103 loss_addr=1.8960 soft_tokens=91 compress=0.543517 gnorm_comp=1.482e-02 gnorm_bridge=2.887e+00 gnorm_router=0.000e+00 gnorm_pre=2.887e+00 clip_coef=3.46e-01 readout=router:0/960(0%) full=0/1 peakmem=19257MiB (1036s)
-[step 250] loss_qa=1.1719 loss_kl=0.2307 loss_addr=2.1385 soft_tokens=67 compress=0.549645 gnorm_comp=7.888e-03 gnorm_bridge=1.343e+00 gnorm_router=0.000e+00 gnorm_pre=1.343e+00 clip_coef=7.45e-01 readout=router:0/1000(0%) full=0/1 peakmem=19257MiB (1073s)
-[step 260] loss_qa=2.5625 loss_kl=1.2659 loss_addr=1.8180 soft_tokens=62 compress=0.554694 gnorm_comp=1.623e-01 gnorm_bridge=1.921e+01 gnorm_router=0.000e+00 gnorm_pre=1.921e+01 clip_coef=5.21e-02 readout=router:0/1040(0%) full=0/1 peakmem=19257MiB (1112s)
-[step 270] loss_qa=5.1562 loss_kl=5.3126 loss_addr=2.2065 soft_tokens=71 compress=0.544102 gnorm_comp=5.470e-01 gnorm_bridge=6.587e+01 gnorm_router=0.000e+00 gnorm_pre=6.587e+01 clip_coef=1.52e-02 readout=router:0/1080(0%) full=0/1 peakmem=19257MiB (1150s)
-[step 280] loss_qa=2.5312 loss_kl=1.3688 loss_addr=4.2422 soft_tokens=75 compress=0.53753 gnorm_comp=7.827e-02 gnorm_bridge=6.862e+00 gnorm_router=0.000e+00 gnorm_pre=6.862e+00 clip_coef=1.46e-01 readout=router:0/1120(0%) full=0/1 peakmem=19257MiB (1188s)
-[step 290] loss_qa=1.5469 loss_kl=1.4025 loss_addr=3.3270 soft_tokens=50 compress=0.54921 gnorm_comp=5.779e-02 gnorm_bridge=5.870e+00 gnorm_router=0.000e+00 gnorm_pre=5.871e+00 clip_coef=1.70e-01 readout=router:0/1160(0%) full=0/1 peakmem=19257MiB (1226s)
-[ckpt] step 300 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 300] loss_qa=7.2500 loss_kl=3.4660 loss_addr=2.8878 soft_tokens=50 compress=0.545004 gnorm_comp=9.360e-02 gnorm_bridge=8.141e+00 gnorm_router=0.000e+00 gnorm_pre=8.141e+00 clip_coef=1.23e-01 readout=router:0/1200(0%) full=0/1 peakmem=19257MiB (1266s)
-[step 310] loss_qa=1.5625 loss_kl=0.1679 loss_addr=3.8616 soft_tokens=42 compress=0.547945 gnorm_comp=7.702e-03 gnorm_bridge=2.149e+00 gnorm_router=0.000e+00 gnorm_pre=2.149e+00 clip_coef=4.65e-01 readout=router:0/1240(0%) full=0/1 peakmem=19257MiB (1306s)
-[step 320] loss_qa=1.7656 loss_kl=1.0489 loss_addr=3.7964 soft_tokens=132 compress=0.549495 gnorm_comp=8.156e-03 gnorm_bridge=1.845e+00 gnorm_router=0.000e+00 gnorm_pre=1.845e+00 clip_coef=5.42e-01 readout=router:0/1280(0%) full=0/1 peakmem=19257MiB (1344s)
-[step 330] loss_qa=1.7891 loss_kl=2.5175 loss_addr=3.5777 soft_tokens=38 compress=0.532637 gnorm_comp=1.024e-01 gnorm_bridge=1.270e+01 gnorm_router=0.000e+00 gnorm_pre=1.271e+01 clip_coef=7.87e-02 readout=router:0/1320(0%) full=0/1 peakmem=19257MiB (1383s)
-[step 340] loss_qa=1.6172 loss_kl=1.7504 loss_addr=3.8191 soft_tokens=42 compress=0.556 gnorm_comp=1.823e-02 gnorm_bridge=2.860e+00 gnorm_router=0.000e+00 gnorm_pre=2.860e+00 clip_coef=3.50e-01 readout=router:0/1360(0%) full=0/1 peakmem=19257MiB (1421s)
-[step 350] loss_qa=2.3438 loss_kl=2.1716 loss_addr=4.3228 soft_tokens=83 compress=0.547564 gnorm_comp=2.967e-02 gnorm_bridge=6.575e+00 gnorm_router=0.000e+00 gnorm_pre=6.575e+00 clip_coef=1.52e-01 readout=router:0/1400(0%) full=0/1 peakmem=19257MiB (1459s)
-[step 360] loss_qa=3.1875 loss_kl=2.5240 loss_addr=2.2779 soft_tokens=115 compress=0.543109 gnorm_comp=1.372e-02 gnorm_bridge=3.085e+00 gnorm_router=0.000e+00 gnorm_pre=3.085e+00 clip_coef=3.24e-01 readout=router:0/1440(0%) full=0/1 peakmem=19257MiB (1497s)
-[step 370] loss_qa=1.6875 loss_kl=1.2938 loss_addr=1.7645 soft_tokens=63 compress=0.543276 gnorm_comp=4.368e-03 gnorm_bridge=2.068e+00 gnorm_router=0.000e+00 gnorm_pre=2.068e+00 clip_coef=4.84e-01 readout=router:0/1480(0%) full=0/1 peakmem=19257MiB (1536s)
-[step 380] loss_qa=0.7266 loss_kl=0.1117 loss_addr=2.4962 soft_tokens=94 compress=0.541732 gnorm_comp=5.678e-03 gnorm_bridge=1.061e+00 gnorm_router=0.000e+00 gnorm_pre=1.061e+00 clip_coef=9.42e-01 readout=router:0/1520(0%) full=0/1 peakmem=19257MiB (1574s)
-[step 390] loss_qa=1.0312 loss_kl=1.8697 loss_addr=3.6605 soft_tokens=30 compress=0.572133 gnorm_comp=2.160e-03 gnorm_bridge=9.618e-01 gnorm_router=0.000e+00 gnorm_pre=9.618e-01 clip_coef=1.00e+00 readout=router:0/1560(0%) full=0/1 peakmem=19257MiB (1611s)
-[ckpt] step 400 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 400] loss_qa=2.2031 loss_kl=1.8871 loss_addr=3.0680 soft_tokens=83 compress=0.542553 gnorm_comp=6.817e-03 gnorm_bridge=2.165e+00 gnorm_router=0.000e+00 gnorm_pre=2.165e+00 clip_coef=4.62e-01 readout=router:0/1600(0%) full=0/1 peakmem=19257MiB (1649s)
-[step 410] loss_qa=0.9141 loss_kl=0.5179 loss_addr=2.8331 soft_tokens=42 compress=0.555102 gnorm_comp=1.130e-02 gnorm_bridge=3.072e+00 gnorm_router=0.000e+00 gnorm_pre=3.072e+00 clip_coef=3.26e-01 readout=router:0/1640(0%) full=0/1 peakmem=19257MiB (1689s)
-[step 420] loss_qa=1.1719 loss_kl=0.6580 loss_addr=3.2792 soft_tokens=104 compress=0.549296 gnorm_comp=2.755e-03 gnorm_bridge=1.355e+00 gnorm_router=0.000e+00 gnorm_pre=1.355e+00 clip_coef=7.38e-01 readout=router:0/1680(0%) full=0/1 peakmem=19257MiB (1728s)
-[step 430] loss_qa=2.0781 loss_kl=1.5379 loss_addr=2.9331 soft_tokens=55 compress=0.53753 gnorm_comp=1.018e-02 gnorm_bridge=2.355e+00 gnorm_router=0.000e+00 gnorm_pre=2.355e+00 clip_coef=4.25e-01 readout=router:0/1720(0%) full=0/1 peakmem=19257MiB (1767s)
-[step 440] loss_qa=2.4375 loss_kl=1.5046 loss_addr=3.6433 soft_tokens=108 compress=0.534502 gnorm_comp=5.378e-03 gnorm_bridge=1.334e+00 gnorm_router=0.000e+00 gnorm_pre=1.334e+00 clip_coef=7.50e-01 readout=router:0/1760(0%) full=0/1 peakmem=19257MiB (1806s)
-[step 450] loss_qa=1.4766 loss_kl=1.1424 loss_addr=3.4425 soft_tokens=115 compress=0.542601 gnorm_comp=3.545e-03 gnorm_bridge=1.988e+00 gnorm_router=0.000e+00 gnorm_pre=1.988e+00 clip_coef=5.03e-01 readout=router:0/1800(0%) full=0/1 peakmem=19257MiB (1846s)
-[step 460] loss_qa=2.2188 loss_kl=1.0712 loss_addr=1.4255 soft_tokens=62 compress=0.546624 gnorm_comp=1.029e-02 gnorm_bridge=2.668e+00 gnorm_router=0.000e+00 gnorm_pre=2.668e+00 clip_coef=3.75e-01 readout=router:0/1840(0%) full=0/1 peakmem=19257MiB (1884s)
-[step 470] loss_qa=2.4219 loss_kl=3.1596 loss_addr=1.7001 soft_tokens=46 compress=0.541599 gnorm_comp=2.388e-02 gnorm_bridge=6.192e+00 gnorm_router=0.000e+00 gnorm_pre=6.192e+00 clip_coef=1.62e-01 readout=router:0/1880(0%) full=0/1 peakmem=19257MiB (1921s)
-[step 480] loss_qa=4.3125 loss_kl=2.0688 loss_addr=4.6774 soft_tokens=58 compress=0.553431 gnorm_comp=4.764e-03 gnorm_bridge=2.733e+00 gnorm_router=0.000e+00 gnorm_pre=2.733e+00 clip_coef=3.66e-01 readout=router:0/1920(0%) full=0/1 peakmem=19257MiB (1960s)
-[step 490] loss_qa=0.4531 loss_kl=1.0705 loss_addr=2.3043 soft_tokens=42 compress=0.556082 gnorm_comp=5.364e-03 gnorm_bridge=1.325e+00 gnorm_router=0.000e+00 gnorm_pre=1.325e+00 clip_coef=7.54e-01 readout=router:0/1960(0%) full=0/1 peakmem=19257MiB (1998s)
-[ckpt] step 500 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 500] loss_qa=4.6562 loss_kl=4.1186 loss_addr=2.9469 soft_tokens=62 compress=0.537037 gnorm_comp=5.972e-03 gnorm_bridge=2.784e+00 gnorm_router=0.000e+00 gnorm_pre=2.784e+00 clip_coef=3.59e-01 readout=router:0/2000(0%) full=0/1 peakmem=19257MiB (2038s)
-[grad-group] step=501 queries=6.190e-05 attn=2.561e-03 input_proj=2.308e-05 output_proj=3.675e-03 lex_scorer=0.000e+00 bridge=2.365e+00
-  [eval@500] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
-  [eval@500] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
-  [eval@500] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Columbia'
-  [eval@500] ✗ q='Where is the company that Sachin Warrier worked for as a software engineer headquartered?' gold='Mumbai' pred='Bengaluru'
-  [eval@500] ✗ q='A medieval fortress in Dirleton, East Lothian, Scotland borders on the south side of what coastal area?' gold='Yellowcraig' pred='Bayland coast'
-  [eval@500] ✗ q='What type of forum did a former Soviet statesman initiate?' gold='Organizations could come together to address global issues' pred='Nobel Peace Forum'
-  [eval@500] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='2001, Big 12 Conference'
-  [eval@500] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
-  [eval@500] ✓ q='Are both Cypress and Ajuga genera?' gold='no' pred='No'
-  [eval@500] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?' gold='Adeline Virginia Woolf' pred='Emma Bull'
-  [eval@500] ✗ q='What was the Roud Folk Song Index of the nursery rhyme inspiring What Are Little Girls Made Of?' gold='821' pred='2033'
-  [eval@500] ✓ q='What is the name of the singer who\'s song was released as the lead single from the album "Confessions", and that had popular song stuck behind for eight consecutive weeks?' gold='Usher' pred='Usher'
-  [eval@500] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
-  [eval@500] ✗ q='What is the inhabitant of the city where  122nd SS-Standarte was formed in2014' gold='276,170 inhabitants' pred='The evidence provided does not contain information about the'
-  [eval@500] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no 1996 loose adaptation of William Shakespeare\'s "'
-  [eval@500] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?' gold='Apalachees' pred='The evidence does not specify which tribe of indigenous peop'
-  [eval@500] ✓ q='What nationality were social anthropologists Alfred Gell and Edmund Leach?' gold='British' pred='British'
-  [eval@500] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred="Sullivan County's county seat is Northwood."
-  [eval@500] ✗ q='What was the name of a woman from the book titled "Their Lives: The Women Targeted by the Clinton Machine " and was also a former white house intern?' gold='Monica Lewinsky' pred='Paula Flowers'
-  [eval@500] ✗ q='What occupation do Chris Menges and Aram Avakian share?' gold='director' pred='film director'
-  [eval@500] ✓ q='Which American film director hosted the 18th Independent Spirit Awards in 2002?' gold='John Waters' pred='John Waters'
-  [eval@500] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrative region to China based?' gold='Beijing' pred='Rabat'
-  [eval@500] ✗ q='Where did the descendants of the group of black Indians associated with the Seminole people settle?' gold='Coahuila, Mexico' pred='Oklahoma and Florida'
-  [eval@500] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?' gold='North Avenue at Techwood Drive' pred='Atlanta, Georgia'
-  [eval@500] ✗ q='Over how many centuries were the "dwelling place of the dead" built?' gold='three centuries' pred='The evidence does not specify the number of centuries.'
-  [eval@500] ✗ q='What major truck road is located in Backford Cross?' gold='The A41' pred='None of the provided evidence mention a major truck road loc'
-  [eval@500] ✓ q='In which role did Caroline Carver played in a 1999 Hallmark Entertainment made-for-TV fantasy movie?' gold='Princess Jessica' pred='Princess Jessica'
-  [eval@500] ✗ q="What's the name of the fantasy film starring Sarah Bolger, featuring a New England family who discover magical creatures around their estate?" gold='The Spiderwick Chronicles' pred='The Spider Chronicles'
-  [eval@500] ✗ q='Maxeda has been owned since 2004 by which American multinational equity firm?' gold='KKR & Co' pred='Kohlberg Kravis Roberts'
-  [eval@500] ✓ q='Where is the Bubblegum Alley, that is similar to Gum Wall, located in California?' gold='San Luis Obispo, California' pred='San Luis Obispo, California'
-  [eval@500] ✗ q="Which board game was published most recently, Pirate's Cove or Catan?" gold="Pirate's Cove" pred='Catan'
-  [eval@500] ✗ q='Which Eminem album included vocals from a singer who had an album titled "Unapologetic"?' gold='"The Marshall Mathers LP 2"' pred='The Slim Shady LP'
-  [eval@500] ✓ q='This American crime film set in South Los Angeles was written and directed by the same director and writer of screenwriter of "Street Kings", "End of Watch", "Sabotage", "Fury" and what other film?' gold='Suicide Squad' pred='"Suicide Squad"'
-  [eval@500] ✗ q='SuperMansion starred the actress who had a recurring role as whom on Workaholics?' gold='Jillian Belk' pred='None of the provided evidence mentions "SuperMansion" or "Wo'
-  [eval@500] ✗ q='Both Truth in Science and Discovery embrace what campaign?' gold='"Teach the Controversy" campaign' pred='Intelligent Design campaign'
-  [eval@500] ✓ q='What is the name of the Isles who were led by Aonghus Mór and covered a total land area of over 8300 km2?' gold='Kingdom of the Isles' pred='Kingdom of the Isles'
-  [eval@500] ✗ q='Which song was behind the third single on the album  "A Lot About Livin\' (And a Little \'bout Love)" for two weeks on the country charts?' gold='"We\'ll Burn That Bridge"' pred='"Love\'s a Stranger"'
-  [eval@500] ✓ q='What football club plays in the area between the old tool gates: Brook Bar and Trafford bar?' gold='Manchester United' pred='Manchester United'
-  [eval@500] ✗ q='Who held the record for the longest service in the Australian Parliament for a woman, and was surpassed by  a former Australian politician who was the 29th Speaker of the House of Representatives?' gold='Kathryn Jean Martin' pred='Dorothy Sullivan'
-  [eval@500] ✗ q='Which man who presented the Australia 2022 FIFA World Cup bid was born on October 22, 1930?' gold='Frank Lowy' pred='No such person is mentioned in the evidence.'
-[eval@500] pair-acc=10/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval] step=500 full-match=0.25 (n=40) gnorm_comp=4.885e-03 gnorm_bridge=2.365e+00 gnorm_router=0.000e+00
-[step 510] loss_qa=1.2266 loss_kl=0.4730 loss_addr=2.6892 soft_tokens=54 compress=0.560801 gnorm_comp=3.564e-03 gnorm_bridge=8.921e-01 gnorm_router=0.000e+00 gnorm_pre=8.922e-01 clip_coef=1.00e+00 readout=router:0/2040(0%) full=0/1 peakmem=19257MiB (2126s)
-[step 520] loss_qa=1.9297 loss_kl=1.3951 loss_addr=2.3590 soft_tokens=120 compress=0.538606 gnorm_comp=1.211e-02 gnorm_bridge=4.147e+00 gnorm_router=0.000e+00 gnorm_pre=4.147e+00 clip_coef=2.41e-01 readout=router:0/2080(0%) full=0/1 peakmem=19257MiB (2165s)
-[step 530] loss_qa=2.1562 loss_kl=1.0984 loss_addr=3.5206 soft_tokens=67 compress=0.565476 gnorm_comp=6.214e-03 gnorm_bridge=1.690e+00 gnorm_router=0.000e+00 gnorm_pre=1.690e+00 clip_coef=5.92e-01 readout=router:0/2120(0%) full=0/1 peakmem=19257MiB (2205s)
-[step 540] loss_qa=1.7344 loss_kl=1.3312 loss_addr=2.7738 soft_tokens=50 compress=0.538462 gnorm_comp=1.395e-02 gnorm_bridge=3.701e+00 gnorm_router=0.000e+00 gnorm_pre=3.701e+00 clip_coef=2.70e-01 readout=router:0/2160(0%) full=0/1 peakmem=19257MiB (2244s)
-[step 550] loss_qa=2.4844 loss_kl=2.5548 loss_addr=4.1349 soft_tokens=125 compress=0.541586 gnorm_comp=1.569e-02 gnorm_bridge=3.521e+00 gnorm_router=0.000e+00 gnorm_pre=3.521e+00 clip_coef=2.84e-01 readout=router:0/2200(0%) full=0/1 peakmem=19257MiB (2282s)
-[step 560] loss_qa=2.8594 loss_kl=2.4336 loss_addr=3.0168 soft_tokens=79 compress=0.548905 gnorm_comp=1.788e-02 gnorm_bridge=6.843e+00 gnorm_router=0.000e+00 gnorm_pre=6.843e+00 clip_coef=1.46e-01 readout=router:0/2240(0%) full=0/1 peakmem=19257MiB (2319s)
-[step 570] loss_qa=2.0938 loss_kl=1.5397 loss_addr=3.4613 soft_tokens=54 compress=0.552301 gnorm_comp=9.581e-03 gnorm_bridge=3.104e+00 gnorm_router=0.000e+00 gnorm_pre=3.104e+00 clip_coef=3.22e-01 readout=router:0/2280(0%) full=0/1 peakmem=19257MiB (2357s)
-[step 580] loss_qa=1.7969 loss_kl=2.3534 loss_addr=2.4064 soft_tokens=50 compress=0.540779 gnorm_comp=1.874e-02 gnorm_bridge=4.047e+00 gnorm_router=0.000e+00 gnorm_pre=4.047e+00 clip_coef=2.47e-01 readout=router:0/2320(0%) full=0/1 peakmem=19257MiB (2394s)
-[step 590] loss_qa=2.3906 loss_kl=2.2888 loss_addr=3.3833 soft_tokens=54 compress=0.542017 gnorm_comp=2.403e-02 gnorm_bridge=5.975e+00 gnorm_router=0.000e+00 gnorm_pre=5.975e+00 clip_coef=1.67e-01 readout=router:0/2360(0%) full=0/1 peakmem=19257MiB (2431s)
-[ckpt] step 600 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 600] loss_qa=0.5156 loss_kl=0.2126 loss_addr=2.9738 soft_tokens=54 compress=0.545633 gnorm_comp=1.768e-02 gnorm_bridge=4.438e+00 gnorm_router=0.000e+00 gnorm_pre=4.438e+00 clip_coef=2.25e-01 readout=router:0/2400(0%) full=0/1 peakmem=19257MiB (2467s)
-[step 610] loss_qa=1.1328 loss_kl=1.6632 loss_addr=4.1278 soft_tokens=74 compress=0.540132 gnorm_comp=1.419e-02 gnorm_bridge=3.926e+00 gnorm_router=0.000e+00 gnorm_pre=3.926e+00 clip_coef=2.55e-01 readout=router:0/2440(0%) full=0/1 peakmem=19257MiB (2504s)
-[step 620] loss_qa=0.8438 loss_kl=0.3096 loss_addr=3.5385 soft_tokens=75 compress=0.566929 gnorm_comp=3.705e-03 gnorm_bridge=1.644e+00 gnorm_router=0.000e+00 gnorm_pre=1.644e+00 clip_coef=6.08e-01 readout=router:0/2480(0%) full=0/1 peakmem=19257MiB (2539s)
-[step 630] loss_qa=2.8125 loss_kl=1.9952 loss_addr=2.6225 soft_tokens=42 compress=0.538141 gnorm_comp=6.743e-03 gnorm_bridge=3.053e+00 gnorm_router=0.000e+00 gnorm_pre=3.053e+00 clip_coef=3.28e-01 readout=router:0/2520(0%) full=0/1 peakmem=19257MiB (2576s)
-[step 640] loss_qa=2.0781 loss_kl=2.0454 loss_addr=2.2259 soft_tokens=34 compress=0.561194 gnorm_comp=6.758e-03 gnorm_bridge=1.986e+00 gnorm_router=0.000e+00 gnorm_pre=1.986e+00 clip_coef=5.03e-01 readout=router:0/2560(0%) full=0/1 peakmem=19257MiB (2614s)
-[step 650] loss_qa=1.8828 loss_kl=1.4075 loss_addr=3.2569 soft_tokens=42 compress=0.560789 gnorm_comp=7.188e-03 gnorm_bridge=3.419e+00 gnorm_router=0.000e+00 gnorm_pre=3.419e+00 clip_coef=2.93e-01 readout=router:0/2600(0%) full=0/1 peakmem=19257MiB (2651s)
-[step 660] loss_qa=2.3594 loss_kl=3.0718 loss_addr=3.4945 soft_tokens=38 compress=0.549383 gnorm_comp=1.038e-02 gnorm_bridge=4.000e+00 gnorm_router=0.000e+00 gnorm_pre=4.000e+00 clip_coef=2.50e-01 readout=router:0/2640(0%) full=0/1 peakmem=19257MiB (2689s)
-[step 670] loss_qa=2.7500 loss_kl=2.4452 loss_addr=2.8136 soft_tokens=50 compress=0.549763 gnorm_comp=6.882e-02 gnorm_bridge=2.985e+01 gnorm_router=0.000e+00 gnorm_pre=2.985e+01 clip_coef=3.35e-02 readout=router:0/2680(0%) full=0/1 peakmem=19257MiB (2726s)
-[step 680] loss_qa=1.8828 loss_kl=1.3258 loss_addr=3.4650 soft_tokens=83 compress=0.542149 gnorm_comp=1.222e-02 gnorm_bridge=2.776e+00 gnorm_router=0.000e+00 gnorm_pre=2.776e+00 clip_coef=3.60e-01 readout=router:0/2720(0%) full=0/1 peakmem=19257MiB (2763s)
-[step 690] loss_qa=2.2031 loss_kl=1.7456 loss_addr=2.7918 soft_tokens=74 compress=0.561086 gnorm_comp=4.450e-02 gnorm_bridge=7.352e+00 gnorm_router=0.000e+00 gnorm_pre=7.352e+00 clip_coef=1.36e-01 readout=router:0/2760(0%) full=0/1 peakmem=19257MiB (2800s)
-[ckpt] step 700 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 700] loss_qa=1.9375 loss_kl=1.9308 loss_addr=3.2096 soft_tokens=79 compress=0.549558 gnorm_comp=1.112e-02 gnorm_bridge=1.990e+00 gnorm_router=0.000e+00 gnorm_pre=1.990e+00 clip_coef=5.02e-01 readout=router:0/2800(0%) full=0/1 peakmem=19257MiB (2838s)
-[step 710] loss_qa=2.4219 loss_kl=2.4290 loss_addr=3.1263 soft_tokens=42 compress=0.545775 gnorm_comp=5.369e-02 gnorm_bridge=4.759e+00 gnorm_router=0.000e+00 gnorm_pre=4.759e+00 clip_coef=2.10e-01 readout=router:0/2840(0%) full=0/1 peakmem=19257MiB (2877s)
-[step 720] loss_qa=0.4219 loss_kl=0.3714 loss_addr=1.5201 soft_tokens=66 compress=0.544601 gnorm_comp=1.050e-01 gnorm_bridge=2.204e+00 gnorm_router=0.000e+00 gnorm_pre=2.206e+00 clip_coef=4.53e-01 readout=router:0/2880(0%) full=0/1 peakmem=19257MiB (2913s)
-[step 730] loss_qa=1.1328 loss_kl=0.8194 loss_addr=3.9020 soft_tokens=54 compress=0.549242 gnorm_comp=6.193e-02 gnorm_bridge=1.582e+00 gnorm_router=0.000e+00 gnorm_pre=1.583e+00 clip_coef=6.32e-01 readout=router:0/2920(0%) full=0/1 peakmem=19257MiB (2951s)
-[step 740] loss_qa=1.0859 loss_kl=1.1978 loss_addr=3.6640 soft_tokens=46 compress=0.548482 gnorm_comp=9.021e-03 gnorm_bridge=3.028e+00 gnorm_router=0.000e+00 gnorm_pre=3.028e+00 clip_coef=3.30e-01 readout=router:0/2960(0%) full=0/1 peakmem=19257MiB (2988s)
-[step 750] loss_qa=2.2500 loss_kl=0.6424 loss_addr=2.7699 soft_tokens=58 compress=0.55313 gnorm_comp=9.791e-03 gnorm_bridge=2.370e+00 gnorm_router=0.000e+00 gnorm_pre=2.370e+00 clip_coef=4.22e-01 readout=router:0/3000(0%) full=0/1 peakmem=19257MiB (3025s)
-[step 760] loss_qa=2.6719 loss_kl=1.9697 loss_addr=3.1839 soft_tokens=46 compress=0.548948 gnorm_comp=1.420e-02 gnorm_bridge=4.365e+00 gnorm_router=0.000e+00 gnorm_pre=4.365e+00 clip_coef=2.29e-01 readout=router:0/3040(0%) full=0/1 peakmem=19257MiB (3063s)
-[step 770] loss_qa=0.3223 loss_kl=0.3736 loss_addr=2.5815 soft_tokens=58 compress=0.534789 gnorm_comp=7.984e-03 gnorm_bridge=1.037e+00 gnorm_router=0.000e+00 gnorm_pre=1.037e+00 clip_coef=9.64e-01 readout=router:0/3080(0%) full=0/1 peakmem=19257MiB (3099s)
-[step 780] loss_qa=0.9375 loss_kl=1.7677 loss_addr=2.9507 soft_tokens=42 compress=0.569892 gnorm_comp=1.928e-02 gnorm_bridge=4.180e+00 gnorm_router=0.000e+00 gnorm_pre=4.180e+00 clip_coef=2.39e-01 readout=router:0/3120(0%) full=0/1 peakmem=19257MiB (3134s)
-[step 790] loss_qa=1.7969 loss_kl=1.5494 loss_addr=3.6280 soft_tokens=50 compress=0.533589 gnorm_comp=3.223e-02 gnorm_bridge=5.542e+00 gnorm_router=0.000e+00 gnorm_pre=5.542e+00 clip_coef=1.80e-01 readout=router:0/3160(0%) full=0/1 peakmem=19257MiB (3172s)
-[ckpt] step 800 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 800] loss_qa=1.7422 loss_kl=2.1818 loss_addr=1.6955 soft_tokens=66 compress=0.53855 gnorm_comp=2.503e-02 gnorm_bridge=3.719e+00 gnorm_router=0.000e+00 gnorm_pre=3.719e+00 clip_coef=2.69e-01 readout=router:0/3200(0%) full=0/1 peakmem=19257MiB (3209s)
-[step 810] loss_qa=0.9766 loss_kl=0.6894 loss_addr=4.0892 soft_tokens=74 compress=0.537491 gnorm_comp=7.833e-03 gnorm_bridge=1.835e+00 gnorm_router=0.000e+00 gnorm_pre=1.835e+00 clip_coef=5.45e-01 readout=router:0/3240(0%) full=0/1 peakmem=19257MiB (3245s)
-[step 820] loss_qa=0.1592 loss_kl=0.1859 loss_addr=3.6389 soft_tokens=58 compress=0.539759 gnorm_comp=1.491e-02 gnorm_bridge=2.913e+00 gnorm_router=0.000e+00 gnorm_pre=2.913e+00 clip_coef=3.43e-01 readout=router:0/3280(0%) full=0/1 peakmem=19257MiB (3281s)
-[step 830] loss_qa=2.6250 loss_kl=2.9482 loss_addr=2.3217 soft_tokens=66 compress=0.538283 gnorm_comp=1.212e-01 gnorm_bridge=3.948e+00 gnorm_router=0.000e+00 gnorm_pre=3.950e+00 clip_coef=2.53e-01 readout=router:0/3320(0%) full=0/1 peakmem=19257MiB (3318s)
-[step 840] loss_qa=1.9922 loss_kl=1.5300 loss_addr=2.4635 soft_tokens=54 compress=0.558758 gnorm_comp=2.273e-02 gnorm_bridge=4.856e+00 gnorm_router=0.000e+00 gnorm_pre=4.856e+00 clip_coef=2.06e-01 readout=router:0/3360(0%) full=0/1 peakmem=19257MiB (3355s)
-[step 850] loss_qa=1.5391 loss_kl=0.9135 loss_addr=3.4208 soft_tokens=54 compress=0.525952 gnorm_comp=4.667e-02 gnorm_bridge=1.951e+00 gnorm_router=0.000e+00 gnorm_pre=1.952e+00 clip_coef=5.12e-01 readout=router:0/3400(0%) full=0/1 peakmem=19257MiB (3393s)
-[step 860] loss_qa=0.2793 loss_kl=0.9249 loss_addr=3.3677 soft_tokens=74 compress=0.544828 gnorm_comp=7.578e-03 gnorm_bridge=2.238e+00 gnorm_router=0.000e+00 gnorm_pre=2.238e+00 clip_coef=4.47e-01 readout=router:0/3440(0%) full=0/1 peakmem=19257MiB (3431s)
-[step 870] loss_qa=0.8555 loss_kl=0.8396 loss_addr=2.3898 soft_tokens=58 compress=0.536842 gnorm_comp=2.405e-02 gnorm_bridge=2.328e+00 gnorm_router=0.000e+00 gnorm_pre=2.328e+00 clip_coef=4.30e-01 readout=router:0/3480(0%) full=0/1 peakmem=19257MiB (3468s)
-[step 880] loss_qa=0.8555 loss_kl=1.0233 loss_addr=2.9824 soft_tokens=54 compress=0.546584 gnorm_comp=1.077e-02 gnorm_bridge=3.430e+00 gnorm_router=0.000e+00 gnorm_pre=3.430e+00 clip_coef=2.92e-01 readout=router:0/3520(0%) full=0/1 peakmem=19257MiB (3504s)
-[step 890] loss_qa=4.5625 loss_kl=3.2480 loss_addr=2.7164 soft_tokens=86 compress=0.540541 gnorm_comp=8.512e-03 gnorm_bridge=5.367e+00 gnorm_router=0.000e+00 gnorm_pre=5.367e+00 clip_coef=1.86e-01 readout=router:0/3560(0%) full=0/1 peakmem=19257MiB (3541s)
-[ckpt] step 900 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 900] loss_qa=0.1108 loss_kl=1.9945 loss_addr=3.1722 soft_tokens=78 compress=0.546584 gnorm_comp=2.214e-02 gnorm_bridge=4.874e+00 gnorm_router=0.000e+00 gnorm_pre=4.874e+00 clip_coef=2.05e-01 readout=router:0/3600(0%) full=0/1 peakmem=19257MiB (3578s)
-[step 910] loss_qa=0.2305 loss_kl=0.1953 loss_addr=1.2713 soft_tokens=46 compress=0.551724 gnorm_comp=7.948e-03 gnorm_bridge=2.302e+00 gnorm_router=0.000e+00 gnorm_pre=2.302e+00 clip_coef=4.34e-01 readout=router:0/3640(0%) full=0/1 peakmem=19257MiB (3614s)
-[step 920] loss_qa=1.5781 loss_kl=1.7135 loss_addr=2.6559 soft_tokens=42 compress=0.542857 gnorm_comp=1.851e-02 gnorm_bridge=3.713e+00 gnorm_router=0.000e+00 gnorm_pre=3.713e+00 clip_coef=2.69e-01 readout=router:0/3680(0%) full=0/1 peakmem=19257MiB (3649s)
-[step 930] loss_qa=1.5156 loss_kl=1.7757 loss_addr=1.9513 soft_tokens=58 compress=0.547699 gnorm_comp=7.976e-03 gnorm_bridge=3.249e+00 gnorm_router=0.000e+00 gnorm_pre=3.249e+00 clip_coef=3.08e-01 readout=router:0/3720(0%) full=0/1 peakmem=19257MiB (3684s)
-[step 940] loss_qa=1.8281 loss_kl=2.2401 loss_addr=2.5334 soft_tokens=34 compress=0.550415 gnorm_comp=9.002e-03 gnorm_bridge=3.165e+00 gnorm_router=0.000e+00 gnorm_pre=3.165e+00 clip_coef=3.16e-01 readout=router:0/3760(0%) full=0/1 peakmem=19257MiB (3720s)
-[step 950] loss_qa=2.7500 loss_kl=3.2001 loss_addr=2.0327 soft_tokens=91 compress=0.538537 gnorm_comp=5.304e-03 gnorm_bridge=3.203e+00 gnorm_router=0.000e+00 gnorm_pre=3.203e+00 clip_coef=3.12e-01 readout=router:0/3800(0%) full=0/1 peakmem=19257MiB (3757s)
-[step 960] loss_qa=1.0078 loss_kl=0.8623 loss_addr=2.7903 soft_tokens=42 compress=0.56445 gnorm_comp=1.035e-02 gnorm_bridge=3.430e+00 gnorm_router=0.000e+00 gnorm_pre=3.430e+00 clip_coef=2.92e-01 readout=router:0/3840(0%) full=0/1 peakmem=19257MiB (3792s)
-[step 970] loss_qa=0.5156 loss_kl=0.5059 loss_addr=2.2554 soft_tokens=58 compress=0.547945 gnorm_comp=5.235e-02 gnorm_bridge=6.026e+00 gnorm_router=0.000e+00 gnorm_pre=6.026e+00 clip_coef=1.66e-01 readout=router:0/3880(0%) full=0/1 peakmem=19257MiB (3829s)
-[step 980] loss_qa=2.4219 loss_kl=2.4950 loss_addr=2.4892 soft_tokens=82 compress=0.535117 gnorm_comp=3.325e-02 gnorm_bridge=7.241e+00 gnorm_router=0.000e+00 gnorm_pre=7.241e+00 clip_coef=1.38e-01 readout=router:0/3920(0%) full=0/1 peakmem=19257MiB (3865s)
-[step 990] loss_qa=2.2344 loss_kl=0.5864 loss_addr=3.3543 soft_tokens=87 compress=0.549422 gnorm_comp=3.930e-03 gnorm_bridge=2.442e+00 gnorm_router=0.000e+00 gnorm_pre=2.442e+00 clip_coef=4.09e-01 readout=router:0/3960(0%) full=0/1 peakmem=19257MiB (3902s)
-[ckpt] step 1000 已保存 -> /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt
-[step 1000] loss_qa=4.1250 loss_kl=4.7602 loss_addr=2.6631 soft_tokens=55 compress=0.55 gnorm_comp=7.362e-03 gnorm_bridge=4.329e+00 gnorm_router=0.000e+00 gnorm_pre=4.329e+00 clip_coef=2.31e-01 readout=router:0/4000(0%) full=0/1 peakmem=19442MiB (3939s)
-[grad-check] {"model_has_no_grad": true, "compressor_queries": true, "compressor_input_proj": true, "bridge_last_linear": true}
-  [eval-final] ✗ q='Hayden is a singer-songwriter from Canada, but where does Buck-Tick hail from?' gold='Fujioka, Gunma' pred='Japan'
-  [eval-final] ✓ q='Are both Elko Regional Airport and Gerald R. Ford International Airport located in Michigan?' gold='no' pred='No'
-  [eval-final] ✗ q='Ralph Hefferline was a psychology professor at a university that is located in what city?' gold='New York City' pred='Columbia'
-  [eval-final] ✗ q='Where is the company that Sachin Warrier worked for as a software engineer headquartered?' gold='Mumbai' pred='Hyderabad, India'
-  [eval-final] ✗ q='A medieval fortress in Dirleton, East Lothian, Scotland borders on the south side of what coastal area?' gold='Yellowcraig' pred='Bayland coast'
-  [eval-final] ✗ q='What type of forum did a former Soviet statesman initiate?' gold='Organizations could come together to address global issues' pred='Nobel Peace Forum'
-  [eval-final] ✗ q='Which year and which conference was the 14th season for this conference as part of the NCAA Division that the Colorado Buffaloes played in with a record of 2-6 in conference play?' gold='2009 Big 12 Conference' pred='1994, Big 12'
-  [eval-final] ✗ q='In what city did the "Prince of tenors" star in a film based on an opera by Giacomo Puccini?' gold='Rome' pred='New York'
-  [eval-final] ✓ q='Are both Cypress and Ajuga genera?' gold='no' pred='no'
-  [eval-final] ✗ q='Who was born earlier, Emma Bull or Virginia Woolf?' gold='Adeline Virginia Woolf' pred='Emma Bull'
-  [eval-final] ✗ q='What was the Roud Folk Song Index of the nursery rhyme inspiring What Are Little Girls Made Of?' gold='821' pred='1033'
-  [eval-final] ✓ q='What is the name of the singer who\'s song was released as the lead single from the album "Confessions", and that had popular song stuck behind for eight consecutive weeks?' gold='Usher' pred='Usher'
-  [eval-final] ✗ q='The 2017–18 Wigan Athletic F.C. season will be a year in which the team competes in the league cup known as what for sponsorship reasons?' gold='Carabao Cup' pred='EFL Cup'
-  [eval-final] ✗ q='What is the inhabitant of the city where  122nd SS-Standarte was formed in2014' gold='276,170 inhabitants' pred='The evidence provided does not contain information about the'
-  [eval-final] ✗ q='What was the name of the 1996 loose adaptation of William Shakespeare\'s "Romeo & Juliet" written by James Gunn?' gold='Tromeo and Juliet' pred='There is no 1996 loose adaptation of William Shakespeare\'s "'
-  [eval-final] ✗ q='Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?' gold='Apalachees' pred='Cuban tribe'
-  [eval-final] ✓ q='What nationality were social anthropologists Alfred Gell and Edmund Leach?' gold='British' pred='British'
-  [eval-final] ✗ q='What is the county seat of the county where East Lempster, New Hampshire is located?' gold='Newport' pred='Sullivan County'
-  [eval-final] ✗ q='What was the name of a woman from the book titled "Their Lives: The Women Targeted by the Clinton Machine " and was also a former white house intern?' gold='Monica Lewinsky' pred='Sally Gravatt'
-  [eval-final] ✗ q='What occupation do Chris Menges and Aram Avakian share?' gold='director' pred='film director'
-  [eval-final] ✓ q='Which American film director hosted the 18th Independent Spirit Awards in 2002?' gold='John Waters' pred='John Waters'
-  [eval-final] ✗ q='In which city is the ambassador of the Rabat-Salé-Kénitra administrative region to China based?' gold='Beijing' pred='Rabat'
-  [eval-final] ✗ q='Where did the descendants of the group of black Indians associated with the Seminole people settle?' gold='Coahuila, Mexico' pred='Oklahoma and Florida'
-  [eval-final] ✗ q='Where is the stadium at which 1964 Georgia Tech Yellow Jackets football team played their home game located?' gold='North Avenue at Techwood Drive' pred='Atlanta, Georgia'
-  [eval-final] ✗ q='Over how many centuries were the "dwelling place of the dead" built?' gold='three centuries' pred='3'
-  [eval-final] ✗ q='What major truck road is located in Backford Cross?' gold='The A41' pred='There is no major truck road located in Backford Cross.'
-  [eval-final] ✓ q='In which role did Caroline Carver played in a 1999 Hallmark Entertainment made-for-TV fantasy movie?' gold='Princess Jessica' pred='Princess Jessica'
-  [eval-final] ✗ q="What's the name of the fantasy film starring Sarah Bolger, featuring a New England family who discover magical creatures around their estate?" gold='The Spiderwick Chronicles' pred='The Spider Chronicles'
-  [eval-final] ✗ q='Maxeda has been owned since 2004 by which American multinational equity firm?' gold='KKR & Co' pred='None of the provided evidence supports the claim that Maxeda'
-  [eval-final] ✗ q='Where is the Bubblegum Alley, that is similar to Gum Wall, located in California?' gold='San Luis Obispo, California' pred='Los Angeles, California'
-  [eval-final] ✓ q="Which board game was published most recently, Pirate's Cove or Catan?" gold="Pirate's Cove" pred="Pirate's Cove"
-  [eval-final] ✗ q='Which Eminem album included vocals from a singer who had an album titled "Unapologetic"?' gold='"The Marshall Mathers LP 2"' pred='The release of the song "Lose Yourself" from the album "8 Mi'
-  [eval-final] ✓ q='This American crime film set in South Los Angeles was written and directed by the same director and writer of screenwriter of "Street Kings", "End of Watch", "Sabotage", "Fury" and what other film?' gold='Suicide Squad' pred='Suicide Squad'
-  [eval-final] ✗ q='SuperMansion starred the actress who had a recurring role as whom on Workaholics?' gold='Jillian Belk' pred='No information available.'
-  [eval-final] ✗ q='Both Truth in Science and Discovery embrace what campaign?' gold='"Teach the Controversy" campaign' pred='Discovery campaign'
-  [eval-final] ✗ q='What is the name of the Isles who were led by Aonghus Mór and covered a total land area of over 8300 km2?' gold='Kingdom of the Isles' pred='the Hebrides'
-  [eval-final] ✗ q='Which song was behind the third single on the album  "A Lot About Livin\' (And a Little \'bout Love)" for two weeks on the country charts?' gold='"We\'ll Burn That Bridge"' pred='"Love Is a Long Road"'
-  [eval-final] ✓ q='What football club plays in the area between the old tool gates: Brook Bar and Trafford bar?' gold='Manchester United' pred='Manchester United'
-  [eval-final] ✗ q='Who held the record for the longest service in the Australian Parliament for a woman, and was surpassed by  a former Australian politician who was the 29th Speaker of the House of Representatives?' gold='Kathryn Jean Martin' pred='Kathy Sullivan'
-  [eval-final] ✗ q='Which man who presented the Australia 2022 FIFA World Cup bid was born on October 22, 1930?' gold='Frank Lowy' pred='Frank Benmach**'
-[eval-final] pair-acc=9/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval] val full-match=0.225 (n=40) —— 规范化完整答案匹配（不再是子串匹配）
-[eval-reload] pair-acc=9/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval-reload] full-match=0.225 (n=40) —— 存盘重载后的对照值
-[eval-after-reset] pair-acc=9/40 （同问题不同记忆值：整组全对才算，纯背 Q→A 做不到）
-[eval-after-reset] full-match=0.225 (n=40) —— 清空 delta 状态后的对照值
-[eval] recon free-gen EM=0.000 tokF1=0.483 实体恢复=0.339 数字恢复=0.367 （n_slot=16）—— 单槽输入、单槽目标、自由生成；强制教学 token-acc=0.682 仅作对照
-[save] /data/zhangjiayang/yyz3/ckpt/probe_mut8_1000.pt config={"schema": 1, "n_slots": 4, "layer": 18, "inner_dim": 1024, "num_heads": 8, "bottleneck": 512, "max_unit_tokens": 8, "target_norm": 1.087283, "read_budget": 32, "dtype": "bf16", "stage": "a", "kl_weight": 1.0, "kl_tau": 1.0, "recon_weight": 0.5, "lr": 0.0002, "steps": 1000, "epochs": 2, "seed": 0, "smoke_model": false, "router": true, "d_key": 256, "addr_weight": 1.0, "lex_skip": true, "addr_maxsim": 1, "addr_gamma": 0.5, "hard_neg_k": 2, "topk_per_hop": 4, "slot_isolation": 1, "router_kind": "hybrid", "readout_mode": "mixed", "router_readout_p": 0.5, "teacher_scope": "gold", "recon_lex": 1, "cov_weight": 0.0, "cov_targets": 0, "cov_entity_w": 2.0, "cov_number_w": 3.0, "cov_content_w": 0.5, "lex_head": false, "lex_token_mode": "mean", "bpe_backfill": 0, "split_inject": false, "split_n_lex": 3, "hid_weight": 0.0, "hid_layer": "last", "inject_mode": "user", "fence_style": "bracket", "bridge_alpha_max": 0.5}

@@ -1,117 +1,0 @@
-[cfg] mem=full layer=18 bottleneck=256 lr=0.0002 steps=1000 accum=4 inject=user shuffle_train=none
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:35,  4.15it/s]Loading weights:   7%|▋         | 26/398 [00:00<00:03, 94.70it/s]Loading weights:  12%|█▏        | 47/398 [00:00<00:02, 133.41it/s]Loading weights:  17%|█▋        | 66/398 [00:00<00:02, 151.81it/s]Loading weights:  21%|██        | 84/398 [00:00<00:01, 159.56it/s]Loading weights:  26%|██▌       | 104/398 [00:00<00:01, 168.13it/s]Loading weights:  32%|███▏      | 126/398 [00:00<00:01, 179.00it/s]Loading weights:  37%|███▋      | 148/398 [00:00<00:01, 183.37it/s]Loading weights:  43%|████▎     | 170/398 [00:01<00:01, 187.72it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 190.21it/s]Loading weights:  54%|█████▍    | 214/398 [00:01<00:00, 193.91it/s]Loading weights:  59%|█████▉    | 236/398 [00:01<00:00, 197.12it/s]Loading weights:  65%|██████▍   | 258/398 [00:01<00:00, 197.76it/s]Loading weights:  70%|███████   | 280/398 [00:01<00:00, 197.31it/s]Loading weights:  76%|███████▌  | 302/398 [00:01<00:00, 197.46it/s]Loading weights:  81%|████████▏ | 324/398 [00:01<00:00, 198.39it/s]Loading weights:  87%|████████▋ | 346/398 [00:01<00:00, 198.92it/s]Loading weights:  92%|█████████▏| 368/398 [00:02<00:00, 199.30it/s]Loading weights:  98%|█████████▊| 390/398 [00:02<00:00, 199.88it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 180.37it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-/data/zhangjiayang/yyz3/delta-mem-exp4/train_latent_memory.py:1661: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-  ckpt = torch.load(path, map_location="cpu")
-[adapter] 校验通过：324/324 个张量与模型参数一一对应
-[params] 可训练 2.700M（mem=full reader_frozen=False comp_frozen=False）
-[data] train=9997 val=40 记忆模式=full
-[step 10] loss_qa=0.0000 loss_recon=2.3906 mem_tokens=104 elapsed=49s (4.92s/step)
-[step 20] loss_qa=1.3984 loss_recon=10.7500 mem_tokens=91 elapsed=98s (4.89s/step)
-[step 30] loss_qa=3.1562 loss_recon=2.4062 mem_tokens=169 elapsed=146s (4.85s/step)
-[step 40] loss_qa=3.4688 loss_recon=2.7812 mem_tokens=86 elapsed=194s (4.86s/step)
-[step 50] loss_qa=1.4219 loss_recon=3.2031 mem_tokens=110 elapsed=244s (4.88s/step)
-[step 60] loss_qa=5.6562 loss_recon=11.1250 mem_tokens=195 elapsed=294s (4.91s/step)
-[step 70] loss_qa=0.2471 loss_recon=3.7812 mem_tokens=54 elapsed=343s (4.91s/step)
-[step 80] loss_qa=1.3125 loss_recon=4.6562 mem_tokens=105 elapsed=399s (4.98s/step)
-[step 90] loss_qa=2.7656 loss_recon=2.8750 mem_tokens=113 elapsed=450s (5.00s/step)
-[step 100] loss_qa=3.2500 loss_recon=1.6719 mem_tokens=126 elapsed=499s (4.99s/step)
-[step 110] loss_qa=1.5000 loss_recon=3.0625 mem_tokens=126 elapsed=547s (4.97s/step)
-[step 120] loss_qa=0.2480 loss_recon=10.1875 mem_tokens=210 elapsed=597s (4.98s/step)
-[step 130] loss_qa=4.8438 loss_recon=10.0000 mem_tokens=87 elapsed=644s (4.95s/step)
-[step 140] loss_qa=2.7344 loss_recon=10.2500 mem_tokens=109 elapsed=691s (4.94s/step)
-[step 150] loss_qa=1.2891 loss_recon=1.4375 mem_tokens=107 elapsed=741s (4.94s/step)
-[step 160] loss_qa=0.9570 loss_recon=10.5000 mem_tokens=69 elapsed=789s (4.93s/step)
-[step 170] loss_qa=3.2031 loss_recon=10.6875 mem_tokens=162 elapsed=840s (4.94s/step)
-[step 180] loss_qa=8.7500 loss_recon=11.0625 mem_tokens=105 elapsed=885s (4.92s/step)
-[step 190] loss_qa=4.4062 loss_recon=10.8125 mem_tokens=115 elapsed=934s (4.92s/step)
-[step 200] loss_qa=2.4062 loss_recon=1.3984 mem_tokens=97 elapsed=982s (4.91s/step)
-[step 210] loss_qa=0.8711 loss_recon=10.3125 mem_tokens=115 elapsed=1030s (4.90s/step)
-[step 220] loss_qa=0.6445 loss_recon=1.8906 mem_tokens=99 elapsed=1076s (4.89s/step)
-[step 230] loss_qa=0.0310 loss_recon=2.8281 mem_tokens=126 elapsed=1122s (4.88s/step)
-[step 240] loss_qa=1.4141 loss_recon=11.1250 mem_tokens=77 elapsed=1169s (4.87s/step)
-[step 250] loss_qa=1.1016 loss_recon=3.0469 mem_tokens=71 elapsed=1217s (4.87s/step)
-[transformers] The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
-[eval] step=250 n=40 none=0.175 shuffle=0.175 wrong=0.225 full=0.200 oracle_text=0.550 | **full-wrong=-0.025** full-shuffle=+0.025 full-none=+0.025
-[step 260] loss_qa=2.0625 loss_recon=1.1172 mem_tokens=91 elapsed=1389s (5.34s/step)
-[step 270] loss_qa=3.1406 loss_recon=2.9062 mem_tokens=127 elapsed=1439s (5.33s/step)
-[step 280] loss_qa=1.3984 loss_recon=3.7188 mem_tokens=56 elapsed=1487s (5.31s/step)
-[step 290] loss_qa=1.8047 loss_recon=2.2344 mem_tokens=70 elapsed=1537s (5.30s/step)
-[step 300] loss_qa=1.3828 loss_recon=10.5000 mem_tokens=94 elapsed=1586s (5.29s/step)
-[step 310] loss_qa=2.6406 loss_recon=2.6250 mem_tokens=137 elapsed=1634s (5.27s/step)
-[step 320] loss_qa=1.8125 loss_recon=1.2422 mem_tokens=186 elapsed=1683s (5.26s/step)
-[step 330] loss_qa=2.5000 loss_recon=10.0625 mem_tokens=138 elapsed=1732s (5.25s/step)
-[step 340] loss_qa=3.5469 loss_recon=10.3125 mem_tokens=78 elapsed=1783s (5.24s/step)
-[step 350] loss_qa=2.7188 loss_recon=10.6250 mem_tokens=101 elapsed=1831s (5.23s/step)
-[step 360] loss_qa=0.8242 loss_recon=2.8438 mem_tokens=131 elapsed=1879s (5.22s/step)
-[step 370] loss_qa=2.5156 loss_recon=11.6875 mem_tokens=61 elapsed=1926s (5.20s/step)
-[step 380] loss_qa=0.0486 loss_recon=10.5000 mem_tokens=58 elapsed=1975s (5.20s/step)
-[step 390] loss_qa=0.5430 loss_recon=11.3125 mem_tokens=187 elapsed=2025s (5.19s/step)
-[step 400] loss_qa=3.3750 loss_recon=3.8594 mem_tokens=118 elapsed=2073s (5.18s/step)
-[step 410] loss_qa=1.0781 loss_recon=2.8125 mem_tokens=191 elapsed=2126s (5.19s/step)
-[step 420] loss_qa=5.1250 loss_recon=3.5156 mem_tokens=95 elapsed=2177s (5.18s/step)
-[step 430] loss_qa=2.3125 loss_recon=10.0625 mem_tokens=149 elapsed=2227s (5.18s/step)
-[step 440] loss_qa=2.2344 loss_recon=9.6250 mem_tokens=103 elapsed=2277s (5.17s/step)
-[step 450] loss_qa=0.1226 loss_recon=10.3125 mem_tokens=100 elapsed=2325s (5.17s/step)
-[step 460] loss_qa=2.3438 loss_recon=2.2656 mem_tokens=134 elapsed=2377s (5.17s/step)
-[step 470] loss_qa=1.5469 loss_recon=4.0312 mem_tokens=54 elapsed=2427s (5.16s/step)
-[step 480] loss_qa=0.0334 loss_recon=8.2500 mem_tokens=143 elapsed=2476s (5.16s/step)
-[step 490] loss_qa=0.0569 loss_recon=2.9688 mem_tokens=90 elapsed=2525s (5.15s/step)
-[step 500] loss_qa=0.2217 loss_recon=8.9375 mem_tokens=63 elapsed=2572s (5.14s/step)
-[eval] step=500 n=40 none=0.175 shuffle=0.200 wrong=0.200 full=0.225 oracle_text=0.550 | **full-wrong=+0.025** full-shuffle=+0.025 full-none=+0.050
-[step 510] loss_qa=4.2812 loss_recon=2.2031 mem_tokens=139 elapsed=2734s (5.36s/step)
-[step 520] loss_qa=0.0325 loss_recon=2.6875 mem_tokens=99 elapsed=2785s (5.36s/step)
-[step 530] loss_qa=0.9531 loss_recon=3.1719 mem_tokens=77 elapsed=2833s (5.35s/step)
-[step 540] loss_qa=1.0781 loss_recon=1.9688 mem_tokens=84 elapsed=2882s (5.34s/step)
-[step 550] loss_qa=0.1650 loss_recon=1.2188 mem_tokens=121 elapsed=2932s (5.33s/step)
-[step 560] loss_qa=6.1875 loss_recon=4.6250 mem_tokens=120 elapsed=2979s (5.32s/step)
-[step 570] loss_qa=1.6328 loss_recon=3.2344 mem_tokens=88 elapsed=3028s (5.31s/step)
-[step 580] loss_qa=0.0391 loss_recon=1.6641 mem_tokens=80 elapsed=3077s (5.30s/step)
-[step 590] loss_qa=1.5312 loss_recon=1.5391 mem_tokens=175 elapsed=3130s (5.30s/step)
-[step 600] loss_qa=2.9688 loss_recon=2.0469 mem_tokens=79 elapsed=3177s (5.29s/step)
-[step 610] loss_qa=1.5547 loss_recon=9.2500 mem_tokens=103 elapsed=3227s (5.29s/step)
-[step 620] loss_qa=0.1963 loss_recon=7.9062 mem_tokens=131 elapsed=3280s (5.29s/step)
-[step 630] loss_qa=2.2188 loss_recon=9.1250 mem_tokens=140 elapsed=3328s (5.28s/step)
-[step 640] loss_qa=1.0469 loss_recon=7.0625 mem_tokens=129 elapsed=3380s (5.28s/step)
-[step 650] loss_qa=0.0103 loss_recon=2.0312 mem_tokens=64 elapsed=3427s (5.27s/step)
-[step 660] loss_qa=0.8750 loss_recon=2.9688 mem_tokens=115 elapsed=3476s (5.27s/step)
-[step 670] loss_qa=0.2578 loss_recon=10.0000 mem_tokens=92 elapsed=3526s (5.26s/step)
-[step 680] loss_qa=3.7812 loss_recon=2.5625 mem_tokens=158 elapsed=3575s (5.26s/step)
-[step 690] loss_qa=0.1963 loss_recon=1.3203 mem_tokens=69 elapsed=3625s (5.25s/step)
-[step 700] loss_qa=0.9023 loss_recon=2.5156 mem_tokens=104 elapsed=3675s (5.25s/step)
-[step 710] loss_qa=1.1797 loss_recon=2.2812 mem_tokens=113 elapsed=3724s (5.24s/step)
-[step 720] loss_qa=0.2080 loss_recon=9.3750 mem_tokens=92 elapsed=3772s (5.24s/step)
-[step 730] loss_qa=3.6250 loss_recon=2.7656 mem_tokens=118 elapsed=3824s (5.24s/step)
-[step 740] loss_qa=0.9180 loss_recon=8.8750 mem_tokens=149 elapsed=3873s (5.23s/step)
-[step 750] loss_qa=4.6562 loss_recon=5.0625 mem_tokens=83 elapsed=3923s (5.23s/step)
-[eval] step=750 n=40 none=0.175 shuffle=0.200 wrong=0.175 full=0.200 oracle_text=0.550 | **full-wrong=+0.025** full-shuffle=+0.000 full-none=+0.025
-[step 760] loss_qa=0.0273 loss_recon=2.7656 mem_tokens=177 elapsed=4095s (5.39s/step)
-[step 770] loss_qa=0.1699 loss_recon=6.7812 mem_tokens=83 elapsed=4143s (5.38s/step)
-[step 780] loss_qa=1.4141 loss_recon=8.7500 mem_tokens=88 elapsed=4194s (5.38s/step)
-[step 790] loss_qa=0.0684 loss_recon=2.3906 mem_tokens=73 elapsed=4243s (5.37s/step)
-[step 800] loss_qa=0.0376 loss_recon=1.5312 mem_tokens=134 elapsed=4289s (5.36s/step)
-[step 810] loss_qa=2.1250 loss_recon=1.6562 mem_tokens=63 elapsed=4336s (5.35s/step)
-[step 820] loss_qa=2.2969 loss_recon=8.9375 mem_tokens=59 elapsed=4388s (5.35s/step)
-[step 830] loss_qa=5.6875 loss_recon=8.9375 mem_tokens=94 elapsed=4438s (5.35s/step)
-[step 840] loss_qa=0.8984 loss_recon=8.7500 mem_tokens=82 elapsed=4488s (5.34s/step)
-[step 850] loss_qa=0.0801 loss_recon=9.3125 mem_tokens=60 elapsed=4538s (5.34s/step)
-[step 860] loss_qa=2.3125 loss_recon=2.7656 mem_tokens=72 elapsed=4586s (5.33s/step)
-[step 870] loss_qa=0.0094 loss_recon=1.9375 mem_tokens=69 elapsed=4635s (5.33s/step)
-[step 880] loss_qa=2.6250 loss_recon=7.0625 mem_tokens=193 elapsed=4685s (5.32s/step)
-[step 890] loss_qa=5.2500 loss_recon=10.0625 mem_tokens=100 elapsed=4735s (5.32s/step)
-[step 900] loss_qa=1.4297 loss_recon=2.0781 mem_tokens=63 elapsed=4783s (5.31s/step)
-[step 910] loss_qa=0.0486 loss_recon=1.3516 mem_tokens=68 elapsed=4832s (5.31s/step)
-[step 920] loss_qa=2.0156 loss_recon=3.1562 mem_tokens=77 elapsed=4879s (5.30s/step)
-[step 930] loss_qa=0.4395 loss_recon=1.9141 mem_tokens=100 elapsed=4926s (5.30s/step)
-[step 940] loss_qa=0.2344 loss_recon=8.9375 mem_tokens=131 elapsed=4979s (5.30s/step)
-[step 950] loss_qa=0.2637 loss_recon=7.5312 mem_tokens=93 elapsed=5025s (5.29s/step)
-[step 960] loss_qa=4.2812 loss_recon=9.2500 mem_tokens=62 elapsed=5075s (5.29s/step)
-[step 970] loss_qa=3.7500 loss_recon=10.8750 mem_tokens=67 elapsed=5130s (5.29s/step)
-[step 980] loss_qa=1.4297 loss_recon=1.8984 mem_tokens=130 elapsed=5188s (5.29s/step)
-[step 990] loss_qa=0.6211 loss_recon=7.5938 mem_tokens=114 elapsed=5239s (5.29s/step)
-[step 1000] loss_qa=0.1895 loss_recon=1.1562 mem_tokens=150 elapsed=5289s (5.29s/step)
-[eval] step=1000 n=40 none=0.175 shuffle=0.200 wrong=0.200 full=0.200 oracle_text=0.550 | **full-wrong=+0.000** full-shuffle=+0.000 full-none=+0.025
-[save] /data/zhangjiayang/yyz3/ckpt/reader_full_1000.pt
-[eval] step=1000 n=40 none=0.175 shuffle=0.200 wrong=0.200 full=0.200 oracle_text=0.550 | **full-wrong=+0.000** full-shuffle=+0.000 full-none=+0.025

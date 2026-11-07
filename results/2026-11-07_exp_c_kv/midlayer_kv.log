@@ -1,0 +1,65 @@
+[data] /data/zhangjiayang/yyz3/synth/hotpot_val500.jsonl n=200 无金标证据=0 arms=['none', 'oracle_text', 'upper_kv', 'upper_kv_wrong', 'h18_kv', 'h18_kv_wrong']
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:13,  5.37it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 83.97it/s]Loading weights:  10%|▉         | 38/398 [00:00<00:03, 118.49it/s]Loading weights:  15%|█▌        | 60/398 [00:00<00:02, 150.03it/s]Loading weights:  21%|██        | 82/398 [00:00<00:01, 167.57it/s]Loading weights:  26%|██▌       | 104/398 [00:00<00:01, 180.66it/s]Loading weights:  32%|███▏      | 126/398 [00:00<00:01, 188.88it/s]Loading weights:  37%|███▋      | 148/398 [00:00<00:01, 194.42it/s]Loading weights:  43%|████▎     | 170/398 [00:01<00:01, 197.48it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 198.92it/s]Loading weights:  54%|█████▍    | 214/398 [00:01<00:00, 199.27it/s]Loading weights:  59%|█████▉    | 235/398 [00:01<00:00, 199.11it/s]Loading weights:  65%|██████▍   | 258/398 [00:01<00:00, 204.93it/s]Loading weights:  70%|███████   | 280/398 [00:01<00:00, 205.75it/s]Loading weights:  76%|███████▌  | 302/398 [00:01<00:00, 205.91it/s]Loading weights:  81%|████████▏ | 324/398 [00:01<00:00, 207.20it/s]Loading weights:  87%|████████▋ | 346/398 [00:01<00:00, 207.81it/s]Loading weights:  92%|█████████▏| 368/398 [00:01<00:00, 207.86it/s]Loading weights:  98%|█████████▊| 390/398 [00:02<00:00, 208.21it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 188.24it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[model] hidden=2560 layers=36 start_layer=18 adapter=off（纯冻结 Qwen）
+[midlayer_kv] start_layer=18 max_mem_tokens=320 sources=('oracle_upper', 'shared_h18')
+[transformers] The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+[progress] 10/200 none=0.100 oracle_text=0.500 upper_kv=0.200 upper_kv_wrong=0.000 h18_kv=0.200 h18_kv_wrong=0.000 elapsed=23s eta=436s
+[progress] 20/200 none=0.200 oracle_text=0.500 upper_kv=0.300 upper_kv_wrong=0.150 h18_kv=0.300 h18_kv_wrong=0.150 elapsed=45s eta=402s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 30/200 none=0.167 oracle_text=0.500 upper_kv=0.300 upper_kv_wrong=0.133 h18_kv=0.300 h18_kv_wrong=0.133 elapsed=69s eta=390s
+[progress] 40/200 none=0.125 oracle_text=0.575 upper_kv=0.325 upper_kv_wrong=0.100 h18_kv=0.275 h18_kv_wrong=0.100 elapsed=92s eta=369s
+[progress] 50/200 none=0.120 oracle_text=0.580 upper_kv=0.320 upper_kv_wrong=0.100 h18_kv=0.240 h18_kv_wrong=0.100 elapsed=110s eta=331s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 60/200 none=0.133 oracle_text=0.567 upper_kv=0.300 upper_kv_wrong=0.100 h18_kv=0.233 h18_kv_wrong=0.117 elapsed=137s eta=319s
+[progress] 70/200 none=0.143 oracle_text=0.586 upper_kv=0.300 upper_kv_wrong=0.100 h18_kv=0.214 h18_kv_wrong=0.114 elapsed=158s eta=293s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 80/200 none=0.138 oracle_text=0.550 upper_kv=0.275 upper_kv_wrong=0.087 h18_kv=0.200 h18_kv_wrong=0.100 elapsed=188s eta=282s
+[progress] 90/200 none=0.133 oracle_text=0.544 upper_kv=0.256 upper_kv_wrong=0.089 h18_kv=0.189 h18_kv_wrong=0.100 elapsed=208s eta=255s
+[progress] 100/200 none=0.120 oracle_text=0.510 upper_kv=0.230 upper_kv_wrong=0.080 h18_kv=0.170 h18_kv_wrong=0.090 elapsed=238s eta=238s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 110/200 none=0.109 oracle_text=0.518 upper_kv=0.227 upper_kv_wrong=0.073 h18_kv=0.155 h18_kv_wrong=0.082 elapsed=260s eta=213s
+[progress] 120/200 none=0.100 oracle_text=0.508 upper_kv=0.217 upper_kv_wrong=0.067 h18_kv=0.150 h18_kv_wrong=0.075 elapsed=283s eta=189s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 130/200 none=0.092 oracle_text=0.500 upper_kv=0.208 upper_kv_wrong=0.062 h18_kv=0.138 h18_kv_wrong=0.069 elapsed=316s eta=170s
+[progress] 140/200 none=0.093 oracle_text=0.493 upper_kv=0.207 upper_kv_wrong=0.064 h18_kv=0.143 h18_kv_wrong=0.071 elapsed=335s eta=143s
+[progress] 150/200 none=0.100 oracle_text=0.500 upper_kv=0.207 upper_kv_wrong=0.080 h18_kv=0.153 h18_kv_wrong=0.087 elapsed=356s eta=119s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 160/200 none=0.100 oracle_text=0.500 upper_kv=0.206 upper_kv_wrong=0.081 h18_kv=0.156 h18_kv_wrong=0.081 elapsed=380s eta=95s
+[progress] 170/200 none=0.100 oracle_text=0.518 upper_kv=0.200 upper_kv_wrong=0.082 h18_kv=0.153 h18_kv_wrong=0.082 elapsed=404s eta=71s
+[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json
+[progress] 180/200 none=0.100 oracle_text=0.522 upper_kv=0.200 upper_kv_wrong=0.083 h18_kv=0.150 h18_kv_wrong=0.089 elapsed=425s eta=47s
+[progress] 190/200 none=0.100 oracle_text=0.521 upper_kv=0.205 upper_kv_wrong=0.084 h18_kv=0.147 h18_kv_wrong=0.089 elapsed=454s eta=24s
+[progress] 200/200 none=0.095 oracle_text=0.525 upper_kv=0.210 upper_kv_wrong=0.085 h18_kv=0.145 h18_kv_wrong=0.090 elapsed=475s eta=0s
+
+| 臂 | EM% (n=200) |
+|---|---|
+| none | 9.5 |
+| oracle_text | 52.5 |
+| upper_kv | 21.0 |
+| upper_kv_wrong | 8.5 |
+| h18_kv | 14.5 |
+| h18_kv_wrong | 9.0 |
+
+| 配对比较 | A% | B% | 差 | 只有A对 | 只有B对 | McNemar p |
+|---|---|---|---|---|---|---|
+| upper_kv vs upper_kv_wrong | 21.0 | 8.5 | +12.5 | 28 | 3 | 0.0000 |
+| h18_kv vs h18_kv_wrong | 14.5 | 9.0 | +5.5 | 13 | 2 | 0.0074 |
+| upper_kv vs none | 21.0 | 9.5 | +11.5 | 25 | 2 | 0.0000 |
+| h18_kv vs none | 14.5 | 9.5 | +5.0 | 12 | 2 | 0.0129 |
+| upper_kv vs h18_kv | 21.0 | 14.5 | +6.5 | 18 | 5 | 0.0106 |
+| oracle_text vs upper_kv | 52.5 | 21.0 | +31.5 | 67 | 4 | 0.0000 |
+
+| 题型 | n | none | oracle_text | upper_kv | upper_kv_wrong | h18_kv | h18_kv_wrong |
+|---|---|---|---|---|---|---|---|
+| date | 11 | 0.0 | 81.8 | 36.4 | 0.0 | 0.0 | 0.0 |
+| entity | 166 | 4.2 | 46.4 | 16.3 | 3.6 | 9.6 | 3.6 |
+| number | 7 | 0.0 | 57.1 | 0.0 | 0.0 | 0.0 | 0.0 |
+| yesno | 16 | 75.0 | 93.8 | 68.8 | 68.8 | 81.2 | 75.0 |
+
+[判据] single_layer_insufficient: 接口有效但单层不够（upper_kv 0.210 高于 none，h18_kv 0.145 没跟上）-> 先做 Adapter（有逐层 teacher 监督）或改存多层
+{"none": 0.095, "oracle_text": 0.525, "upper_kv": 0.21, "upper_kv_wrong": 0.085, "h18_kv": 0.145, "h18_kv_wrong": 0.09}
+[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_c_200/rows.jsonl
+[out] 完整结果 -> /data/zhangjiayang/yyz3/results/exp_c_200/midlayer_kv.json

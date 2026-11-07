@@ -1,80 +1,0 @@
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[gpu] cuda:0 NVIDIA A100-PCIE-40GB 总 39.5G / 空闲 11.8G
-[gpu][warn] 空闲 11.8G < 建议 14G（主干 bf16 权重 ~7.6G + 激活）。建议 --grad-checkpointing、--max-slots 0、--accum 8、--max-unit-tokens 32；仍 OOM 就等其它进程释放显卡
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:01<11:53,  1.80s/it]Loading weights:   1%|          | 4/398 [00:01<02:28,  2.65it/s]Loading weights:   2%|▏         | 6/398 [00:02<01:33,  4.18it/s]Loading weights:   3%|▎         | 13/398 [00:02<00:33, 11.46it/s]Loading weights:   4%|▍         | 17/398 [00:02<00:34, 10.98it/s]Loading weights:   9%|▉         | 36/398 [00:02<00:12, 29.99it/s]Loading weights:  11%|█         | 42/398 [00:03<00:15, 22.88it/s]Loading weights:  15%|█▌        | 60/398 [00:03<00:08, 40.82it/s]Loading weights:  17%|█▋        | 68/398 [00:03<00:07, 45.40it/s]Loading weights:  20%|██        | 81/398 [00:03<00:05, 58.32it/s]Loading weights:  23%|██▎       | 90/398 [00:03<00:06, 49.18it/s]Loading weights:  25%|██▍       | 98/398 [00:04<00:06, 43.89it/s]Loading weights:  26%|██▋       | 105/398 [00:04<00:08, 34.16it/s]Loading weights:  28%|██▊       | 111/398 [00:04<00:09, 30.86it/s]Loading weights:  33%|███▎      | 131/398 [00:05<00:10, 26.20it/s]Loading weights:  37%|███▋      | 147/398 [00:06<00:10, 23.99it/s]Loading weights:  42%|████▏     | 169/398 [00:06<00:06, 33.20it/s]Loading weights:  45%|████▌     | 180/398 [00:06<00:05, 37.52it/s]Loading weights:  48%|████▊     | 191/398 [00:07<00:05, 35.31it/s]Loading weights:  49%|████▉     | 197/398 [00:07<00:05, 37.84it/s]Loading weights:  52%|█████▏    | 207/398 [00:07<00:07, 25.60it/s]Loading weights:  54%|█████▍    | 215/398 [00:08<00:09, 18.83it/s]Loading weights:  64%|██████▎   | 253/398 [00:08<00:03, 45.71it/s]Loading weights:  67%|██████▋   | 266/398 [00:09<00:03, 37.11it/s]Loading weights:  69%|██████▉   | 276/398 [00:10<00:04, 29.42it/s]Loading weights:  71%|███████▏  | 284/398 [00:10<00:05, 20.48it/s]Loading weights:  73%|███████▎  | 290/398 [00:11<00:05, 18.91it/s]Loading weights:  74%|███████▍  | 295/398 [00:12<00:07, 13.35it/s]Loading weights:  81%|████████  | 322/398 [00:12<00:02, 26.54it/s]Loading weights:  82%|████████▏ | 328/398 [00:13<00:03, 21.42it/s]Loading weights:  84%|████████▎ | 333/398 [00:13<00:02, 22.48it/s]Loading weights:  85%|████████▍ | 337/398 [00:13<00:03, 19.24it/s]Loading weights:  86%|████████▌ | 341/398 [00:13<00:02, 19.80it/s]Loading weights:  86%|████████▋ | 344/398 [00:14<00:02, 18.27it/s]Loading weights:  87%|████████▋ | 347/398 [00:14<00:03, 14.02it/s]Loading weights:  88%|████████▊ | 352/398 [00:14<00:02, 17.31it/s]Loading weights:  89%|████████▉ | 355/398 [00:14<00:03, 14.09it/s]Loading weights:  91%|█████████▏| 364/398 [00:15<00:02, 14.26it/s]Loading weights:  98%|█████████▊| 389/398 [00:15<00:00, 35.01it/s]Loading weights: 100%|██████████| 398/398 [00:15<00:00, 25.10it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-/data/zhangjiayang/yyz3/delta-mem-exp4/train_latent_memory.py:1657: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-  ckpt = torch.load(path, map_location="cpu")
-[adapter] 校验通过：324/324 个张量与模型参数一一对应
-[warn] --max-unit-tokens=64 与 ckpt 的 32 不一致，已按 ckpt 运行
-[inject] inject_mode=user fence_style=bracket (style=bracket) isolate=True
-[arms] none,text,latent,raw_prefix,raw_salient,raw_word,raw_full
-[transformers] The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
-[progress] 25/200 EM: none=20.0% text=52.0% latent=32.0% raw_prefix=40.0% raw_salient=24.0% raw_word=32.0% raw_full=52.0% elapsed=648s eta=4537s
-[progress] 50/200 EM: none=12.0% text=58.0% latent=26.0% raw_prefix=30.0% raw_salient=18.0% raw_word=34.0% raw_full=60.0% elapsed=929s eta=2786s
-[progress] 75/200 EM: none=14.7% text=57.3% latent=25.3% raw_prefix=28.0% raw_salient=17.3% raw_word=32.0% raw_full=58.7% elapsed=1171s eta=1951s
-[progress] 100/200 EM: none=12.0% text=52.0% latent=21.0% raw_prefix=24.0% raw_salient=13.0% raw_word=24.0% raw_full=54.0% elapsed=1438s eta=1438s
-[progress] 125/200 EM: none=9.6% text=52.0% latent=18.4% raw_prefix=24.8% raw_salient=13.6% raw_word=24.0% raw_full=53.6% elapsed=1682s eta=1009s
-[progress] 150/200 EM: none=10.0% text=51.3% latent=18.7% raw_prefix=25.3% raw_salient=16.0% raw_word=24.7% raw_full=53.3% elapsed=1941s eta=647s
-[progress] 175/200 EM: none=10.3% text=53.1% latent=18.9% raw_prefix=25.7% raw_salient=16.0% raw_word=25.1% raw_full=54.9% elapsed=2183s eta=312s
-[progress] 200/200 EM: none=9.5% text=53.5% latent=17.5% raw_prefix=25.0% raw_salient=14.5% raw_word=25.0% raw_full=56.0% elapsed=2419s eta=0s
-
-| 读法 | n | EM% | F1% | 内容token | 注入总token | prompt | ms |
-|---|---|---|---|---|---|---|---|
-| `none` | 200 | 9.5 | 19.5 | 0.0 | 0.0 | 48.3 | 786 |
-| `text` | 200 | 53.5 | 71.9 | 92.5 | 92.5 | 140.9 | 622 |
-| `latent` | 200 | 17.5 | 28.2 | 17.9 | 30.2 | 83.5 | 674 |
-| `raw_prefix` | 200 | 25.0 | 34.9 | 17.9 | 30.2 | 83.5 | 741 |
-| `raw_salient` | 200 | 14.5 | 26.6 | 17.9 | 30.2 | 83.5 | 776 |
-| `raw_word` | 200 | 25.0 | 39.1 | 17.9 | 30.2 | 83.5 | 707 |
-| `raw_full` | 200 | 56.0 | 73.5 | 104.4 | 116.7 | 170.0 | 555 |
-[budget] raw_prefix 内容 token 17.92 vs latent 17.92（差 +0.00）
-[budget] raw_salient 内容 token 17.92 vs latent 17.92（差 +0.00）
-[budget] raw_word 内容 token 17.92 vs latent 17.92（差 +0.00）
-[budget] 金标证据原文平均 104.4 token（不压缩要吃这么多）
-
-### 按跳数分层的 EM%
-| 读法 | 2 |
-|---|---|
-| `none` | 9.5 (n=200) |
-| `text` | 53.5 (n=200) |
-| `latent` | 17.5 (n=200) |
-| `raw_prefix` | 25.0 (n=200) |
-| `raw_salient` | 14.5 (n=200) |
-| `raw_word` | 25.0 (n=200) |
-| `raw_full` | 56.0 (n=200) |
-
-### 按题型分层的 EM%
-| 读法 | date | entity | number | yesno |
-|---|---|---|---|---|
-| `none` | 0.0 (n=11) | 4.2 (n=166) | 0.0 (n=7) | 75.0 (n=16) |
-| `text` | 81.8 (n=11) | 47.6 (n=166) | 57.1 (n=7) | 93.8 (n=16) |
-| `latent` | 9.1 (n=11) | 13.3 (n=166) | 0.0 (n=7) | 75.0 (n=16) |
-| `raw_prefix` | 9.1 (n=11) | 22.3 (n=166) | 0.0 (n=7) | 75.0 (n=16) |
-| `raw_salient` | 9.1 (n=11) | 9.6 (n=166) | 14.3 (n=7) | 68.8 (n=16) |
-| `raw_word` | 18.2 (n=11) | 21.1 (n=166) | 14.3 (n=7) | 75.0 (n=16) |
-| `raw_full` | 81.8 (n=11) | 50.0 (n=166) | 71.4 (n=7) | 93.8 (n=16) |
-
-### 与 latent 的逐题配对（McNemar 精确二项）
-- `none`：只 latent 对 19，只 none 对 3，p = 0.0009
-- `text`：只 latent 对 5，只 text 对 75，p = 0.0000
-- `raw_prefix`：只 latent 对 11，只 raw_prefix 对 25，p = 0.0288
-- `raw_salient`：只 latent 对 18，只 raw_salient 对 11，p = 0.2649
-- `raw_word`：只 latent 对 14，只 raw_word 对 28，p = 0.0436
-- `raw_full`：只 latent 对 6，只 raw_full 对 81，p = 0.0000
-- 反向（raw_salient 为基线）：只 raw_salient 对 11，只 latent 对 18，p = 0.2649
-
-### 预算扫描：原生整词要多少 token 才追平潜层
-| 每槽预算 | 每题内容token | 每题prompt | EM% | F1% | 与 latent 差 |
-|---|---|---|---|---|---|
-| 4 | 9.8 | 75.3 | 22.0 | 34.3 | +4.5pt |
-| 8 | 19.6 | 85.1 | 27.0 | 38.6 | +9.5pt |
-| 16 | 39.1 | 104.6 | 36.5 | 54.5 | +19.0pt |
-| 24 | 57.4 | 122.9 | 46.0 | 65.2 | +28.5pt |
-| 32 | 72.3 | 137.9 | 51.0 | 69.7 | +33.5pt |
-| 48 | 90.9 | 156.4 | 54.0 | 71.4 | +36.5pt |
-
-**追平点**：原生整词每槽 **4 个 token** 就达到潜层的水平（潜层每槽约 7.3 个向量）
-
-[保存] /data/zhangjiayang/yyz3/results/exp_a_sweep_base/capacity.json
