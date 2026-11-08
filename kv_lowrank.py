@@ -202,8 +202,224 @@ def fit_lowrank(batches: Callable[[], Iterable[torch.Tensor]], layout: Dict[str,
                            "seed": int(seed), "explained_ratio": float(explained.sum())})
 
 
+# ---------------------------------------------------------------------
+# 分组基底（实验 F 的初始化：分层段 × K/V 各一套）
+# ---------------------------------------------------------------------
+def group_slices(layout: Dict[str, Any], n_segments: int = 3) -> Dict[str, Dict[str, Any]]:
+    """按"层段 × K/V"把跨层 K/V 长向量切成若干组，给出每组在 U 里的列区间。
+
+    为什么分层段：第 6 层与第 34 层学到的东西不是一类；一套全局基会让它们互相抢主成分。
+    为什么 K/V 分开：Key 决定"谁被查中"、Value 决定"读出什么"，两者的低秩结构不同，
+    共用一个子空间等于强迫它们对齐。
+    """
+    ls = list(layout["layers"])
+    n = int(n_segments)
+    if n <= 0 or n > len(ls):
+        raise ValueError(f"n_segments={n} 非法（层数 {len(ls)}）")
+    chunks = [ls[i::n] for i in range(n)]              # 交错切分：每段都能覆盖深浅
+    chunks = [sorted(c) for c in chunks if c]
+    out: Dict[str, Dict[str, Any]] = {}
+    for si, chunk in enumerate(chunks):
+        for kind in ("k", "v"):
+            cols: List[int] = []
+            for l in chunk:
+                a, b = layout["per_layer"][l][kind]
+                cols.extend(range(a, b))
+            if not cols:
+                continue
+            out[f"seg{si}.{kind}"] = {"cols": cols, "layers": list(chunk),
+                                     "dim": len(cols)}
+    if not out:
+        raise ValueError("分组为空")
+    return out
+
+
+def split_latent_budget(groups: Dict[str, Dict[str, Any]], latent_dim: int,
+                        kind_weights: Optional[Dict[str, float]] = None) -> Dict[str, int]:
+    """把总潜码预算按组摊开；不足以每组一维时直接报错（不静默改动预算）。
+
+    `kind_weights` 给 `{"k": w_k, "v": w_v}` 时按 K/V 分成两块再在块内均分。
+    为什么需要：实测（`tools/diag_kv_by_type.py`）Value 的相对重建误差是 Key 的 1.6 倍，
+    吃掉 67% 的总误差，而两者的预算是对半分的 —— 平均摊在这里是错的方向。
+    """
+    names = list(groups)
+    total = int(latent_dim)
+    if total < len(names):
+        raise ValueError(f"潜码预算 {total} 维不够 {len(names)} 组各分一维")
+    if not kind_weights:
+        base = total // len(names)
+        rem = total - base * len(names)
+        out = {}
+        for i, n in enumerate(names):
+            d = base + (1 if i < rem else 0)
+            out[n] = min(d, int(groups[n]["dim"]))
+        return out
+
+    def kind_of(n: str) -> str:
+        return str(n).rsplit(".", 1)[-1]
+
+    wk = float(kind_weights.get("k", 0.5))
+    wv = float(kind_weights.get("v", 0.5))
+    tot_w = wk + wv
+    if tot_w <= 0:
+        raise ValueError("kind_weights 之和必须为正")
+    pools = {"k": [n for n in names if kind_of(n) == "k"],
+             "v": [n for n in names if kind_of(n) == "v"]}
+    other = [n for n in names if kind_of(n) not in ("k", "v")]
+    budget = {"k": int(round(total * wk / tot_w)), "v": 0}
+    budget["v"] = total - budget["k"]
+    out: Dict[str, int] = {}
+    for kind, pool in pools.items():
+        if not pool:
+            budget["k" if kind == "v" else "v"] += budget[kind]
+            continue
+        b = budget[kind] // len(pool)
+        rem = budget[kind] - b * len(pool)
+        for i, n in enumerate(pool):
+            out[n] = min(b + (1 if i < rem else 0), int(groups[n]["dim"]))
+    if other:
+        b = total // max(1, len(names))
+        for n in other:
+            out[n] = min(b, int(groups[n]["dim"]))
+    return out
+
+
+class GroupedLowRankKV:
+    """若干组 `LowRankKV` 的组合体：每组分自己的一段列、各自的标准化和基底。
+
+    编解码都在**完整的 U 空间**上工作（输入 [N, D]、输出 [N, D]），内部按组切片，
+    所以对上层调用方与 `LowRankKV` 完全同构。
+    """
+
+    def __init__(self, parts: Dict[str, LowRankKV], layout: Dict[str, Any],
+                 n_segments: int, groups: Dict[str, Dict[str, Any]],
+                 meta: Optional[Dict[str, Any]] = None):
+        self.parts = dict(parts)
+        self.layout = dict(layout)
+        self.n_segments = int(n_segments)
+        self.groups = dict(groups)
+        self.meta = dict(meta or {})
+
+    @property
+    def native_dim(self) -> int:
+        return int(self.layout["dim"])
+
+    @property
+    def latent_dim(self) -> int:
+        return int(sum(p.dim for p in self.parts.values()))
+
+    def encode(self, U: torch.Tensor) -> torch.Tensor:
+        return torch.cat([self.parts[n].encode(U[:, g["cols"]])
+                          for n, g in self.groups.items()], dim=-1)
+
+    def decode(self, Z: torch.Tensor) -> torch.Tensor:
+        if int(Z.shape[-1]) != self.latent_dim:
+            raise ValueError(f"潜码宽度 {int(Z.shape[-1])} != {self.latent_dim}")
+        out = None
+        off = 0
+        for n, g in self.groups.items():
+            p = self.parts[n]
+            seg = Z[:, off:off + p.dim]
+            off += p.dim
+            piece = p.decode(seg)
+            if out is None:
+                out = U_like = torch.zeros((int(Z.shape[0]), self.native_dim),
+                                           dtype=piece.dtype, device=piece.device)
+            out[:, g["cols"]] = piece
+        if out is None:
+            raise ValueError("解码为空")
+        return out
+
+    def roundtrip(self, U: torch.Tensor) -> torch.Tensor:
+        return self.decode(self.encode(U))
+
+    def rel_error(self, U: torch.Tensor) -> float:
+        d = self.decode(self.encode(U))
+        return float((d.float() - U.float()).norm() / U.float().norm().clamp_min(1e-6))
+
+    def group_errors(self, U: torch.Tensor) -> Dict[str, float]:
+        d = self.decode(self.encode(U))
+        out = {}
+        for n, g in self.groups.items():
+            a, b = d[:, g["cols"]].float(), U[:, g["cols"]].float()
+            out[n] = float((a - b).norm() / b.norm().clamp_min(1e-6))
+        return out
+
+    def to(self, device: Any) -> "GroupedLowRankKV":
+        for p in self.parts.values():
+            p.to(device)
+        return self
+
+    def save(self, path: str) -> str:
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+        torch.save({"schema": "kv_lowrank_grouped_v1",
+                    "parts": {n: {"mean": p.mean.cpu(), "scale": p.scale.cpu(),
+                                  "basis": p.basis.cpu(),
+                                  "explained": None if p.explained is None else p.explained.cpu()}
+                              for n, p in self.parts.items()},
+                    "layout": self.layout, "n_segments": self.n_segments,
+                    "groups": self.groups, "meta": self.meta}, path)
+        return path
+
+    @staticmethod
+    def load(path: str, device: Any = "cpu") -> "GroupedLowRankKV":
+        blob = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(blob, dict) or blob.get("schema") != "kv_lowrank_grouped_v1":
+            raise ValueError(f"{path} 不是分组基底 ckpt")
+        parts = {n: LowRankKV(b["mean"], b["scale"], b["basis"], {},
+                              b.get("explained"), {})
+                 for n, b in blob["parts"].items()}
+        return GroupedLowRankKV(parts, blob["layout"], blob["n_segments"],
+                                blob["groups"], blob.get("meta")).to(device)
+
+    def describe(self) -> Dict[str, Any]:
+        return {"n_groups": len(self.parts), "native_dim": self.native_dim,
+                "latent_dim": self.latent_dim,
+                "per_group": {n: int(p.dim) for n, p in self.parts.items()},
+                "bytes_per_token": self.latent_dim * 2,
+                "ratio": round(self.native_dim / max(1, self.latent_dim), 2)}
+
+
+def fit_grouped(batches: Callable[[], Iterable[torch.Tensor]], layout: Dict[str, Any],
+                latent_dim: int, n_segments: int = 3, oversample: int = 64,
+                device: Any = "cuda", seed: int = 0,
+                kind_weights: Optional[Dict[str, float]] = None,
+                log: Optional[Callable[[str], None]] = None) -> GroupedLowRankKV:
+    """每组独立拟合一套低秩基（每组自己的标准化与主成分），总潜码 ≈ `latent_dim`。
+
+    组内维度按 `split_latent_budget` 摊分后仍可能被该组原始维度截断（不会超），
+    最终 `latent_dim` 以实际值为准，并写进 meta。
+    """
+    say = log or (lambda m: None)
+    groups = group_slices(layout, n_segments)
+    budget = split_latent_budget(groups, latent_dim, kind_weights=kind_weights)
+    parts: Dict[str, LowRankKV] = {}
+    for i, (name, g) in enumerate(groups.items()):
+        cols = g["cols"]
+
+        def sub_batches(_cols=cols):
+            for U in batches():
+                yield U[:, _cols]
+
+        sub_layout = {"dim": len(cols), "layers": g["layers"],
+                      "nkv": layout["nkv"], "hd": layout["hd"]}
+        # 过采样下限：保留秩 k 只占随机子空间 r 的 1/3 以内。每组原生维度比全局小一个
+        # 数量级，套用同一个 +64 会让 r≈1.37k（用了 73% 的子空间），挑出来的"主成分"
+        # 只是对真子空间的粗糙近似——实测分组零训练 5.5%，比全局 23.5% 还差。
+        over = max(int(oversample), 2 * int(budget[name]))
+        say(f"[fit-grouped] {name}: native={len(cols)} -> latent={budget[name]} "
+            f"r={min(len(cols), int(budget[name]) + over)} "
+            f"(layers {g['layers'][0]}..{g['layers'][-1]}, n={len(g['layers'])})")
+        parts[name] = fit_lowrank(sub_batches, sub_layout, dim=budget[name],
+                                  oversample=over, device=device,
+                                  seed=int(seed) + i, log=say)
+    return GroupedLowRankKV(parts, layout, n_segments, groups,
+                            {"latent_dim_requested": int(latent_dim),
+                             "oversample": int(oversample)})
+
+
 def describe() -> str:
-    return "[kv_lowrank] 流式随机化低秩（3 遍扫描）：逐维标准化 + 全局共享线性基"
+    return "[kv_lowrank] 流式随机化低秩（3 遍扫描）：逐维标准化 + 全局/分组共享线性基"
 
 
 if __name__ == "__main__":

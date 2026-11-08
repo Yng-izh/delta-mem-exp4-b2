@@ -1,10 +1,0 @@
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:11,  5.54it/s]Loading weights:   4%|▍         | 16/398 [00:00<00:05, 68.21it/s]Loading weights:   9%|▉         | 37/398 [00:00<00:02, 121.18it/s]Loading weights:  15%|█▍        | 58/398 [00:00<00:02, 151.57it/s]Loading weights:  19%|█▉        | 77/398 [00:00<00:01, 162.13it/s]Loading weights:  24%|██▍       | 95/398 [00:00<00:01, 164.98it/s]Loading weights:  29%|██▊       | 114/398 [00:00<00:01, 170.53it/s]Loading weights:  34%|███▍      | 135/398 [00:00<00:01, 180.57it/s]Loading weights:  39%|███▊      | 154/398 [00:01<00:01, 183.20it/s]Loading weights:  43%|████▎     | 173/398 [00:01<00:01, 182.49it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 176.11it/s]Loading weights:  54%|█████▎    | 213/398 [00:01<00:01, 184.00it/s]Loading weights:  59%|█████▉    | 234/398 [00:01<00:00, 189.54it/s]Loading weights:  64%|██████▍   | 254/398 [00:01<00:00, 191.66it/s]Loading weights:  69%|██████▉   | 274/398 [00:01<00:00, 189.42it/s]Loading weights:  74%|███████▍  | 294/398 [00:01<00:00, 186.87it/s]Loading weights:  79%|███████▊  | 313/398 [00:01<00:00, 181.99it/s]Loading weights:  84%|████████▍ | 334/398 [00:01<00:00, 189.63it/s]Loading weights:  89%|████████▉ | 356/398 [00:02<00:00, 191.28it/s]Loading weights:  95%|█████████▍| 377/398 [00:02<00:00, 194.67it/s]Loading weights: 100%|█████████▉| 397/398 [00:02<00:00, 196.14it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 174.26it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-[model] hidden=2560 layers=36 uv_dim=61440 layers=6..35
-[fit] 训练样本 9997 条，编码协议=anchor，token 预算=30000
-[fit] tokens=30070 native_dim=61440 target_dim=2048 r=2112
-[fit] 随机投影累加完成，开始 QR
-[fit] 前 2048 个主成分累计解释方差 99.83%
-[fit] 基底 -> /data/zhangjiayang/yyz3/results/exp_e_lowrank/kv_lowrank_2048.pt  {'dim': 2048, 'native_dim': 61440, 'bytes_per_token': 4096, 'native_bytes_per_token': 122880, 'ratio': 30.0, 'layers': [6, 35]}

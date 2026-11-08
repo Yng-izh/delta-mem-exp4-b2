@@ -791,8 +791,8 @@ def capture_uv(model: Any, tokenizer: Any, split: Dict[str, Any], encoding: str,
 
 
 def memory_kv_from_uv(model: Any, U: torch.Tensor, insert_at: int,
-                      layers: Sequence[int], rope: Optional[nn.Module] = None
-                      ) -> "MemoryKV":
+                      layers: Sequence[int], rope: Optional[nn.Module] = None,
+                      positions: Optional[Any] = None) -> "MemoryKV":
     """把跨层 Pre-RoPE K/V 还原成 `MemoryKV`（按逻辑位置施 RoPE），交回中间插入机制。
 
     **不压缩时的恒等路径**：`U` 直接来自 `capture_uv` 时，这一步的结果必须与
@@ -805,8 +805,15 @@ def memory_kv_from_uv(model: Any, U: torch.Tensor, insert_at: int,
         raise ValueError(f"U 必须是 [N,{layout['dim']}]，得到 {tuple(U.shape)}")
     n = int(U.shape[0])
     dev = LM._model_device(model)
-    positions = torch.arange(int(insert_at), int(insert_at) + n, device=dev)
-    cos, sin = _rope_cos_sin(rope, U.dtype, dev, positions)
+    if positions is None:
+        pos = torch.arange(int(insert_at), int(insert_at) + n, device=dev)
+    else:
+        # 序列压缩（实验 F 阶段二）后记忆长度可以短于 E 段：此时每个槽的位置由调用方
+        # 给出（一般是它覆盖的第一个原始位置），不能再用"从 insert_at 起连续"这个假设。
+        pos = torch.as_tensor(positions, dtype=torch.long, device=dev).reshape(-1)
+        if int(pos.numel()) != n:
+            raise ValueError(f"positions 长度 {int(pos.numel())} != 记忆长度 {n}")
+    cos, sin = _rope_cos_sin(rope, U.dtype, dev, pos)
     nkv, hd = layout["nkv"], layout["hd"]
     per: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
     for l in layout["per_layer"]:

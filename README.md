@@ -80,6 +80,10 @@ E2/E3/E4、`L_cov` 调参、独立词形头**全部暂停**（E1 已证伪"语�
 | `eval_midlayer_kv.py` | 实验 D 的零训练对照：D0 等价性 / D1 编码协议 / D2 注入起点，各带 wrong 反事实 |
 | `kv_lowrank.py` | 实验 E：跨层 Pre-RoPE K/V 的流式线性低秩压缩（逐维标准化 + 全局共享基，三遍随机化拟合） |
 | `eval_kv_lowrank.py` | 实验 E：拟合基底 / 200 题对比未压缩与 PCA-512/1024/2048（含恒等门槛与 wrong） |
+| `fadkv_codec.py` | 实验 F：分层 K/V 解耦的分组线性编解码 + 双粒度（锚点/池化）序列压缩 |
+| `train_fadkv.py` | 实验 F：功能蒸馏训练（L_QA + L_kv + L_KL + L_attn，冻结主干） |
+| `eval_fadkv.py` | 实验 F 主表：native / pca1024 / fadkv1 / fadkv2（EM + F1 + 存储与序列保留率） |
+| `tools/diag_kv_by_type.py` | 压缩误差按 token 类型（数字/实体/关系/功能）与层段组分层，定位预算失衡 |
 | `tools/probe_readout_capacity.py` | 逐槽等预算下原生 BPE vs 潜层（实验 B 的基线来源） |
 | `tools/cmp_readout.py` | 两份 eval 产出逐题配对比较（McNemar 精确二项） |
 | `tools/diag_router_cache.py` | 缓存路径与训练路径逐题对拍（kfeat / picks / 召回） |
