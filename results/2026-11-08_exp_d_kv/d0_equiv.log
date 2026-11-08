@@ -1,0 +1,49 @@
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:18,  5.05it/s]Loading weights:   6%|▋         | 25/398 [00:00<00:03, 98.08it/s]Loading weights:  12%|█▏        | 47/398 [00:00<00:02, 137.06it/s]Loading weights:  17%|█▋        | 69/398 [00:00<00:02, 159.40it/s]Loading weights:  23%|██▎       | 91/398 [00:00<00:01, 173.25it/s]Loading weights:  28%|██▊       | 113/398 [00:00<00:01, 179.60it/s]Loading weights:  34%|███▍      | 135/398 [00:00<00:01, 185.63it/s]Loading weights:  39%|███▉      | 157/398 [00:00<00:01, 188.14it/s]Loading weights:  45%|████▍     | 179/398 [00:01<00:01, 193.95it/s]Loading weights:  51%|█████     | 201/398 [00:01<00:00, 197.38it/s]Loading weights:  56%|█████▌    | 223/398 [00:01<00:00, 200.12it/s]Loading weights:  62%|██████▏   | 245/398 [00:01<00:00, 202.37it/s]Loading weights:  67%|██████▋   | 267/398 [00:01<00:00, 201.46it/s]Loading weights:  73%|███████▎  | 289/398 [00:01<00:00, 201.17it/s]Loading weights:  78%|███████▊  | 311/398 [00:01<00:00, 199.90it/s]Loading weights:  84%|████████▎ | 333/398 [00:01<00:00, 199.52it/s]Loading weights:  89%|████████▉ | 354/398 [00:01<00:00, 197.93it/s]Loading weights:  94%|█████████▍| 375/398 [00:02<00:00, 200.72it/s]Loading weights:  99%|█████████▉| 396/398 [00:02<00:00, 199.12it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 183.75it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[model] hidden=2560 layers=36 mode=equivalence arms=['text_full', 'prefix_kv', 'kv:full_prefix:0', 'kv:full_prefix:0:wrong']
+[midlayer_kv] start_layer=0 max_mem_tokens=320 encodings=('full_prefix', 'bare', 'anchor')
+  [item 0] gold='1838' split=exact ns=18 ne=63 nt=48
+      text_full                  ✓ '1838'
+      prefix_kv                  ✓ '1838'
+      kv:full_prefix:0           ✓ '1838'
+      kv:full_prefix:0:wrong     ✗ '1969'
+  [item 1] gold='Drifting' split=exact ns=18 ne=55 nt=24
+      text_full                  ✓ 'Drifting'
+      prefix_kv                  ✓ 'Drifting'
+      kv:full_prefix:0           ✓ 'Drifting'
+      kv:full_prefix:0:wrong     ✗ 'D1NZ is not a series based on any oversteering technique. There'
+[progress] 10/15 text_full=0.700 prefix_kv=0.700 kv:full_prefix:0=0.700 kv:full_prefix:0:wrong=0.000 elapsed=16s eta=8s
+
+| 臂 | 首步 logits max|Δ| | Top-1 一致 | 生成串一致 | 均分（EM） |
+|---|---|---|---|---|
+| prefix_kv | 0.750 | 15/15 | 15/15 | 0.667 |
+| kv:full_prefix:0 | 0.781 | 15/15 | 15/15 | 0.667 |
+| kv:full_prefix:0:wrong | 40.375 | 3/15 | 1/15 | 0.067 |
+
+[eq] EQ_PASS 等价性通过
+
+| 实验模式 | EM% | Entity EM% | Wrong EM% | Correct−Wrong | 相对明文 |
+|---|---|---|---|---|---|
+| text_full | 66.7 | 50.0 | — | — | 100% |
+| prefix_kv | 66.7 | 50.0 | — | — | 100% |
+| kv:full_prefix:0 | 66.7 | 50.0 | 6.7 | +60.0 | 100% |
+
+| 配对比较 | A% | B% | 差 | 只有A对 | 只有B对 | p |
+|---|---|---|---|---|---|---|
+| kv:full_prefix:0 vs text_full | 66.7 | 66.7 | +0.0 | 0 | 0 | 1.0000 |
+| kv:full_prefix:0:wrong vs text_full | 6.7 | 66.7 | -60.0 | 0 | 9 | 0.0039 |
+| kv:full_prefix:0:wrong vs kv:full_prefix:0 | 6.7 | 66.7 | -60.0 | 0 | 9 | 0.0039 |
+
+| 题型 | n | text_full | prefix_kv | kv:full_prefix:0 |
+|---|---|---|---|---|
+| date | 2 | 100.0 | 100.0 | 100.0 |
+| entity | 10 | 50.0 | 50.0 | 50.0 |
+| number | 1 | 100.0 | 100.0 | 100.0 |
+| yesno | 2 | 100.0 | 100.0 | 100.0 |
+
+[切分口径] {'exact': 15}
+[判据:d0] D0 通过：full_prefix@L0 0.667 ≈ 明文 0.667（差 +0.0 点）
+[判据:text] 最佳 KV 臂 kv:full_prefix:0 = 0.667，保留明文 100.0%（门槛 45% 达到）
+{"text_full": 0.6667, "prefix_kv": 0.6667, "kv:full_prefix:0": 0.6667, "kv:full_prefix:0:wrong": 0.0667}

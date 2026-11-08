@@ -76,8 +76,8 @@ E2/E3/E4、`L_cov` 调参、独立词形头**全部暂停**（E1 已证伪"语�
 | `tools/train_router_stage1.py` | 阶段一：只训 Router，训完直接报召回 |
 | `reader_memory.py` | 实验 A/B：Query-conditioned Reader + 完整/槽记忆构建 + shuffle 对照 |
 | `train_reader.py` | 实验 A/B 的训练与评测（none / shuffle / full / oracle_text） |
-| `midlayer_kv.py` | 实验 C/D：中间层原生 KV 读出（H¹⁸ → 各层 K/V → 原生注意力）+ 残差 Adapter 脚手架 |
-| `eval_midlayer_kv.py` | 实验 C 的零训练对照（none / oracle_text / upper_kv / h18_kv，各带 wrong 反事实） |
+| `midlayer_kv.py` | 实验 D：把证据的逐层真实 KV 插在 S 与 T 之间，由原生注意力读（S/E/T 切分、逻辑位置 RoPE、插入掩码） |
+| `eval_midlayer_kv.py` | 实验 D 的零训练对照：D0 等价性 / D1 编码协议 / D2 注入起点，各带 wrong 反事实 |
 | `tools/probe_readout_capacity.py` | 逐槽等预算下原生 BPE vs 潜层（实验 B 的基线来源） |
 | `tools/cmp_readout.py` | 两份 eval 产出逐题配对比较（McNemar 精确二项） |
 | `tools/diag_router_cache.py` | 缓存路径与训练路径逐题对拍（kfeat / picks / 召回） |
