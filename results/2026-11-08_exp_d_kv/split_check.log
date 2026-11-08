@@ -1,4 +1,0 @@
-[dry] idx=0 method=exact ns=18 ne=121 nt=24 len_full=163 一致性=True
-[dry] idx=1 method=exact ns=18 ne=123 nt=35 len_full=176 一致性=True
-[dry] idx=2 method=exact ns=18 ne=63 nt=48 len_full=129 一致性=True
-[dry] 可切分 30 / 失败 0  切法分布={'exact': 30} arms=['none', 'text_full', 'prefix_kv', 'kv:full_prefix:0', 'kv:full_prefix:0:wrong', 'kv:bare:0', 'kv:bare:0:wrong', 'kv:anchor:0', 'kv:anchor:0:wrong', 'kv:full_prefix:6', 'kv:full_prefix:6:wrong', 'kv:full_prefix:12', 'kv:full_prefix:12:wrong', 'kv:full_prefix:18', 'kv:full_prefix:18:wrong'] encodings=['anchor', 'bare', 'full_prefix']

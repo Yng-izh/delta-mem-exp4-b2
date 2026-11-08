@@ -1,112 +1,0 @@
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:09,  5.73it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 86.92it/s]Loading weights:  10%|▉         | 38/398 [00:00<00:02, 120.70it/s]Loading weights:  15%|█▌        | 60/398 [00:00<00:02, 151.11it/s]Loading weights:  21%|██        | 82/398 [00:00<00:01, 167.70it/s]Loading weights:  26%|██▌       | 104/398 [00:00<00:01, 179.93it/s]Loading weights:  32%|███▏      | 126/398 [00:00<00:01, 187.34it/s]Loading weights:  37%|███▋      | 148/398 [00:00<00:01, 193.37it/s]Loading weights:  43%|████▎     | 170/398 [00:01<00:01, 195.50it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 197.59it/s]Loading weights:  54%|█████▍    | 214/398 [00:01<00:00, 199.31it/s]Loading weights:  59%|█████▉    | 236/398 [00:01<00:00, 199.41it/s]Loading weights:  65%|██████▍   | 258/398 [00:01<00:00, 200.11it/s]Loading weights:  70%|███████   | 280/398 [00:01<00:00, 201.93it/s]Loading weights:  76%|███████▌  | 302/398 [00:01<00:00, 203.44it/s]Loading weights:  81%|████████▏ | 324/398 [00:01<00:00, 204.91it/s]Loading weights:  87%|████████▋ | 346/398 [00:01<00:00, 205.03it/s]Loading weights:  92%|█████████▏| 368/398 [00:02<00:00, 204.53it/s]Loading weights:  98%|█████████▊| 390/398 [00:02<00:00, 203.46it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 187.02it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-[model] hidden=2560 layers=36 mode=main arms=['none', 'text_full', 'prefix_kv', 'kv:full_prefix:0', 'kv:full_prefix:0:wrong', 'kv:bare:0', 'kv:bare:0:wrong', 'kv:anchor:0', 'kv:anchor:0:wrong', 'kv:full_prefix:6', 'kv:full_prefix:6:wrong', 'kv:full_prefix:12', 'kv:full_prefix:12:wrong', 'kv:full_prefix:18', 'kv:full_prefix:18:wrong']
-[midlayer_kv] start_layer=0 max_mem_tokens=320 encodings=('full_prefix', 'bare', 'anchor')
-  [item 0] gold='Chief of Protocol' split=exact ns=18 ne=127 nt=31
-      none                       ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      text_full                  ✗ 'United States ambassador to Ghana and to Czechoslovakia, and Chief of Protocol'
-      prefix_kv                  ✗ 'United States ambassador to Ghana and to Czechoslovakia, and Chief of Protocol'
-      kv:full_prefix:0           ✗ 'United States ambassador to Ghana and to Czechoslovakia, and Chief of Protocol'
-      kv:full_prefix:0:wrong     ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      kv:bare:0                  ✗ 'Shirley Temple Black served as United States ambassador to Ghana and Czechoslovak'
-      kv:bare:0:wrong            ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      kv:anchor:0                ✗ 'United States ambassador to Ghana and to Czechoslovakia, and Chief of Protocol'
-      kv:anchor:0:wrong          ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      kv:full_prefix:6           ✗ 'Shirley Temple did not portray Corliss Archer in *Kiss and'
-      kv:full_prefix:6:wrong     ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      kv:full_prefix:12          ✗ 'Shirley Temple, not Shirley Temple Black, portrayed Corliss Archer in'
-      kv:full_prefix:12:wrong    ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-      kv:full_prefix:18          ✗ 'Shirley Temple Black, who portrayed Corliss Archer in the film *'
-      kv:full_prefix:18:wrong    ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
-  [item 1] gold='Animorphs' split=exact ns=18 ne=229 nt=39
-      none                       ✗ 'The Expanse'
-      text_full                  ✓ 'Animorphs'
-      prefix_kv                  ✓ 'Animorphs'
-      kv:full_prefix:0           ✓ 'Animorphs'
-      kv:full_prefix:0:wrong     ✗ "The series you're referring to is *The Expanse* — but it is"
-      kv:bare:0                  ✓ 'Animorphs'
-      kv:bare:0:wrong            ✗ "The science fantasy young adult series you're referring to is *The Expanse*"
-      kv:anchor:0                ✓ 'Animorphs'
-      kv:anchor:0:wrong          ✗ "The series you're referring to is *The Expanse* — however, it"
-      kv:full_prefix:6           ✓ 'Animorphs'
-      kv:full_prefix:6:wrong     ✗ 'There is no known science fantasy young adult series told in first person that features a'
-      kv:full_prefix:12          ✗ "The science fantasy young adult series you're referring to is **Animorphs**"
-      kv:full_prefix:12:wrong    ✗ "The science fantasy young adult series you're referring to is *The Expanse*"
-      kv:full_prefix:18          ✗ 'The science fantasy young adult series you\'re referring to is **"The Animorph'
-      kv:full_prefix:18:wrong    ✗ 'The science fantasy young adult series you\'re referring to is **"The Expanse'
-[progress] 10/200 none=0.100 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.200 kv:bare:0=0.400 kv:bare:0:wrong=0.100 kv:anchor:0=0.400 kv:anchor:0:wrong=0.200 kv:full_prefix:6=0.400 kv:full_prefix:6:wrong=0.100 kv:full_prefix:12=0.300 kv:full_prefix:12:wrong=0.100 kv:full_prefix:18=0.100 kv:full_prefix:18:wrong=0.000 elapsed=77s eta=1458s
-[progress] 20/200 none=0.200 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.200 kv:bare:0=0.400 kv:bare:0:wrong=0.150 kv:anchor:0=0.450 kv:anchor:0:wrong=0.200 kv:full_prefix:6=0.450 kv:full_prefix:6:wrong=0.150 kv:full_prefix:12=0.250 kv:full_prefix:12:wrong=0.100 kv:full_prefix:18=0.050 kv:full_prefix:18:wrong=0.000 elapsed=155s eta=1395s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 30/200 none=0.167 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.167 kv:bare:0=0.400 kv:bare:0:wrong=0.100 kv:anchor:0=0.433 kv:anchor:0:wrong=0.133 kv:full_prefix:6=0.533 kv:full_prefix:6:wrong=0.100 kv:full_prefix:12=0.233 kv:full_prefix:12:wrong=0.067 kv:full_prefix:18=0.033 kv:full_prefix:18:wrong=0.000 elapsed=244s eta=1380s
-[progress] 40/200 none=0.125 text_full=0.575 prefix_kv=0.575 kv:full_prefix:0=0.575 kv:full_prefix:0:wrong=0.125 kv:bare:0=0.500 kv:bare:0:wrong=0.075 kv:anchor:0=0.525 kv:anchor:0:wrong=0.100 kv:full_prefix:6=0.575 kv:full_prefix:6:wrong=0.075 kv:full_prefix:12=0.275 kv:full_prefix:12:wrong=0.050 kv:full_prefix:18=0.050 kv:full_prefix:18:wrong=0.000 elapsed=318s eta=1274s
-[progress] 50/200 none=0.120 text_full=0.580 prefix_kv=0.580 kv:full_prefix:0=0.580 kv:full_prefix:0:wrong=0.120 kv:bare:0=0.520 kv:bare:0:wrong=0.080 kv:anchor:0=0.540 kv:anchor:0:wrong=0.100 kv:full_prefix:6=0.580 kv:full_prefix:6:wrong=0.080 kv:full_prefix:12=0.280 kv:full_prefix:12:wrong=0.040 kv:full_prefix:18=0.040 kv:full_prefix:18:wrong=0.000 elapsed=398s eta=1194s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 60/200 none=0.133 text_full=0.567 prefix_kv=0.567 kv:full_prefix:0=0.567 kv:full_prefix:0:wrong=0.133 kv:bare:0=0.517 kv:bare:0:wrong=0.083 kv:anchor:0=0.533 kv:anchor:0:wrong=0.117 kv:full_prefix:6=0.533 kv:full_prefix:6:wrong=0.100 kv:full_prefix:12=0.233 kv:full_prefix:12:wrong=0.050 kv:full_prefix:18=0.033 kv:full_prefix:18:wrong=0.000 elapsed=482s eta=1125s
-[progress] 70/200 none=0.143 text_full=0.586 prefix_kv=0.586 kv:full_prefix:0=0.586 kv:full_prefix:0:wrong=0.114 kv:bare:0=0.514 kv:bare:0:wrong=0.071 kv:anchor:0=0.557 kv:anchor:0:wrong=0.100 kv:full_prefix:6=0.543 kv:full_prefix:6:wrong=0.086 kv:full_prefix:12=0.229 kv:full_prefix:12:wrong=0.043 kv:full_prefix:18=0.043 kv:full_prefix:18:wrong=0.000 elapsed=557s eta=1034s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 80/200 none=0.138 text_full=0.550 prefix_kv=0.550 kv:full_prefix:0=0.550 kv:full_prefix:0:wrong=0.113 kv:bare:0=0.475 kv:bare:0:wrong=0.062 kv:anchor:0=0.525 kv:anchor:0:wrong=0.100 kv:full_prefix:6=0.500 kv:full_prefix:6:wrong=0.075 kv:full_prefix:12=0.225 kv:full_prefix:12:wrong=0.037 kv:full_prefix:18=0.037 kv:full_prefix:18:wrong=0.000 elapsed=649s eta=973s
-[progress] 90/200 none=0.133 text_full=0.544 prefix_kv=0.544 kv:full_prefix:0=0.544 kv:full_prefix:0:wrong=0.100 kv:bare:0=0.444 kv:bare:0:wrong=0.056 kv:anchor:0=0.522 kv:anchor:0:wrong=0.089 kv:full_prefix:6=0.500 kv:full_prefix:6:wrong=0.067 kv:full_prefix:12=0.211 kv:full_prefix:12:wrong=0.033 kv:full_prefix:18=0.033 kv:full_prefix:18:wrong=0.000 elapsed=726s eta=888s
-[progress] 100/200 none=0.120 text_full=0.510 prefix_kv=0.510 kv:full_prefix:0=0.510 kv:full_prefix:0:wrong=0.090 kv:bare:0=0.410 kv:bare:0:wrong=0.050 kv:anchor:0=0.490 kv:anchor:0:wrong=0.080 kv:full_prefix:6=0.460 kv:full_prefix:6:wrong=0.060 kv:full_prefix:12=0.200 kv:full_prefix:12:wrong=0.030 kv:full_prefix:18=0.030 kv:full_prefix:18:wrong=0.000 elapsed=818s eta=818s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 110/200 none=0.109 text_full=0.518 prefix_kv=0.518 kv:full_prefix:0=0.518 kv:full_prefix:0:wrong=0.082 kv:bare:0=0.418 kv:bare:0:wrong=0.045 kv:anchor:0=0.500 kv:anchor:0:wrong=0.073 kv:full_prefix:6=0.473 kv:full_prefix:6:wrong=0.055 kv:full_prefix:12=0.200 kv:full_prefix:12:wrong=0.027 kv:full_prefix:18=0.027 kv:full_prefix:18:wrong=0.000 elapsed=894s eta=732s
-[progress] 120/200 none=0.100 text_full=0.508 prefix_kv=0.508 kv:full_prefix:0=0.508 kv:full_prefix:0:wrong=0.075 kv:bare:0=0.417 kv:bare:0:wrong=0.042 kv:anchor:0=0.492 kv:anchor:0:wrong=0.067 kv:full_prefix:6=0.450 kv:full_prefix:6:wrong=0.050 kv:full_prefix:12=0.192 kv:full_prefix:12:wrong=0.025 kv:full_prefix:18=0.025 kv:full_prefix:18:wrong=0.000 elapsed=982s eta=655s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 130/200 none=0.092 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.069 kv:bare:0=0.408 kv:bare:0:wrong=0.038 kv:anchor:0=0.485 kv:anchor:0:wrong=0.062 kv:full_prefix:6=0.431 kv:full_prefix:6:wrong=0.046 kv:full_prefix:12=0.185 kv:full_prefix:12:wrong=0.023 kv:full_prefix:18=0.023 kv:full_prefix:18:wrong=0.000 elapsed=1079s eta=581s
-[progress] 140/200 none=0.093 text_full=0.493 prefix_kv=0.493 kv:full_prefix:0=0.493 kv:full_prefix:0:wrong=0.064 kv:bare:0=0.407 kv:bare:0:wrong=0.036 kv:anchor:0=0.479 kv:anchor:0:wrong=0.057 kv:full_prefix:6=0.429 kv:full_prefix:6:wrong=0.043 kv:full_prefix:12=0.193 kv:full_prefix:12:wrong=0.021 kv:full_prefix:18=0.021 kv:full_prefix:18:wrong=0.000 elapsed=1160s eta=497s
-[progress] 150/200 none=0.100 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.073 kv:bare:0=0.407 kv:bare:0:wrong=0.040 kv:anchor:0=0.487 kv:anchor:0:wrong=0.067 kv:full_prefix:6=0.427 kv:full_prefix:6:wrong=0.053 kv:full_prefix:12=0.200 kv:full_prefix:12:wrong=0.027 kv:full_prefix:18=0.020 kv:full_prefix:18:wrong=0.000 elapsed=1244s eta=415s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 160/200 none=0.100 text_full=0.500 prefix_kv=0.500 kv:full_prefix:0=0.500 kv:full_prefix:0:wrong=0.069 kv:bare:0=0.406 kv:bare:0:wrong=0.037 kv:anchor:0=0.487 kv:anchor:0:wrong=0.062 kv:full_prefix:6=0.431 kv:full_prefix:6:wrong=0.050 kv:full_prefix:12=0.212 kv:full_prefix:12:wrong=0.025 kv:full_prefix:18=0.019 kv:full_prefix:18:wrong=0.000 elapsed=1329s eta=332s
-[progress] 170/200 none=0.100 text_full=0.518 prefix_kv=0.518 kv:full_prefix:0=0.518 kv:full_prefix:0:wrong=0.071 kv:bare:0=0.418 kv:bare:0:wrong=0.041 kv:anchor:0=0.506 kv:anchor:0:wrong=0.065 kv:full_prefix:6=0.441 kv:full_prefix:6:wrong=0.053 kv:full_prefix:12=0.218 kv:full_prefix:12:wrong=0.024 kv:full_prefix:18=0.018 kv:full_prefix:18:wrong=0.000 elapsed=1405s eta=248s
-[out] 中间结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json
-[progress] 180/200 none=0.100 text_full=0.522 prefix_kv=0.522 kv:full_prefix:0=0.522 kv:full_prefix:0:wrong=0.072 kv:bare:0=0.428 kv:bare:0:wrong=0.039 kv:anchor:0=0.511 kv:anchor:0:wrong=0.067 kv:full_prefix:6=0.450 kv:full_prefix:6:wrong=0.056 kv:full_prefix:12=0.222 kv:full_prefix:12:wrong=0.022 kv:full_prefix:18=0.017 kv:full_prefix:18:wrong=0.000 elapsed=1482s eta=165s
-[progress] 190/200 none=0.100 text_full=0.521 prefix_kv=0.521 kv:full_prefix:0=0.521 kv:full_prefix:0:wrong=0.074 kv:bare:0=0.426 kv:bare:0:wrong=0.037 kv:anchor:0=0.516 kv:anchor:0:wrong=0.068 kv:full_prefix:6=0.453 kv:full_prefix:6:wrong=0.053 kv:full_prefix:12=0.221 kv:full_prefix:12:wrong=0.021 kv:full_prefix:18=0.016 kv:full_prefix:18:wrong=0.000 elapsed=1568s eta=83s
-[progress] 200/200 none=0.095 text_full=0.530 prefix_kv=0.525 kv:full_prefix:0=0.530 kv:full_prefix:0:wrong=0.070 kv:bare:0=0.425 kv:bare:0:wrong=0.035 kv:anchor:0=0.520 kv:anchor:0:wrong=0.065 kv:full_prefix:6=0.455 kv:full_prefix:6:wrong=0.050 kv:full_prefix:12=0.225 kv:full_prefix:12:wrong=0.020 kv:full_prefix:18=0.015 kv:full_prefix:18:wrong=0.000 elapsed=1651s eta=0s
-
-| 实验模式 | EM% | Entity EM% | Wrong EM% | Correct−Wrong | 相对明文 |
-|---|---|---|---|---|---|
-| none | 9.5 | 4.2 | — | — | 18% |
-| text_full | 53.0 | 46.4 | — | — | 100% |
-| prefix_kv | 52.5 | 46.4 | — | — | 99% |
-| kv:full_prefix:0 | 53.0 | 46.4 | 7.0 | +46.0 | 100% |
-| kv:bare:0 | 42.5 | 37.3 | 3.5 | +39.0 | 80% |
-| kv:anchor:0 | 52.0 | 46.4 | 6.5 | +45.5 | 98% |
-| kv:full_prefix:6 | 45.5 | 41.6 | 5.0 | +40.5 | 86% |
-| kv:full_prefix:12 | 22.5 | 20.5 | 2.0 | +20.5 | 42% |
-| kv:full_prefix:18 | 1.5 | 1.8 | 0.0 | +1.5 | 3% |
-
-| 配对比较 | A% | B% | 差 | 只有A对 | 只有B对 | p |
-|---|---|---|---|---|---|---|
-| kv:full_prefix:0 vs text_full | 53.0 | 53.0 | +0.0 | 0 | 0 | 1.0000 |
-| kv:full_prefix:0:wrong vs text_full | 7.0 | 53.0 | -46.0 | 0 | 92 | 0.0000 |
-| kv:full_prefix:0:wrong vs kv:full_prefix:0 | 7.0 | 53.0 | -46.0 | 0 | 92 | 0.0000 |
-| kv:bare:0 vs text_full | 42.5 | 53.0 | -10.5 | 1 | 22 | 0.0000 |
-| kv:bare:0:wrong vs text_full | 3.5 | 53.0 | -49.5 | 0 | 99 | 0.0000 |
-| kv:bare:0:wrong vs kv:bare:0 | 3.5 | 42.5 | -39.0 | 1 | 79 | 0.0000 |
-| kv:anchor:0 vs text_full | 52.0 | 53.0 | -1.0 | 2 | 4 | 0.6875 |
-| kv:anchor:0:wrong vs text_full | 6.5 | 53.0 | -46.5 | 0 | 93 | 0.0000 |
-| kv:anchor:0:wrong vs kv:anchor:0 | 6.5 | 52.0 | -45.5 | 0 | 91 | 0.0000 |
-| kv:full_prefix:6 vs text_full | 45.5 | 53.0 | -7.5 | 7 | 22 | 0.0081 |
-| kv:full_prefix:6:wrong vs text_full | 5.0 | 53.0 | -48.0 | 0 | 96 | 0.0000 |
-| kv:full_prefix:6:wrong vs kv:full_prefix:6 | 5.0 | 45.5 | -40.5 | 3 | 84 | 0.0000 |
-| kv:full_prefix:12 vs text_full | 22.5 | 53.0 | -30.5 | 1 | 62 | 0.0000 |
-| kv:full_prefix:12:wrong vs text_full | 2.0 | 53.0 | -51.0 | 0 | 102 | 0.0000 |
-| kv:full_prefix:12:wrong vs kv:full_prefix:12 | 2.0 | 22.5 | -20.5 | 1 | 42 | 0.0000 |
-| kv:full_prefix:18 vs text_full | 1.5 | 53.0 | -51.5 | 0 | 103 | 0.0000 |
-| kv:full_prefix:18:wrong vs text_full | 0.0 | 53.0 | -53.0 | 0 | 106 | 0.0000 |
-| kv:full_prefix:18:wrong vs kv:full_prefix:18 | 0.0 | 1.5 | -1.5 | 0 | 3 | 0.2500 |
-
-| 题型 | n | none | text_full | prefix_kv | kv:full_prefix:0 | kv:bare:0 | kv:anchor:0 | kv:full_prefix:6 | kv:full_prefix:12 | kv:full_prefix:18 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| date | 11 | 0.0 | 90.9 | 81.8 | 90.9 | 54.5 | 72.7 | 72.7 | 36.4 | 0.0 |
-| entity | 166 | 4.2 | 46.4 | 46.4 | 46.4 | 37.3 | 46.4 | 41.6 | 20.5 | 1.8 |
-| number | 7 | 0.0 | 57.1 | 57.1 | 57.1 | 57.1 | 57.1 | 42.9 | 14.3 | 0.0 |
-| yesno | 16 | 75.0 | 93.8 | 93.8 | 93.8 | 81.2 | 93.8 | 68.8 | 37.5 | 0.0 |
-
-[切分口径] {'exact': 200}
-[判据:d0] D0 通过：full_prefix@L0 0.530 ≈ 明文 0.530（差 +0.0 点）
-[判据:text] 最佳 KV 臂 kv:full_prefix:0 = 0.530，保留明文 100.0%（门槛 45% 达到）
-{"none": 0.095, "text_full": 0.53, "prefix_kv": 0.525, "kv:full_prefix:0": 0.53, "kv:full_prefix:0:wrong": 0.07, "kv:bare:0": 0.425, "kv:bare:0:wrong": 0.035, "kv:anchor:0": 0.52, "kv:anchor:0:wrong": 0.065, "kv:full_prefix:6": 0.455, "kv:full_prefix:6:wrong": 0.05, "kv:full_prefix:12": 0.225, "kv:full_prefix:12:wrong": 0.02, "kv:full_prefix:18": 0.015, "kv:full_prefix:18:wrong": 0.0}
-[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_d_main/rows.jsonl
-[out] 完整结果 -> /data/zhangjiayang/yyz3/results/exp_d_main/midlayer_kv.json

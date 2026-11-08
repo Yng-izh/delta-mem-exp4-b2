@@ -1,0 +1,85 @@
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:03,  6.27it/s]Loading weights:   4%|▍         | 16/398 [00:00<00:05, 74.08it/s]Loading weights:   9%|▉         | 37/398 [00:00<00:02, 126.13it/s]Loading weights:  14%|█▍        | 57/398 [00:00<00:02, 151.59it/s]Loading weights:  19%|█▉        | 77/398 [00:00<00:01, 167.01it/s]Loading weights:  24%|██▍       | 95/398 [00:00<00:01, 167.70it/s]Loading weights:  29%|██▊       | 114/398 [00:00<00:01, 170.47it/s]Loading weights:  34%|███▍      | 135/398 [00:00<00:01, 181.19it/s]Loading weights:  39%|███▊      | 154/398 [00:00<00:01, 182.08it/s]Loading weights:  43%|████▎     | 173/398 [00:01<00:01, 180.75it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 174.55it/s]Loading weights:  54%|█████▎    | 213/398 [00:01<00:01, 183.58it/s]Loading weights:  59%|█████▉    | 234/398 [00:01<00:00, 187.79it/s]Loading weights:  64%|██████▎   | 253/398 [00:01<00:00, 187.55it/s]Loading weights:  68%|██████▊   | 272/398 [00:01<00:00, 185.42it/s]Loading weights:  73%|███████▎  | 291/398 [00:01<00:00, 176.57it/s]Loading weights:  78%|███████▊  | 312/398 [00:01<00:00, 181.92it/s]Loading weights:  83%|████████▎ | 332/398 [00:01<00:00, 181.62it/s]Loading weights:  88%|████████▊ | 351/398 [00:02<00:00, 183.01it/s]Loading weights:  93%|█████████▎| 370/398 [00:02<00:00, 176.55it/s]Loading weights:  98%|█████████▊| 389/398 [00:02<00:00, 176.13it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 171.38it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[model] hidden=2560 layers=36 uv_dim=61440 layers=6..35
+[eval] n=200 臂=['text_full', 'anchor6', 'anchor6_wrong', 'native_rt', 'pca512', 'pca1024', 'pca2048', 'pca512_wrong', 'pca1024_wrong', 'pca2048_wrong'] 基底={'dim': 2048, 'native_dim': 61440, 'bytes_per_token': 4096, 'native_bytes_per_token': 122880, 'ratio': 30.0, 'layers': [6, 35]}
+[identity] native_rt vs anchor6 第 6 层 K 的 max|Δ| = 0.000000（bf16 下应接近 0）
+  [item 0] gold='Chief of Protocol' ne=127
+      text_full        ✗ 'United States ambassador to Ghana and to Czechoslovakia, and Chief of Protocol'
+      anchor6          ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      anchor6_wrong    ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      native_rt        ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      pca512           ✗ 'The woman who portrayed Corliss Archer in *Kiss and Tell* is'
+      pca1024          ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      pca2048          ✗ 'Shirley Temple did not portray Corliss Archer in the film *K'
+      pca512_wrong     ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      pca1024_wrong    ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      pca2048_wrong    ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+  [item 1] gold='Animorphs' ne=229
+      text_full        ✓ 'Animorphs'
+      anchor6          ✓ 'Animorphs'
+      anchor6_wrong    ✗ 'There is no known science fantasy young adult series told in first person that features a'
+      native_rt        ✓ 'Animorphs'
+      pca512           ✗ 'The science fantasy young adult series you\'re referring to is **"Animorphs'
+      pca1024          ✓ 'Animorphs'
+      pca2048          ✓ 'Animorphs'
+      pca512_wrong     ✗ "The science fantasy young adult series you're referring to is *The Expanse*."
+      pca1024_wrong    ✗ "The science fantasy young adult series you're referring to is *The Expanse*."
+      pca2048_wrong    ✗ 'There is no known science fantasy young adult series told in first person that features a'
+[progress] 10/200 text_full=0.500 anchor6=0.400 anchor6_wrong=0.100 native_rt=0.400 pca512=0.200 pca1024=0.400 pca2048=0.400 pca512_wrong=0.100 pca1024_wrong=0.100 pca2048_wrong=0.100 elapsed=54s eta=1031s
+[progress] 20/200 text_full=0.500 anchor6=0.350 anchor6_wrong=0.100 native_rt=0.350 pca512=0.150 pca1024=0.250 pca2048=0.300 pca512_wrong=0.100 pca1024_wrong=0.100 pca2048_wrong=0.100 elapsed=112s eta=1012s
+[progress] 30/200 text_full=0.500 anchor6=0.433 anchor6_wrong=0.067 native_rt=0.433 pca512=0.167 pca1024=0.267 pca2048=0.333 pca512_wrong=0.067 pca1024_wrong=0.067 pca2048_wrong=0.067 elapsed=173s eta=980s
+[progress] 40/200 text_full=0.575 anchor6=0.500 anchor6_wrong=0.050 native_rt=0.500 pca512=0.150 pca1024=0.275 pca2048=0.375 pca512_wrong=0.050 pca1024_wrong=0.050 pca2048_wrong=0.050 elapsed=230s eta=918s
+[progress] 50/200 text_full=0.580 anchor6=0.500 anchor6_wrong=0.060 native_rt=0.500 pca512=0.160 pca1024=0.300 pca2048=0.400 pca512_wrong=0.060 pca1024_wrong=0.060 pca2048_wrong=0.060 elapsed=288s eta=864s
+[progress] 60/200 text_full=0.567 anchor6=0.450 anchor6_wrong=0.083 native_rt=0.450 pca512=0.133 pca1024=0.267 pca2048=0.367 pca512_wrong=0.083 pca1024_wrong=0.083 pca2048_wrong=0.083 elapsed=352s eta=820s
+[progress] 70/200 text_full=0.586 anchor6=0.471 anchor6_wrong=0.071 native_rt=0.471 pca512=0.143 pca1024=0.300 pca2048=0.386 pca512_wrong=0.071 pca1024_wrong=0.071 pca2048_wrong=0.071 elapsed=406s eta=755s
+[progress] 80/200 text_full=0.550 anchor6=0.438 anchor6_wrong=0.075 native_rt=0.438 pca512=0.125 pca1024=0.300 pca2048=0.362 pca512_wrong=0.062 pca1024_wrong=0.062 pca2048_wrong=0.075 elapsed=473s eta=710s
+[progress] 90/200 text_full=0.544 anchor6=0.400 anchor6_wrong=0.067 native_rt=0.400 pca512=0.133 pca1024=0.289 pca2048=0.333 pca512_wrong=0.056 pca1024_wrong=0.056 pca2048_wrong=0.067 elapsed=530s eta=648s
+[progress] 100/200 text_full=0.510 anchor6=0.370 anchor6_wrong=0.060 native_rt=0.370 pca512=0.130 pca1024=0.270 pca2048=0.310 pca512_wrong=0.050 pca1024_wrong=0.050 pca2048_wrong=0.060 elapsed=596s eta=596s
+[progress] 110/200 text_full=0.518 anchor6=0.382 anchor6_wrong=0.055 native_rt=0.382 pca512=0.127 pca1024=0.273 pca2048=0.327 pca512_wrong=0.045 pca1024_wrong=0.045 pca2048_wrong=0.055 elapsed=645s eta=528s
+[progress] 120/200 text_full=0.508 anchor6=0.375 anchor6_wrong=0.050 native_rt=0.375 pca512=0.117 pca1024=0.258 pca2048=0.317 pca512_wrong=0.042 pca1024_wrong=0.042 pca2048_wrong=0.050 elapsed=711s eta=474s
+[progress] 130/200 text_full=0.500 anchor6=0.354 anchor6_wrong=0.046 native_rt=0.354 pca512=0.108 pca1024=0.246 pca2048=0.300 pca512_wrong=0.038 pca1024_wrong=0.038 pca2048_wrong=0.046 elapsed=781s eta=420s
+[progress] 140/200 text_full=0.493 anchor6=0.364 anchor6_wrong=0.043 native_rt=0.364 pca512=0.114 pca1024=0.250 pca2048=0.300 pca512_wrong=0.036 pca1024_wrong=0.036 pca2048_wrong=0.043 elapsed=840s eta=360s
+[progress] 150/200 text_full=0.500 anchor6=0.367 anchor6_wrong=0.053 native_rt=0.367 pca512=0.120 pca1024=0.233 pca2048=0.300 pca512_wrong=0.047 pca1024_wrong=0.047 pca2048_wrong=0.053 elapsed=903s eta=301s
+[progress] 160/200 text_full=0.500 anchor6=0.375 anchor6_wrong=0.050 native_rt=0.375 pca512=0.119 pca1024=0.225 pca2048=0.300 pca512_wrong=0.044 pca1024_wrong=0.044 pca2048_wrong=0.050 elapsed=963s eta=241s
+[progress] 170/200 text_full=0.518 anchor6=0.388 anchor6_wrong=0.053 native_rt=0.388 pca512=0.124 pca1024=0.235 pca2048=0.306 pca512_wrong=0.047 pca1024_wrong=0.047 pca2048_wrong=0.053 elapsed=1019s eta=180s
+[progress] 180/200 text_full=0.522 anchor6=0.400 anchor6_wrong=0.056 native_rt=0.400 pca512=0.133 pca1024=0.239 pca2048=0.311 pca512_wrong=0.050 pca1024_wrong=0.050 pca2048_wrong=0.056 elapsed=1071s eta=119s
+[progress] 190/200 text_full=0.521 anchor6=0.400 anchor6_wrong=0.053 native_rt=0.400 pca512=0.126 pca1024=0.232 pca2048=0.305 pca512_wrong=0.047 pca1024_wrong=0.047 pca2048_wrong=0.053 elapsed=1137s eta=60s
+[progress] 200/200 text_full=0.530 anchor6=0.405 anchor6_wrong=0.050 native_rt=0.405 pca512=0.125 pca1024=0.230 pca2048=0.310 pca512_wrong=0.045 pca1024_wrong=0.045 pca2048_wrong=0.050 elapsed=1198s eta=0s
+
+| 方法 | 每 token 存储 | EM% | Entity EM% | Wrong EM% | Correct−Wrong | 相对明文 | 保留未压缩 | KV 相对误差 |
+|---|---|---|---|---|---|---|---|---|
+| text_full | 原始 token | 53.0 | 46.4 | — | — | 100% | 131% | — |
+| anchor6 | 120 KiB（1×） | 40.5 | 36.1 | 5.0 | +35.5 | 76% | 100% | 0（恒等） |
+| native_rt | 120 KiB（1×） | 40.5 | 36.1 | — | — | 76% | 100% | 0（恒等） |
+| pca512 | 1 KiB（120×） | 12.5 | 7.2 | 4.5 | +8.0 | 24% | 31% | 37.07% |
+| pca1024 | 2 KiB（60×） | 23.0 | 18.7 | 4.5 | +18.5 | 43% | 57% | 32.40% |
+| pca2048 | 4 KiB（30×） | 31.0 | 27.1 | 5.0 | +26.0 | 58% | 77% | 29.03% |
+
+| 配对比较（vs 未压缩 anchor6） | A% | B% | 差 | 只有A对 | 只有B对 | p |
+|---|---|---|---|---|---|---|
+| native_rt | 40.5 | 40.5 | +0.0 | 0 | 0 | 1.0000 |
+| pca512 | 12.5 | 40.5 | -28.0 | 3 | 59 | 0.0000 |
+| pca1024 | 23.0 | 40.5 | -17.5 | 3 | 38 | 0.0000 |
+| pca2048 | 31.0 | 40.5 | -9.5 | 4 | 23 | 0.0003 |
+| pca512_wrong | 4.5 | 40.5 | -36.0 | 4 | 76 | 0.0000 |
+| pca1024_wrong | 4.5 | 40.5 | -36.0 | 4 | 76 | 0.0000 |
+| pca2048_wrong | 5.0 | 40.5 | -35.5 | 4 | 75 | 0.0000 |
+
+| 题型 | n | text_full | anchor6 | native_rt | pca512 | pca1024 | pca2048 | pca512_wrong | pca1024_wrong | pca2048_wrong |
+|---|---|---|---|---|---|---|---|---|---|---|
+| date | 11 | 90.9 | 72.7 | 72.7 | 36.4 | 54.5 | 54.5 | 0.0 | 0.0 | 0.0 |
+| entity | 166 | 46.4 | 36.1 | 36.1 | 7.2 | 18.7 | 27.1 | 0.0 | 0.0 | 0.6 |
+| number | 7 | 57.1 | 57.1 | 57.1 | 14.3 | 28.6 | 42.9 | 0.0 | 0.0 | 0.0 |
+| yesno | 16 | 93.8 | 56.2 | 56.2 | 50.0 | 43.8 | 50.0 | 56.2 | 56.2 | 56.2 |
+
+[判据] baseline_anchor6: 0.405
+[判据] code: marginal
+[判据] pca1024: pca1024: EM=0.230 保留 56.8% Δ_memory=+18.5
+[判据] pca2048: pca2048: EM=0.310 保留 76.5% Δ_memory=+26.0
+[判据] pca512: pca512: EM=0.125 保留 30.9% Δ_memory=+8.0
+[判据] marginal: 2048 维只保留 76.5% -> 部分可压，需看精确实体/多跳是否集中受损（见分层表）
+{"text_full": 0.53, "anchor6": 0.405, "anchor6_wrong": 0.05, "native_rt": 0.405, "pca512": 0.125, "pca1024": 0.23, "pca2048": 0.31, "pca512_wrong": 0.045, "pca1024_wrong": 0.045, "pca2048_wrong": 0.05}
+[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_e_lowrank/rows.jsonl
+[out] 汇总 -> /data/zhangjiayang/yyz3/results/exp_e_lowrank/summary.json

@@ -67,6 +67,9 @@ MID_KV_START_LAYER = LM._env_int("MID_KV_START_LAYER", 0)
 MID_KV_MAX_MEM_TOKENS = LM._env_int("MID_KV_MAX_MEM_TOKENS", 320)
 # 离线编码协议
 MID_KV_ENCODINGS = ("full_prefix", "bare", "anchor")
+# 实验 E 默认取哪几层的跨层 K/V（D2 已量出 L6 是有效读取起点，第一轮只跑这一段）
+MID_KV_UV_LO = LM._env_int("MID_KV_UV_LO", 6)
+MID_KV_UV_HI = LM._env_int("MID_KV_UV_HI", 35)
 
 
 # ---------------------------------------------------------------------
@@ -319,6 +322,23 @@ def capture_span_hidden(model: Any, ids: Sequence[int], span_start: int,
             for l in need}
 
 
+def encoding_ids(tokenizer: Any, split: Dict[str, Any],
+                 encoding: str) -> Tuple[List[int], int]:
+    """某种离线编码协议喂进主干的 token 序列，以及 E 段在其中的起始下标。
+
+    编码协议只改"离线那一次前向看到了什么"，不改 E 段本身，也不改在线逻辑位置。
+    """
+    enc = str(encoding)
+    if enc not in MID_KV_ENCODINGS:
+        raise ValueError(f"未知编码协议 {enc!r}，可选 {MID_KV_ENCODINGS}")
+    if enc == "full_prefix":
+        return list(split["ids_S"]) + list(split["ids_E"]), len(split["ids_S"])
+    if enc == "bare":
+        return list(split["ids_E"]), 0
+    a = _ids_of(tokenizer, MID_KV_ANCHOR_TEXT)
+    return a + list(split["ids_E"]), len(a)
+
+
 def build_evidence_kv(model: Any, tokenizer: Any, split: Dict[str, Any],
                       encoding: str, pos_start: int, n_tokens: int,
                       layers: Sequence[int], rope: Optional[nn.Module] = None,
@@ -329,19 +349,8 @@ def build_evidence_kv(model: Any, tokenizer: Any, split: Dict[str, Any],
     隐藏状态、但插在本题的位置上，所以这两个量不能从 `split` 里偷。
     """
     enc = str(encoding)
-    if enc not in MID_KV_ENCODINGS:
-        raise ValueError(f"未知编码协议 {enc!r}，可选 {MID_KV_ENCODINGS}")
     rope = rope_module(model) if rope is None else rope
-    if enc == "full_prefix":
-        ids = list(split["ids_S"]) + list(split["ids_E"])
-        span_start = len(split["ids_S"])
-    elif enc == "bare":
-        ids = list(split["ids_E"])
-        span_start = 0
-    else:                                            # anchor
-        a = _ids_of(tokenizer, MID_KV_ANCHOR_TEXT)
-        ids = a + list(split["ids_E"])
-        span_start = len(a)
+    ids, span_start = encoding_ids(tokenizer, split, enc)
     span_len = min(int(split["ne"]), int(n_tokens))
     if span_len <= 0:
         raise ValueError("E 段长度为 0")
@@ -695,6 +704,120 @@ def prefix_kv_generate(model: Any, tokenizer: Any, split: Dict[str, Any],
             "n_out": len(out_ids), "n_s": split["ns"], "n_t": split["nt"],
             "cache": "native"}
     return (pred, meta, first) if return_logits else (pred, meta)
+
+
+# ---------------------------------------------------------------------
+# 5) 跨层 Pre-RoPE K/V（实验 E 的压缩对象）
+# ---------------------------------------------------------------------
+def uv_layout(model: Any, layers: Sequence[int]) -> Dict[str, Any]:
+    """跨层 K/V 拼成一个长向量的**布局**：每层先 K 后 V，各自按 head-major 展平。
+
+    为什么要这份布局而不是直接拼张量：压缩器工作在"每 token 一个长向量"上，
+    解码时必须**逐位**知道每一段属于哪一层的 K 还是 V。靠位置算术猜一次就可能整体错位，
+    而错位不会报错，只会让 QA 掉点。
+    """
+    layers_l = decoder_layers(model)
+    ls = [int(l) for l in layers]
+    if not ls:
+        raise ValueError("layers 不能为空")
+    attn = attn_of(layers_l[ls[0]])
+    nkv, hd = num_kv_heads_of(attn), head_dim_of(attn)
+    width = nkv * hd
+    groups: List[Tuple[str, int, int]] = []
+    per_layer: Dict[int, Dict[str, Tuple[int, int]]] = {}
+    off = 0
+    for l in ls:
+        a = attn_of(layers_l[l])
+        if num_kv_heads_of(a) != nkv or head_dim_of(a) != hd:
+            raise ValueError(f"第 {l} 层的 kv 头数/head_dim 与第 {ls[0]} 层不一致")
+        per_layer[l] = {"k": (off, off + width)}
+        groups.append((f"L{l}.k", off, off + width))
+        off += width
+        per_layer[l]["v"] = (off, off + width)
+        groups.append((f"L{l}.v", off, off + width))
+        off += width
+    return {"layers": ls, "dim": off, "nkv": nkv, "hd": hd, "width": width,
+            "groups": groups, "per_layer": per_layer}
+
+
+@torch.no_grad()
+def capture_uv(model: Any, tokenizer: Any, split: Dict[str, Any], encoding: str,
+               layers: Sequence[int], n_tokens: Optional[int] = None,
+               pad_repeat: bool = False) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    """按某种编码协议编码证据，返回 E 段的**跨层 Pre-RoPE K/V**：[N, 61440]。
+
+    Key 取在 `k_norm` **之后**、RoPE **之前**；Value 是原生投影输出。这样压缩器不必
+    去拟合"已经被某个绝对位置旋转过"的表示，恢复时按在线逻辑位置重新施加 RoPE 即可。
+
+    `pad_repeat` 只给 wrong 反事实用（别的题目的证据可能更短，但要占满本题 E 的位置区间）。
+    """
+    layout = uv_layout(model, layers)
+    ids, span_start = encoding_ids(tokenizer, split, encoding)
+    span_len = int(split["ne"]) if n_tokens is None else min(int(split["ne"]), int(n_tokens))
+    if span_len <= 0:
+        raise ValueError("E 段长度为 0")
+    dev = LM._model_device(model)
+    t = torch.tensor([list(int(i) for i in ids)], dtype=torch.long, device=dev)
+    with LM.delta_write_disabled(model):
+        out = model(input_ids=t, use_cache=False, output_hidden_states=True)
+    hs = getattr(out, "hidden_states", None)
+    if hs is None:
+        raise RuntimeError("主干没有返回 hidden_states")
+    layers_l = decoder_layers(model)
+    blocks: List[torch.Tensor] = []
+    for l in layout["layers"]:
+        a = attn_of(layers_l[l])
+        h = hs[l][:, span_start:span_start + span_len]
+        x = input_norm_of(layers_l[l])(h)
+        n = int(x.shape[1])
+        hd, nkv = layout["hd"], layout["nkv"]
+        k = a.k_proj(x).view(1, n, nkv, hd)
+        kn = getattr(a, "k_norm", None)
+        if isinstance(kn, nn.Module) and any(True for _ in kn.parameters()):
+            k = kn(k)
+        v = a.v_proj(x).view(1, n, nkv, hd)
+        blocks.append(k.reshape(n, nkv * hd))
+        blocks.append(v.reshape(n, nkv * hd))
+    U = torch.cat(blocks, dim=-1)
+    if int(U.shape[-1]) != int(layout["dim"]):
+        raise RuntimeError(f"拼出来的宽度 {int(U.shape[-1])} != 布局 {layout['dim']}")
+    if span_len < int(split["ne"]) or (n_tokens is not None and span_len < int(n_tokens)):
+        want = int(n_tokens) if n_tokens is not None else int(split["ne"])
+        if span_len < want:
+            if not pad_repeat:
+                raise ValueError(f"证据段只有 {span_len} 个 token，不足要求的 {want}")
+            U = torch.cat([U, U[-1:].repeat(want - span_len, 1)], dim=0)
+    return U.detach(), layout
+
+
+def memory_kv_from_uv(model: Any, U: torch.Tensor, insert_at: int,
+                      layers: Sequence[int], rope: Optional[nn.Module] = None
+                      ) -> "MemoryKV":
+    """把跨层 Pre-RoPE K/V 还原成 `MemoryKV`（按逻辑位置施 RoPE），交回中间插入机制。
+
+    **不压缩时的恒等路径**：`U` 直接来自 `capture_uv` 时，这一步的结果必须与
+    `build_evidence_kv` 逐位一致 —— 这是实验 E 的正确性门槛，先证明解码器没错，
+    才有资格把掉点归因给 PCA。
+    """
+    rope = rope_module(model) if rope is None else rope
+    layout = uv_layout(model, layers)
+    if U.dim() != 2 or int(U.shape[-1]) != int(layout["dim"]):
+        raise ValueError(f"U 必须是 [N,{layout['dim']}]，得到 {tuple(U.shape)}")
+    n = int(U.shape[0])
+    dev = LM._model_device(model)
+    positions = torch.arange(int(insert_at), int(insert_at) + n, device=dev)
+    cos, sin = _rope_cos_sin(rope, U.dtype, dev, positions)
+    nkv, hd = layout["nkv"], layout["hd"]
+    per: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+    for l in layout["per_layer"]:
+        ks, ke = layout["per_layer"][l]["k"]
+        vs, ve = layout["per_layer"][l]["v"]
+        k = U[:, ks:ke].reshape(1, n, nkv, hd).transpose(1, 2)
+        v = U[:, vs:ve].reshape(1, n, nkv, hd).transpose(1, 2)
+        per[int(l)] = (rot_positions(k, cos, sin).contiguous(), v.contiguous())
+    return MemoryKV(per, n_tokens=n, insert_at=int(insert_at),
+                    start_layer=min(per), encoding=f"uv:{min(per)}-{max(per)}",
+                    rope=rope, hidden_size=int(U.shape[-1]))
 
 
 def describe() -> str:

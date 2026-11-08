@@ -1,0 +1,52 @@
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<00:59,  6.69it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 93.58it/s]Loading weights:  10%|▉         | 38/398 [00:00<00:02, 121.94it/s]Loading weights:  15%|█▌        | 60/398 [00:00<00:02, 149.64it/s]Loading weights:  20%|██        | 81/398 [00:00<00:01, 167.47it/s]Loading weights:  26%|██▌       | 103/398 [00:00<00:01, 176.06it/s]Loading weights:  31%|███       | 124/398 [00:00<00:01, 184.75it/s]Loading weights:  36%|███▋      | 145/398 [00:00<00:01, 185.55it/s]Loading weights:  41%|████      | 164/398 [00:01<00:01, 185.95it/s]Loading weights:  46%|████▌     | 183/398 [00:01<00:01, 185.04it/s]Loading weights:  51%|█████     | 202/398 [00:01<00:01, 186.15it/s]Loading weights:  56%|█████▌    | 223/398 [00:01<00:00, 192.80it/s]Loading weights:  61%|██████    | 243/398 [00:01<00:00, 192.29it/s]Loading weights:  66%|██████▌   | 263/398 [00:01<00:00, 191.87it/s]Loading weights:  71%|███████   | 283/398 [00:01<00:00, 191.20it/s]Loading weights:  76%|███████▌  | 303/398 [00:01<00:00, 188.05it/s]Loading weights:  81%|████████  | 323/398 [00:01<00:00, 190.42it/s]Loading weights:  86%|████████▋ | 344/398 [00:01<00:00, 195.24it/s]Loading weights:  91%|█████████▏| 364/398 [00:02<00:00, 195.53it/s]Loading weights:  96%|█████████▋| 384/398 [00:02<00:00, 188.58it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 178.86it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[model] hidden=2560 layers=36 mode=main arms=['text_full', 'kv:anchor:6', 'kv:anchor:6:wrong', 'kv:anchor:0']
+[midlayer_kv] start_layer=0 max_mem_tokens=320 encodings=('full_prefix', 'bare', 'anchor')
+[progress] 10/200 text_full=0.500 kv:anchor:6=0.400 kv:anchor:6:wrong=0.100 kv:anchor:0=0.400 elapsed=18s eta=337s
+[progress] 20/200 text_full=0.500 kv:anchor:6=0.350 kv:anchor:6:wrong=0.100 kv:anchor:0=0.450 elapsed=37s eta=329s
+[progress] 30/200 text_full=0.500 kv:anchor:6=0.433 kv:anchor:6:wrong=0.067 kv:anchor:0=0.433 elapsed=57s eta=325s
+[progress] 40/200 text_full=0.575 kv:anchor:6=0.500 kv:anchor:6:wrong=0.050 kv:anchor:0=0.525 elapsed=73s eta=292s
+[progress] 50/200 text_full=0.580 kv:anchor:6=0.500 kv:anchor:6:wrong=0.060 kv:anchor:0=0.540 elapsed=90s eta=270s
+[progress] 60/200 text_full=0.567 kv:anchor:6=0.450 kv:anchor:6:wrong=0.083 kv:anchor:0=0.533 elapsed=111s eta=259s
+[progress] 70/200 text_full=0.586 kv:anchor:6=0.471 kv:anchor:6:wrong=0.071 kv:anchor:0=0.557 elapsed=127s eta=235s
+[progress] 80/200 text_full=0.550 kv:anchor:6=0.438 kv:anchor:6:wrong=0.075 kv:anchor:0=0.525 elapsed=148s eta=222s
+[progress] 90/200 text_full=0.544 kv:anchor:6=0.400 kv:anchor:6:wrong=0.067 kv:anchor:0=0.522 elapsed=166s eta=203s
+[progress] 100/200 text_full=0.510 kv:anchor:6=0.370 kv:anchor:6:wrong=0.060 kv:anchor:0=0.490 elapsed=189s eta=189s
+[progress] 110/200 text_full=0.518 kv:anchor:6=0.382 kv:anchor:6:wrong=0.055 kv:anchor:0=0.500 elapsed=205s eta=168s
+[progress] 120/200 text_full=0.508 kv:anchor:6=0.375 kv:anchor:6:wrong=0.050 kv:anchor:0=0.492 elapsed=225s eta=150s
+[progress] 130/200 text_full=0.500 kv:anchor:6=0.354 kv:anchor:6:wrong=0.046 kv:anchor:0=0.485 elapsed=249s eta=134s
+[progress] 140/200 text_full=0.493 kv:anchor:6=0.364 kv:anchor:6:wrong=0.043 kv:anchor:0=0.479 elapsed=267s eta=114s
+[progress] 150/200 text_full=0.500 kv:anchor:6=0.367 kv:anchor:6:wrong=0.053 kv:anchor:0=0.487 elapsed=287s eta=96s
+[progress] 160/200 text_full=0.500 kv:anchor:6=0.375 kv:anchor:6:wrong=0.050 kv:anchor:0=0.487 elapsed=306s eta=77s
+[progress] 170/200 text_full=0.518 kv:anchor:6=0.388 kv:anchor:6:wrong=0.053 kv:anchor:0=0.506 elapsed=324s eta=57s
+[progress] 180/200 text_full=0.522 kv:anchor:6=0.400 kv:anchor:6:wrong=0.056 kv:anchor:0=0.511 elapsed=341s eta=38s
+[progress] 190/200 text_full=0.521 kv:anchor:6=0.400 kv:anchor:6:wrong=0.053 kv:anchor:0=0.516 elapsed=360s eta=19s
+[progress] 200/200 text_full=0.530 kv:anchor:6=0.405 kv:anchor:6:wrong=0.050 kv:anchor:0=0.520 elapsed=379s eta=0s
+
+| 实验模式 | EM% | Entity EM% | Wrong EM% | Correct−Wrong | 相对明文 |
+|---|---|---|---|---|---|
+| text_full | 53.0 | 46.4 | — | — | 100% |
+| kv:anchor:6 | 40.5 | 36.1 | 5.0 | +35.5 | 76% |
+| kv:anchor:0 | 52.0 | 46.4 | — | — | 98% |
+
+| 配对比较 | A% | B% | 差 | 只有A对 | 只有B对 | p |
+|---|---|---|---|---|---|---|
+| kv:anchor:6 vs text_full | 40.5 | 53.0 | -12.5 | 6 | 31 | 0.0000 |
+| kv:anchor:6:wrong vs text_full | 5.0 | 53.0 | -48.0 | 0 | 96 | 0.0000 |
+| kv:anchor:6:wrong vs kv:anchor:6 | 5.0 | 40.5 | -35.5 | 4 | 75 | 0.0000 |
+| kv:anchor:0 vs text_full | 52.0 | 53.0 | -1.0 | 2 | 4 | 0.6875 |
+
+| 题型 | n | text_full | kv:anchor:6 | kv:anchor:0 |
+|---|---|---|---|---|
+| date | 11 | 90.9 | 72.7 | 72.7 |
+| entity | 166 | 46.4 | 36.1 | 46.4 |
+| number | 7 | 57.1 | 57.1 | 57.1 |
+| yesno | 16 | 93.8 | 56.2 | 93.8 |
+
+[切分口径] {'exact': 200}
+[判据:text] 最佳 KV 臂 kv:anchor:0 = 0.520，保留明文 98.1%（门槛 45% 达到）
+{"text_full": 0.53, "kv:anchor:6": 0.405, "kv:anchor:6:wrong": 0.05, "kv:anchor:0": 0.52}
+[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_e_lowrank/anchor_l6_rows.jsonl
+[out] 完整结果 -> /data/zhangjiayang/yyz3/results/exp_e_lowrank/anchor_l6.json
