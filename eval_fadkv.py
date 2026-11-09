@@ -40,15 +40,27 @@ import train_fadkv as TR
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description="FAD-KV 主表")
-    ap.add_argument("--data", required=True)
+    ap.add_argument("--data", default="", help="eval 需要；fit-global 不需要")
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--layers", default="6-35")
     ap.add_argument("--encoding", default="full_prefix", choices=MK.MID_KV_ENCODINGS)
-    ap.add_argument("--global-basis", default="", help="实验 E 的全局 LowRankKV（pca1024 臂）")
+    ap.add_argument("--stage", choices=("eval", "fit-global"), default="eval",
+                    help="fit-global：在**同一个 full_prefix 协议**下重新拟合全局 PCA 基线")
+    ap.add_argument("--fit-data", default="")
+    ap.add_argument("--fit-limit", type=int, default=0)
+    ap.add_argument("--fit-tokens", type=int, default=20000)
+    ap.add_argument("--fit-basis", default="", help="fit-global 的输出路径")
+    ap.add_argument("--global-basis", default="",
+                    help="全局 LowRankKV（pca1024 臂）；必须与本表同前缀拟合，否则不可比")
     ap.add_argument("--global-dim", type=int, default=1024)
     ap.add_argument("--stage1", default="", help="阶段一 codec ckpt")
     ap.add_argument("--stage2", default="", help="阶段二 codec ckpt")
     ap.add_argument("--wrong", action="store_true", help="给 fadkv1 加 wrong 反事实")
+    ap.add_argument("--latent-dtype", default="fp16", choices=("bf16", "fp16", "fp32"),
+                    help="fadkv 臂默认的潜码精度")
+    ap.add_argument("--latent-arms", default="",
+                    help="逗号分隔的精度列表（如 bf16,fp16,fp32）：同一权重下逐精度出臂，"
+                         "用来把'量化损失'从'训练配置差异'里拆出来")
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--system-prompt",
                     default="You are a helpful assistant. Answer with the shortest exact value.")
@@ -65,12 +77,61 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+def latent_dtype_of(args, name=None):
+    return TR.latent_dtype_of(args, name)
+
+
+def stage_fit_global(args, model, tokenizer, dev, layout, layers) -> int:
+    """在训练集上用**同一个 full_prefix 协议**拟合全局 PCA 基线（pca1024 臂）。
+
+    必须重拟合：实验 E 的基底是用 anchor 协议拟合的，而本表全部用 full_prefix。
+    不重拟合，41.0% 对 23.5% 的提升里就混着"前缀分布不同"这一项。
+    """
+    if not (args.fit_data and args.fit_basis):
+        raise SystemExit("fit-global 需要 --fit-data 与 --fit-basis")
+    data = T.load_synth_jsonl(args.fit_data, limit=int(args.fit_limit or 0),
+                              seed=int(args.seed))
+    if not data:
+        raise SystemExit(f"{args.fit_data} 里没有样本")
+
+    def batches():
+        used = 0
+        for it in data:
+            ev = ED.evidence_text(it)
+            if not ev.strip():
+                continue
+            try:
+                split = MK.split_prompt_tokens(tokenizer, args.system_prompt, ev,
+                                               it["question"])
+            except MK.SplitError:
+                continue
+            U, _ = MK.capture_uv(model, tokenizer, split, args.encoding, layers)
+            yield U
+            used += int(U.shape[0])
+            if int(args.fit_tokens) > 0 and used >= int(args.fit_tokens):
+                return
+
+    lr = LR.fit_lowrank(batches, layout, dim=int(args.global_dim), oversample=64,
+                        device=dev, seed=int(args.seed),
+                        log=lambda m: print(m, flush=True))
+    lr.save(args.fit_basis)
+    print(f"[fit-global] {args.encoding} 协议，{lr.describe()} -> {args.fit_basis}",
+          flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if not hasattr(args, "fit_tokens"):
+        args.fit_tokens = 20000
     layers = TR.parse_layers(args.layers)
-    arms = ["native"] + (["pca1024"] if args.global_basis else []) \
-        + (["fadkv1"] if args.stage1 else []) + (["fadkv2"] if args.stage2 else [])
-    if args.wrong and "fadkv1" in arms:
+    latent_arms = [x.strip() for x in str(args.latent_arms).split(",") if x.strip()]
+    arms = ["native"] + (["pca1024"] if args.global_basis else [])
+    if args.stage1:
+        arms += [f"fadkv1_{d}" for d in latent_arms] if latent_arms else ["fadkv1"]
+    if args.stage2:
+        arms += ["fadkv2"]
+    if args.wrong and any(a == "fadkv1" or a.startswith("fadkv1_") for a in arms):
         arms.append("fadkv1_wrong")
     if args.dry_run:
         print(f"[dry] layers={layers[0]}..{layers[-1]} arms={arms}")
@@ -83,6 +144,10 @@ def main(argv=None) -> int:
     model, tokenizer, dev, hidden = T._load_backbone(ns, dev)
     T.freeze_model(model)
     layout = MK.uv_layout(model, layers)
+    if args.stage == "fit-global":
+        return stage_fit_global(args, model, tokenizer, dev, layout, layers)
+    if not args.data:
+        raise SystemExit("eval 需要 --data")
 
     global_basis = None
     if args.global_basis:
@@ -99,12 +164,18 @@ def main(argv=None) -> int:
                               "seq_keep": 1.0}
     if codec1 is not None:
         d = codec1.describe()
-        storage["fadkv1"] = {"kib_per_token": round(d["bytes_per_token"] / 1024, 2),
-                             "seq_keep": 1.0}
+        dims = d["latent_dim"]
+        for a in [x for x in arms if x == "fadkv1" or x.startswith("fadkv1_")]:
+            dt = a.split("_", 1)[1] if "_" in a else str(args.latent_dtype)
+            nbytes = 4 if dt == "fp32" else 2
+            storage[a] = {"kib_per_token": round(dims * nbytes / 1024, 2),
+                          "seq_keep": 1.0, "latent_dtype": dt}
     if codec2 is not None:
         d = codec2.storage()
         storage["fadkv2"] = {"kib_per_token": d["kib_per_token"],
-                             "seq_keep": d["seq_keep"]}
+                             "kib_per_token_latent_only": d["kib_per_token_latent_only"],
+                             "seq_keep": d["seq_keep"],
+                             "note": "含每个槽 4 字节位置元数据"}
     print(f"[cfg] uv_dim={layout['dim']} arms={arms} storage={storage}", flush=True)
 
     data = T.load_synth_jsonl(args.data, limit=int(args.limit or 0), seed=int(args.seed))
@@ -164,6 +235,11 @@ def main(argv=None) -> int:
     return 0
 
 
+def MK_FAGS(tokenizer, split):
+    """锚点选择用的内容词标记（数字/实体/关系词）。"""
+    return FC.content_flags(tokenizer, split["ids_E"])
+
+
 def build_mem(arm, model, tokenizer, split, layers, args, global_basis, codec1, codec2,
               data, donor, i) -> MK.MemoryKV:
     if arm == "native":
@@ -172,12 +248,23 @@ def build_mem(arm, model, tokenizer, split, layers, args, global_basis, codec1, 
                                     layers=layers)
     if arm == "pca1024":
         U, _ = MK.capture_uv(model, tokenizer, split, args.encoding, layers)
-        return MK.memory_kv_from_uv(model, global_basis.decode(global_basis.encode(U)),
+        z = global_basis.encode(U)
+        if latent_dtype_of(args) is not None:
+            z = z.to(latent_dtype_of(args)).float()
+        return MK.memory_kv_from_uv(model, global_basis.decode(z),
                                     int(split["ns"]), layers)
-    if arm in ("fadkv1", "fadkv2"):
-        codec = codec1 if arm == "fadkv1" else codec2
-        mem, _ = TR.encode_to_memory(model, tokenizer, codec, split, layers,
-                                    1 if arm == "fadkv1" else 2, args.encoding)
+    # 只有后缀是**已知精度**时才算精度臂：否则 `fadkv1_wrong` 会被解析成 dtype='wrong'
+    if arm == "fadkv1" or (arm.startswith("fadkv1_")
+                           and arm.split("_", 1)[1] in TR.LATENT_DTYPES):
+        dt = latent_dtype_of(args, arm.split("_", 1)[1] if "_" in arm else None)
+        mem, _ = TR.encode_to_memory(
+            model, tokenizer, codec1, split, layers, 1, args.encoding,
+            MK_FAGS(tokenizer, split), dt)
+        return mem
+    if arm == "fadkv2":
+        mem, _ = TR.encode_to_memory(
+            model, tokenizer, codec2, split, layers, 2, args.encoding,
+            MK_FAGS(tokenizer, split), latent_dtype_of(args))
         return mem
     if arm == "fadkv1_wrong":
         dsplit = MK.split_prompt_tokens(tokenizer, args.system_prompt,
@@ -185,8 +272,8 @@ def build_mem(arm, model, tokenizer, split, layers, args, global_basis, codec1, 
                                         data[donor[i]]["question"])
         U, _ = MK.capture_uv(model, tokenizer, dsplit, args.encoding, layers,
                              n_tokens=int(split["ne"]), pad_repeat=True)
-        return MK.memory_kv_from_uv(model, codec1.decode(codec1.encode(U)),
-                                    int(split["ns"]), layers)
+        z = codec1.encode(U, latent_dtype_of(args))
+        return MK.memory_kv_from_uv(model, codec1.decode(z), int(split["ns"]), layers)
     raise ValueError(f"未知臂 {arm}")
 
 

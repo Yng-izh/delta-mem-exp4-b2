@@ -1,0 +1,63 @@
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:06,  5.96it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 88.56it/s]Loading weights:  10%|▉         | 38/398 [00:00<00:02, 121.34it/s]Loading weights:  15%|█▍        | 59/398 [00:00<00:02, 151.82it/s]Loading weights:  20%|██        | 81/398 [00:00<00:01, 168.07it/s]Loading weights:  26%|██▌       | 102/398 [00:00<00:01, 178.36it/s]Loading weights:  30%|███       | 121/398 [00:00<00:01, 177.74it/s]Loading weights:  35%|███▌      | 140/398 [00:00<00:01, 179.73it/s]Loading weights:  40%|███▉      | 159/398 [00:01<00:01, 176.64it/s]Loading weights:  45%|████▌     | 180/398 [00:01<00:01, 180.98it/s]Loading weights:  51%|█████     | 202/398 [00:01<00:01, 184.70it/s]Loading weights:  56%|█████▌    | 223/398 [00:01<00:00, 191.13it/s]Loading weights:  61%|██████    | 243/398 [00:01<00:00, 191.47it/s]Loading weights:  66%|██████▌   | 263/398 [00:01<00:00, 191.04it/s]Loading weights:  71%|███████   | 283/398 [00:01<00:00, 187.37it/s]Loading weights:  76%|███████▌  | 302/398 [00:01<00:00, 181.07it/s]Loading weights:  81%|████████  | 323/398 [00:01<00:00, 187.15it/s]Loading weights:  86%|████████▋ | 344/398 [00:01<00:00, 192.58it/s]Loading weights:  91%|█████████▏| 364/398 [00:02<00:00, 194.24it/s]Loading weights:  96%|█████████▋| 384/398 [00:02<00:00, 192.94it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 176.71it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[cfg] uv_dim=61440 arms=['native', 'pca1024', 'fadkv1', 'fadkv1_wrong'] storage={'native': {'kib_per_token': 120.0, 'seq_keep': 1.0}, 'pca1024': {'kib_per_token': 2.0, 'seq_keep': 1.0}, 'fadkv1': {'kib_per_token': 2.0, 'seq_keep': 1.0, 'latent_dtype': 'fp16'}, 'fadkv1_wrong': {'kib_per_token': 2.0, 'seq_keep': 1.0, 'latent_dtype': 'wrong'}}
+  [item 0] gold='Chief of Protocol' ne=127
+      native         ✗ 'Shirley Temple did not portray Corliss Archer in *Kiss and'
+      pca1024        ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      fadkv1         ✗ 'United States Ambassador to Ghana and United States Ambassador to Czechoslovakia. ('
+      fadkv1_wrong   ✗ 'Marine Fighting Squadron 214 (VMF-214)'
+  [item 1] gold='Animorphs' ne=229
+      native         ✓ 'Animorphs'
+      pca1024        ✓ 'Animorphs'
+      fadkv1         ✗ "The Chronicles of Earth's Children series"
+      fadkv1_wrong   ✗ "Melamor's Children (1980)"
+[progress] 10/200 native=0.400 pca1024=0.400 fadkv1=0.400 fadkv1_wrong=0.200 elapsed=18s eta=351s
+[progress] 20/200 native=0.450 pca1024=0.300 fadkv1=0.450 fadkv1_wrong=0.250 elapsed=39s eta=352s
+[progress] 30/200 native=0.533 pca1024=0.267 fadkv1=0.333 fadkv1_wrong=0.167 elapsed=60s eta=340s
+[progress] 40/200 native=0.575 pca1024=0.250 fadkv1=0.350 fadkv1_wrong=0.125 elapsed=79s eta=316s
+[progress] 50/200 native=0.580 pca1024=0.280 fadkv1=0.340 fadkv1_wrong=0.140 elapsed=99s eta=296s
+[progress] 60/200 native=0.533 pca1024=0.250 fadkv1=0.333 fadkv1_wrong=0.133 elapsed=121s eta=282s
+[progress] 70/200 native=0.543 pca1024=0.243 fadkv1=0.329 fadkv1_wrong=0.114 elapsed=138s eta=256s
+[progress] 80/200 native=0.500 pca1024=0.225 fadkv1=0.287 fadkv1_wrong=0.100 elapsed=162s eta=244s
+[progress] 90/200 native=0.500 pca1024=0.222 fadkv1=0.267 fadkv1_wrong=0.089 elapsed=184s eta=225s
+[progress] 100/200 native=0.460 pca1024=0.210 fadkv1=0.290 fadkv1_wrong=0.080 elapsed=208s eta=208s
+[progress] 110/200 native=0.473 pca1024=0.200 fadkv1=0.291 fadkv1_wrong=0.073 elapsed=227s eta=186s
+[progress] 120/200 native=0.450 pca1024=0.192 fadkv1=0.292 fadkv1_wrong=0.075 elapsed=251s eta=167s
+[progress] 130/200 native=0.431 pca1024=0.177 fadkv1=0.308 fadkv1_wrong=0.085 elapsed=276s eta=149s
+[progress] 140/200 native=0.429 pca1024=0.186 fadkv1=0.300 fadkv1_wrong=0.079 elapsed=296s eta=127s
+[progress] 150/200 native=0.427 pca1024=0.187 fadkv1=0.307 fadkv1_wrong=0.087 elapsed=317s eta=106s
+[progress] 160/200 native=0.431 pca1024=0.194 fadkv1=0.287 fadkv1_wrong=0.081 elapsed=338s eta=85s
+[progress] 170/200 native=0.441 pca1024=0.206 fadkv1=0.306 fadkv1_wrong=0.088 elapsed=358s eta=63s
+[progress] 180/200 native=0.450 pca1024=0.211 fadkv1=0.306 fadkv1_wrong=0.089 elapsed=376s eta=42s
+[progress] 190/200 native=0.453 pca1024=0.205 fadkv1=0.289 fadkv1_wrong=0.089 elapsed=400s eta=21s
+[progress] 200/200 native=0.455 pca1024=0.205 fadkv1=0.290 fadkv1_wrong=0.085 elapsed=421s eta=0s
+
+| 方法 | 存储 KiB/Token | 序列保留率 | EM% | F1% | 相对原生 |
+|---|---|---|---|---|---|
+| native | 120.0 | 100.0% | 45.5 | 65.3 | — |
+| pca1024 | 2.0 | 100.0% | 20.5 | 33.9 | 45% |
+| fadkv1 | 2.0 | 100.0% | 29.0 | 53.9 | 64% |
+| fadkv1_wrong | 2.0 | 100.0% | 8.5 | 17.9 | 19% |
+
+| 配对（vs native） | A% | B% | 差 | 只有A对 | 只有B对 | p |
+|---|---|---|---|---|---|---|
+| pca1024 | 20.5 | 45.5 | -25.0 | 2 | 52 | 0.0000 |
+| fadkv1 | 29.0 | 45.5 | -16.5 | 21 | 54 | 0.0002 |
+| fadkv1_wrong | 8.5 | 45.5 | -37.0 | 8 | 82 | 0.0000 |
+
+| 题型 | n | native | pca1024 | fadkv1 | fadkv1_wrong |
+|---|---|---|---|---|---|
+| date | 11 | 72.7 | 45.5 | 72.7 | 0.0 |
+| entity | 166 | 41.6 | 15.1 | 19.9 | 3.6 |
+| number | 7 | 42.9 | 14.3 | 28.6 | 0.0 |
+| yesno | 16 | 68.8 | 62.5 | 93.8 | 68.8 |
+
+[判据] fadkv1: EM=0.290 F1=0.539 保留原生 63.7%
+[判据] pca1024: EM=0.205 F1=0.339 保留原生 45.1%
+[判据] stage1_hit40: False
+[判据] text: 阶段一 0.290（目标 ≥0.40，未达到）
+{"native": 0.455, "pca1024": 0.205, "fadkv1": 0.29, "fadkv1_wrong": 0.085}
+[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_f_v4/rows.jsonl
+[out] 汇总 -> /data/zhangjiayang/yyz3/results/exp_f_v4/summary.json

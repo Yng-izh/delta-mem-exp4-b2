@@ -62,7 +62,10 @@ class GroupedLinearCodec(nn.Module):
         super().__init__()
         self.layout = dict(layout)
         self.n_segments = int(n_segments)
-        self.groups = {n: {"cols": list(g["cols"]), "layers": list(g["layers"])}
+        # `dim` 必须一起存：`split_latent_budget()` 按它算预算，缺了会在阶段二
+        # 抛 KeyError: 'dim'（阶段一要重建分组时才发现，太晚）。
+        self.groups = {n: {"cols": list(g["cols"]), "layers": list(g["layers"]),
+                           "dim": len(g["cols"])}
                        for n, g in groups.items()}
         self.native_dim = int(layout["dim"])
         self.latent_dims = {n: int(latent_dims[n]) for n in self.groups}
@@ -89,6 +92,39 @@ class GroupedLinearCodec(nn.Module):
                 getattr(codec, f"dec__{codec._key(n)}").copy_(p.basis.float().T)
         return codec
 
+    @classmethod
+    def from_stage1(cls, src: "GroupedLinearCodec", latent_dims: Dict[str, int],
+                    extra_basis: Optional[Dict[str, torch.Tensor]] = None
+                    ) -> "GroupedLinearCodec":
+        """阶段二初始化：**继承阶段一训出来的投影矩阵**，只做加宽/截窄。
+
+        为什么不能重新拟合 PCA：阶段一的 41% 是靠训练学出来的，随机/无监督初始化拿不到；
+        阶段二从头拟合等于把已验证的起点丢掉。加宽时多出来的那几列才用 `extra_basis`
+        （该组在原空间上补出来的主成分）填，保证不是随机方向。
+        """
+        codec = cls(src.layout, src.groups, latent_dims, n_segments=src.n_segments)
+        with torch.no_grad():
+            for n in codec.group_order:
+                d_new = int(latent_dims[n])
+                d_old = int(src.latent_dims[n])
+                getattr(codec, f"mean__{codec._key(n)}").copy_(
+                    getattr(src, f"mean__{src._key(n)}").float())
+                getattr(codec, f"scale__{codec._key(n)}").copy_(
+                    getattr(src, f"scale__{src._key(n)}").float())
+                w = torch.zeros((int(src.groups[n]["cols"].__len__()), d_new))
+                m = min(d_new, d_old)
+                w[:, :m] = getattr(src, f"enc__{src._key(n)}").float()[:, :m]
+                if d_new > d_old:
+                    if not extra_basis or n not in extra_basis:
+                        raise ValueError(f"加宽 {n} 需要 extra_basis（{d_old}->{d_new}）")
+                    eb = extra_basis[n].float()
+                    if int(eb.shape[0]) != int(w.shape[0]) or int(eb.shape[1]) < d_new:
+                        raise ValueError(f"{n} 的 extra_basis 形状不符：{tuple(eb.shape)}")
+                    w[:, d_old:d_new] = eb[:, d_old:d_new]
+                getattr(codec, f"enc__{codec._key(n)}").copy_(w)
+                getattr(codec, f"dec__{codec._key(n)}").copy_(w.T)
+        return codec
+
     @property
     def latent_dim(self) -> int:
         return int(sum(self.latent_dims.values()))
@@ -96,7 +132,13 @@ class GroupedLinearCodec(nn.Module):
     def _slice(self, U: torch.Tensor, n: str) -> torch.Tensor:
         return U[:, torch.as_tensor(self.groups[n]["cols"], device=U.device)]
 
-    def encode(self, U: torch.Tensor) -> torch.Tensor:
+    def encode(self, U: torch.Tensor,
+               latent_dtype: Optional[torch.dtype] = None) -> torch.Tensor:
+        """`latent_dtype` 不为 None 时，把潜码**按该精度存一遍再读回来**。
+
+        为什么必须做这一步：训练与评测默认用 fp32 中间量，但对外宣称的 2 KiB/token
+        是 bf16 存储。不模拟这次量化，41.0% 对应的其实是 4 KiB/token（30×）。
+        """
         if U.dim() != 2 or int(U.shape[1]) != self.native_dim:
             raise ValueError(f"U 必须是 [N,{self.native_dim}]，得到 {tuple(U.shape)}")
         out = []
@@ -104,7 +146,8 @@ class GroupedLinearCodec(nn.Module):
             x = (self._slice(U, n).float() - getattr(self, f"mean__{self._key(n)}")) \
                 / getattr(self, f"scale__{self._key(n)}")
             out.append(x @ getattr(self, f"enc__{self._key(n)}"))
-        return torch.cat(out, dim=-1)
+        z = torch.cat(out, dim=-1)
+        return z.to(latent_dtype).float() if latent_dtype is not None else z
 
     def decode(self, Z: torch.Tensor) -> torch.Tensor:
         if Z.dim() != 2 or int(Z.shape[1]) != self.latent_dim:
@@ -120,21 +163,24 @@ class GroupedLinearCodec(nn.Module):
             off += d
         return out
 
-    def roundtrip(self, U: torch.Tensor) -> torch.Tensor:
-        return self.decode(self.encode(U))
+    def roundtrip(self, U: torch.Tensor,
+                  latent_dtype: Optional[torch.dtype] = None) -> torch.Tensor:
+        return self.decode(self.encode(U, latent_dtype))
 
-    def kv_loss(self, U: torch.Tensor) -> torch.Tensor:
+    def kv_loss(self, U: torch.Tensor,
+                latent_dtype: Optional[torch.dtype] = None) -> torch.Tensor:
         """逐组归一化 MSE（各组量纲不同，直接求全空间 MSE 会被大组主导）。"""
         total = U.new_zeros(())
         for n in self.group_order:
             tgt = self._slice(U, n).float()
-            pred = self.decode(self.encode(U))
+            pred = self.decode(self.encode(U, latent_dtype))
             pred = pred[:, torch.as_tensor(self.groups[n]["cols"], device=U.device)]
             total = total + ((pred - tgt) ** 2).mean() / tgt.var().clamp_min(1e-6)
         return total / max(1, len(self.group_order))
 
-    def rel_error(self, U: torch.Tensor) -> float:
-        d = self.roundtrip(U)
+    def rel_error(self, U: torch.Tensor,
+                  latent_dtype: Optional[torch.dtype] = None) -> float:
+        d = self.roundtrip(U, latent_dtype)
         return float((d - U.float()).norm() / U.float().norm().clamp_min(1e-6))
 
     def describe(self) -> Dict[str, Any]:
@@ -170,12 +216,53 @@ def select_anchors(U: torch.Tensor, ratio: float,
 
 
 def pool_groups(idx: Sequence[int], pool: int) -> List[List[int]]:
-    """把背景下标按连续 `pool` 个一槽切开（末尾不足一槽的单独成槽，不丢）。"""
+    """背景下标按 `pool` 个一槽切开，**只合并原文里连续的下标**。
+
+    旧实现是 `ids[s:s+p]`：只要排序后相邻就合并，会把跨句子、甚至跨事实的 token 塞进
+    同一个槽（锚点被挖掉后断点更多）。那样"池化"就变成了"把不相干的位置平均掉"，
+    关系绑定会直接崩，而指标只表现为"第二阶段掉点"。
+    """
     ids = sorted(int(i) for i in idx)
     p = max(1, int(pool))
     out: List[List[int]] = []
-    for s in range(0, len(ids), p):
-        out.append(ids[s:s + p])
+    cur: List[int] = []
+    for i in ids:
+        if cur and (len(cur) >= p or i - cur[-1] > 1):
+            out.append(cur)
+            cur = []
+        cur.append(i)
+    if cur:
+        out.append(cur)
+    return out
+
+
+# 事实关键位判定的停用词/关系词（与 reader_memory.key_span_flags 同口径）
+_SENT_START = frozenset(
+    "the a an it he she they we you i his her their its this that these those there "
+    "however after before during in on at as by for from with while when where which "
+    "who whom whose what how also both each other some many most more than then thus".split())
+_RELATION = frozenset(
+    "founded established born died married divorced directed produced written located "
+    "served held became released published created member part appointed elected joined "
+    "led owned designed built named known worked studied graduated awarded won lost "
+    "replaced succeeded preceded attended represented signed defeated beat".split())
+
+
+def content_flags(tokenizer: Any, ids: Sequence[int]) -> List[bool]:
+    """逐 token 标"是不是事实关键位"：数字 / 词首大写且非句首虚词 / 关系词。
+
+    锚点选择必须能优先保住这些位置 —— 只按 KV 范数挑，会挑到一堆高频功能词（它们范数
+    同样大），被判据明确点出"没有真正执行实体/日期/数字优先保留"。
+    """
+    out: List[bool] = []
+    for i in ids:
+        raw = tokenizer.convert_ids_to_tokens(int(i)) or ""
+        word_start = raw[:1] in ("Ġ", "▁", " ")
+        txt = raw.replace("Ġ", " ").replace("▁", " ").strip()
+        low = txt.lower().strip(".,;:!?\"'()[]{}").strip()
+        out.append(bool(any(ch.isdigit() for ch in txt)
+                        or (word_start and txt[:1].isupper() and low not in _SENT_START)
+                        or low in _RELATION))
     return out
 
 
@@ -193,7 +280,8 @@ class DualGranularityCodec(nn.Module):
         self.pool = int(pool)
 
     def compress(self, U: torch.Tensor,
-                 token_flags: Optional[Sequence[bool]] = None) -> Dict[str, Any]:
+                 token_flags: Optional[Sequence[bool]] = None,
+                 latent_dtype: Optional[torch.dtype] = None) -> Dict[str, Any]:
         """U [N, D] -> {锚点潜码 [Na, da], 背景槽潜码 [Nb, db], 下标, 位置}"""
         n = int(U.shape[0])
         idx_a = select_anchors(U, self.anchor_ratio, token_flags)
@@ -204,13 +292,15 @@ class DualGranularityCodec(nn.Module):
         # 背景槽的原生表示 = 被合并那几个 token 的均值（池化发生在 U 空间）
         U_b = torch.stack([U[torch.as_tensor(c)].float().mean(dim=0) for c in chunks]) \
             if chunks else U.new_zeros((0, int(U.shape[1])))
-        z_a = self.anchor_codec.encode(U[torch.as_tensor(idx_a)]) if idx_a else \
+        z_a = self.anchor_codec.encode(U[torch.as_tensor(idx_a)], latent_dtype) if idx_a else \
             U.new_zeros((0, self.anchor_codec.latent_dim))
-        z_b = self.bg_codec.encode(U_b) if chunks else U.new_zeros((0, self.bg_codec.latent_dim))
+        z_b = self.bg_codec.encode(U_b, latent_dtype) if chunks else \
+            U.new_zeros((0, self.bg_codec.latent_dim))
         pos_a = list(idx_a)
         pos_b = [int(c[0]) for c in chunks]           # 槽位置 = 覆盖的第一个原始位置
         return {"z_anchor": z_a, "z_bg": z_b, "idx_anchor": idx_a, "chunks_bg": chunks,
-                "pos": pos_a + pos_b, "n": n,
+                "U_anchor_native": U[torch.as_tensor(idx_a)] if idx_a else None,
+                "U_bg_native": U_b, "pos": pos_a + pos_b, "n": n,
                 "n_anchor": len(idx_a), "n_slot": len(chunks)}
 
     def decompress(self, packed: Dict[str, Any]) -> Tuple[torch.Tensor, List[int]]:
@@ -227,16 +317,28 @@ class DualGranularityCodec(nn.Module):
     def roundtrip(self, U: torch.Tensor, token_flags: Optional[Sequence[bool]] = None):
         return self.decompress(self.compress(U, token_flags))
 
-    def storage(self) -> Dict[str, Any]:
+    def storage(self, pos_bytes: int = 4, dtype_bytes: int = 2) -> Dict[str, Any]:
+        """按**实际保存的东西**核算：锚点/槽的潜码 + 每个槽的位置元数据 + 槽数。
+
+        理论比例（0.3 + 0.7/4）只是下界：真实存储还要存"这个槽覆盖哪些位置"，
+        不把这部分算进去，1.03 KiB 这个数就是虚的。
+        """
         da, db = self.anchor_codec.latent_dim, self.bg_codec.latent_dim
         a = self.anchor_ratio
-        per_token = a * da + (1.0 - a) * (db / max(1, self.pool))
-        seq_keep = a + (1.0 - a) / max(1, self.pool)
+        n_anchor = a
+        n_slot = (1.0 - a) / max(1, self.pool)
+        latent_dims_per_token = n_anchor * da + n_slot * db
+        bytes_latent = latent_dims_per_token * dtype_bytes
+        bytes_pos = (n_anchor + n_slot) * int(pos_bytes)
+        total = bytes_latent + bytes_pos
         return {"anchor_dim": da, "bg_dim": db, "anchor_ratio": a, "pool": self.pool,
-                "latent_dims_per_token": round(float(per_token), 1),
-                "bytes_per_token": int(round(per_token * 2)),
-                "kib_per_token": round(per_token * 2 / 1024, 3),
-                "seq_keep": round(float(seq_keep), 4)}
+                "latent_dims_per_token": round(float(latent_dims_per_token), 1),
+                "bytes_per_token_latent_only": int(round(bytes_latent)),
+                "bytes_per_token": int(round(total)),
+                "kib_per_token_latent_only": round(bytes_latent / 1024, 3),
+                "kib_per_token": round(total / 1024, 3),
+                "seq_keep": round(float(n_anchor + n_slot), 4),
+                "pos_bytes_per_unit": int(pos_bytes)}
 
 
 # ---------------------------------------------------------------------

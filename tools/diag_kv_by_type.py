@@ -120,7 +120,7 @@ def main(argv=None) -> int:
             except MK.SplitError:
                 continue
             U, _layout = MK.capture_uv(model, tokenizer, split, args.encoding, layers)
-            Uhat = codec.roundtrip(U)
+            Uhat = codec.roundtrip(U, torch.bfloat16)   # 按真实存储精度（bf16）算
             Uf, Uf_hat = U.float(), Uhat.float()
             per_tok = (Uf_hat - Uf).pow(2).sum(dim=-1)
             tok_norm2 = Uf.pow(2).sum(dim=-1).clamp_min(1e-6)

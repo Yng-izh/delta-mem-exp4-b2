@@ -50,6 +50,9 @@ def parse_args(argv=None):
     ap.add_argument("--n-train", type=int, default=0)
     ap.add_argument("--layers", default="6-35")
     ap.add_argument("--segments", type=int, default=3, help="层段数（阶段一/二都用）")
+    ap.add_argument("--latent-dtype", default="fp16", choices=("bf16", "fp16", "fp32"),
+                    help="潜码存储精度。bf16/fp16 都是 2 字节（2 KiB/token），"
+                         "但 fp16 尾数 11 位、bf16 只有 8 位；fp32 会把预算翻倍到 4 KiB")
     ap.add_argument("--kv-split", default="",
                     help="K/V 预算比，如 0.3,0.7（空=按组均分）。实测 V 的重建误差是 K 的 1.6 倍")
     ap.add_argument("--latent-dim", type=int, default=1024,
@@ -88,6 +91,16 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+LATENT_DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": None}
+
+
+def latent_dtype_of(args, name: Optional[str] = None) -> Optional[torch.dtype]:
+    key = str(name or getattr(args, "latent_dtype", "fp16"))
+    if key not in LATENT_DTYPES:
+        raise ValueError(f"未知潜码精度 {key!r}，可选 {list(LATENT_DTYPES)}")
+    return LATENT_DTYPES[key]
+
+
 def parse_kind_weights(spec: str) -> Optional[Dict[str, float]]:
     s = str(spec or "").strip()
     if not s:
@@ -110,15 +123,20 @@ def parse_layers(spec: str) -> List[int]:
 # 前向：把答案 token 接在 T 后面，位置保留 E 的空档
 # ---------------------------------------------------------------------
 @contextmanager
-def capture_attn(model, layers: Sequence[int]):
-    """捕获被注入层注意力模块的输出（`out[0]`），用于 L_attn。"""
+def capture_attn(model, layers: Sequence[int], detach: bool = True):
+    """捕获被注入层注意力模块的输出（`out[0]`），用于 L_attn。
+
+    `detach` 必须**只对教师**为 True。旧实现两边都 detach，于是 L_attn 根本传不到
+    codec（`(a-b)²` 里两条支路都断开），"加 L_attn 后 32.5→41.0" 那 8.5 点不能归因给它。
+    """
     store: Dict[int, torch.Tensor] = {}
     handles = []
     dec = MK.decoder_layers(model)
 
     def mk(l):
         def hk(mod, args, kw, out):
-            store[int(l)] = (out[0] if isinstance(out, tuple) else out).detach()
+            o = out[0] if isinstance(out, tuple) else out
+            store[int(l)] = o.detach() if detach else o
         return hk
 
     for l in layers:
@@ -131,7 +149,9 @@ def capture_attn(model, layers: Sequence[int]):
 
 
 def answer_logits(model, split: Dict[str, Any], mem: MK.MemoryKV,
-                  ans_ids: Sequence[int], capture_layers: Optional[Sequence[int]] = None
+                  ans_ids: Sequence[int],
+                  capture_layers: Optional[Sequence[int]] = None,
+                  capture_detach: bool = True
                   ) -> Tuple[torch.Tensor, Dict[int, torch.Tensor]]:
     """返回 [n_ans, V] 的答案位置 logits（与中间插入、位置空档一致）。"""
     dev = LM._model_device(model)
@@ -148,7 +168,7 @@ def answer_logits(model, split: Dict[str, Any], mem: MK.MemoryKV,
     cap: Dict[int, torch.Tensor] = {}
     with MK.inject_memory_kv(model, mem), LM.delta_write_disabled(model):
         if capture_layers:
-            with capture_attn(model, capture_layers) as store:
+            with capture_attn(model, capture_layers, detach=capture_detach) as store:
                 out = model(inputs_embeds=emb, use_cache=False, position_ids=pos.unsqueeze(0))
                 cap = dict(store)
         else:
@@ -164,45 +184,56 @@ def answer_logits(model, split: Dict[str, Any], mem: MK.MemoryKV,
 # codec 编解码 -> MemoryKV
 # ---------------------------------------------------------------------
 def encode_to_memory(model, tokenizer, codec, split: Dict[str, Any], layers: List[int],
-                     stage: int, encoding: str, token_flags: Optional[Sequence[bool]] = None
+                     stage: int, encoding: str, token_flags: Optional[Sequence[bool]] = None,
+                     latent_dtype: Optional[torch.dtype] = None
                      ) -> Tuple[MK.MemoryKV, Dict[str, Any]]:
-    """证据 -> 原生 U -> 潜码 -> 还原 -> MemoryKV（阶段二还会缩短序列长度）。"""
+    """证据 -> 原生 U -> 潜码（按 `latent_dtype` 存一遍）-> 还原 -> MemoryKV。
+
+    阶段二的记忆长度 M < N，**不能**再跨长度比重建误差（旧实现在这里直接形状不匹配）。
+    所以按"锚点 / 池化背景块"分别算，两者都与各自的原生目标等长。
+    """
     U, layout = MK.capture_uv(model, tokenizer, split, encoding, layers)
     ns = int(split["ns"])
     info: Dict[str, Any] = {"n_native": int(U.shape[0])}
     if int(stage) == 2:
-        packed = codec.compress(U, token_flags)
+        packed = codec.compress(U, token_flags, latent_dtype)
         U_hat, pos = codec.decompress(packed)
         info.update({"n_anchor": int(packed["n_anchor"]), "n_slot": int(packed["n_slot"]),
                      "n_mem": int(U_hat.shape[0])})
-        mem = MK.memory_kv_from_uv(model, U_hat.to(U.dtype),
-                                   insert_at=ns + 0, layers=layers,
+        na = int(packed["n_anchor"])
+        tgt_a, pred_a = packed.get("U_anchor_native"), U_hat[:na]
+        if tgt_a is not None and na > 0:
+            info["rel_err_anchor"] = float((pred_a.float() - tgt_a.float()).norm()
+                                           / tgt_a.float().norm().clamp_min(1e-6))
+        tgt_b, pred_b = packed.get("U_bg_native"), U_hat[na:]
+        if tgt_b is not None and int(tgt_b.shape[0]) > 0:
+            info["rel_err_bg"] = float((pred_b.float() - tgt_b.float()).norm()
+                                       / tgt_b.float().norm().clamp_min(1e-6))
+        mem = MK.memory_kv_from_uv(model, U_hat.to(U.dtype), insert_at=ns, layers=layers,
                                    positions=[ns + int(p) for p in pos])
     else:
-        U_hat = codec.decode(codec.encode(U))
+        U_hat = codec.decode(codec.encode(U, latent_dtype))
         info["n_mem"] = int(U_hat.shape[0])
         mem = MK.memory_kv_from_uv(model, U_hat.to(U.dtype), insert_at=ns, layers=layers)
-    info["rel_err"] = float((U_hat.float() - U.float()).norm()
-                            / U.float().norm().clamp_min(1e-6))
+        info["rel_err"] = float((U_hat.float() - U.float()).norm()
+                                / U.float().norm().clamp_min(1e-6))
     return mem, info
 
 
-def kv_penalty(codec, model, tokenizer, split, layers, stage, encoding) -> torch.Tensor:
+def kv_penalty(codec, model, tokenizer, split, layers, stage, encoding,
+               token_flags=None, latent_dtype=None) -> torch.Tensor:
     """L_kv：在原生 U 空间上逐组归一化 MSE（阶段二按 锚点/池化背景 分别算）。"""
     U, _ = MK.capture_uv(model, tokenizer, split, encoding, layers)
     if int(stage) == 1:
-        return codec.kv_loss(U)
-    packed = codec.compress(U)
+        return codec.kv_loss(U, latent_dtype)
+    packed = codec.compress(U, token_flags, latent_dtype)
     total = U.new_zeros(())
     n_terms = 0
     if int(packed["n_anchor"]) > 0:
-        idx = torch.as_tensor(packed["idx_anchor"], device=U.device)
-        total = total + codec.anchor_codec.kv_loss(U[idx])
+        total = total + codec.anchor_codec.kv_loss(packed["U_anchor_native"], latent_dtype)
         n_terms += 1
     if int(packed["n_slot"]) > 0:
-        U_b = torch.stack([U[torch.as_tensor(c, device=U.device)].float().mean(dim=0)
-                           for c in packed["chunks_bg"]]).to(U.dtype)
-        total = total + codec.bg_codec.kv_loss(U_b)
+        total = total + codec.bg_codec.kv_loss(packed["U_bg_native"], latent_dtype)
         n_terms += 1
     return total / max(1, n_terms)
 
@@ -273,7 +304,9 @@ def main(argv=None) -> int:
                           "segments": int(args.segments), "latent_dim": int(args.latent_dim),
                           "anchor_ratio": float(args.anchor_ratio), "pool": int(args.pool),
                           "encoding": args.encoding, "steps": int(args.steps),
-                          "losses": want, "lr": float(args.lr)},
+                          "losses": want, "lr": float(args.lr),
+                          "kv_split": str(args.kv_split),
+                          "latent_dtype": str(args.latent_dtype)},
                   stats={"steps": step, "params": int(n_param)})
     print(f"[save] {args.out}", flush=True)
     return 0
@@ -297,41 +330,37 @@ def build_codec(args, model, tokenizer, dev, layout, layers, data):
             codec = FC.GroupedLinearCodec.from_grouped(gr)
         return codec.to(dev)
 
-    # 阶段二：两套 codec，各自 PCA 初始化；锚点/背景的划分与训练时一致
+    # 阶段二：**继承阶段一的投影矩阵**，不重新拟合；只对"加宽出来的列"补主成分
     if not args.init:
         raise SystemExit("阶段二需要 --init 指向阶段一 codec（或先跑阶段一）")
-    stage1, _cfg = FC.load_codec(args.init, device=dev)
+    stage1, cfg1 = FC.load_codec(args.init, device=dev)
     ratio, pool = float(args.anchor_ratio), int(args.pool)
+    kw = parse_kind_weights(args.kv_split or str(cfg1.get("kv_split") or ""))
+    print(f"[stage2] 继承阶段一：per_group={stage1.latent_dims} kv_split={kw}", flush=True)
 
     def anchor_batches():
-        for U in _raw_uv(args, model, tokenizer, layers, data, 0):
-            idx = torch.as_tensor(FC.select_anchors(U, ratio), device=U.device)
+        for U, flags in _raw_uv(args, model, tokenizer, layers, data, 0):
+            idx = torch.as_tensor(FC.select_anchors(U, ratio, flags), device=U.device)
             yield U[idx]
 
-    def bg_batches():
-        for U in _raw_uv(args, model, tokenizer, layers, data, 0):
-            idx = set(FC.select_anchors(U, ratio))
-            rest = [i for i in range(int(U.shape[0])) if i not in idx]
-            chunks = FC.pool_groups(rest, pool)
-            if not chunks:
-                continue
-            yield torch.stack([U[torch.as_tensor(c, device=U.device)].float().mean(dim=0)
-                               for c in chunks]).to(U.dtype)
-
+    # 锚点 codec 要比阶段一宽：多出来的列用该组在原空间补出来的主成分（不是随机方向）
     gr_a = LR.fit_grouped(anchor_batches, layout, latent_dim=int(args.anchor_dim),
                           n_segments=int(args.segments), device=dev, seed=int(args.seed),
-                          log=lambda m: print("[anchor]" + m, flush=True))
-    gr_b = LR.fit_grouped(bg_batches, layout, latent_dim=int(args.bg_dim),
-                          n_segments=int(args.segments), device=dev,
-                          seed=int(args.seed) + 1,
-                          log=lambda m: print("[bg]" + m, flush=True))
-    codec = FC.DualGranularityCodec(FC.GroupedLinearCodec.from_grouped(gr_a),
-                                    FC.GroupedLinearCodec.from_grouped(gr_b),
-                                    anchor_ratio=ratio, pool=pool)
+                          kind_weights=kw, log=lambda m: print("[anchor]" + m, flush=True))
+    dims_a = {n: gr_a.parts[n].dim for n in gr_a.parts}
+    codec_a = FC.GroupedLinearCodec.from_stage1(
+        stage1, dims_a, extra_basis={n: gr_a.parts[n].basis for n in gr_a.parts})
+    # 背景 codec 是"截窄"：直接取阶段一每组的前几列，**不需要任何新拟合**
+    dims_b = LR.split_latent_budget(stage1.groups, int(args.bg_dim), kind_weights=kw)
+    codec_b = FC.GroupedLinearCodec.from_stage1(stage1, dims_b)
+    print(f"[stage2] anchor dims={dims_a} bg dims={dims_b}", flush=True)
+    codec = FC.DualGranularityCodec(codec_a, codec_b, anchor_ratio=ratio, pool=pool)
     return codec.to(dev)
 
 
 def _raw_uv(args, model, tokenizer, layers, data, budget):
+    """逐条产出 (U, content_flags)。锚点划分必须和训练/评测用同一套标记，
+    否则阶段二的 PCA 初始化是在一个"只按范数挑"的划分上拟合，训练却在另一个划分上跑。"""
     used = 0
     for item in data:
         ev = ED.evidence_text(item)
@@ -342,7 +371,7 @@ def _raw_uv(args, model, tokenizer, layers, data, budget):
         except MK.SplitError:
             continue
         U, _ = MK.capture_uv(model, tokenizer, split, args.encoding, layers)
-        yield U
+        yield U, FC.content_flags(tokenizer, split["ids_E"])
         used += int(U.shape[0])
         if budget > 0 and used >= budget:
             return
@@ -350,7 +379,8 @@ def _raw_uv(args, model, tokenizer, layers, data, budget):
 
 def _sub_batches(args, model, tokenizer, layers, data, budget):
     def gen():
-        yield from _raw_uv(args, model, tokenizer, layers, data, budget)
+        for U, _flags in _raw_uv(args, model, tokenizer, layers, data, budget):
+            yield U
     return gen
 
 
@@ -363,11 +393,14 @@ def train_step(args, model, tokenizer, codec, item, layers, want, dev) -> Dict[s
     ans_ids = tokenizer(str(item["answer"]), return_tensors="pt",
                         add_special_tokens=False)["input_ids"][0].tolist()
     out: Dict[str, Any] = {"total": torch.zeros((), device=dev)}
-    # 学生：压缩后的 KV
+    flags = FC.content_flags(tokenizer, split["ids_E"])
+    ldt = latent_dtype_of(args)
+    # 学生：压缩后的 KV（注意力输出**保留梯度**，否则 L_attn 传不回来）
     mem_s, info = encode_to_memory(model, tokenizer, codec, split, layers,
-                                   int(args.stage), args.encoding)
+                                   int(args.stage), args.encoding, flags, ldt)
     cap_layers = layers if "attn" in want else None
-    logit_s, cap_s = answer_logits(model, split, mem_s, ans_ids, cap_layers)
+    logit_s, cap_s = answer_logits(model, split, mem_s, ans_ids, cap_layers,
+                                   capture_detach=False)
     y = torch.tensor(ans_ids, dtype=torch.long, device=dev)
     total = out["total"]
     if "qa" in want:
@@ -399,7 +432,7 @@ def train_step(args, model, tokenizer, codec, item, layers, want, dev) -> Dict[s
                 total = total + float(args.lambda_attn) * l_at
     if "kv" in want:
         l_kv = kv_penalty(codec, model, tokenizer, split, layers, int(args.stage),
-                          args.encoding)
+                          args.encoding, flags, ldt)
         out["kv"] = float(l_kv)
         total = total + float(args.lambda_kv) * l_kv
     out["total"] = total
@@ -420,7 +453,9 @@ def run_eval(args, model, tokenizer, codec, val, layers, step, dev) -> None:
         except MK.SplitError:
             continue
         mem, _ = encode_to_memory(model, tokenizer, codec, split, layers,
-                                  int(args.stage), args.encoding)
+                                  int(args.stage), args.encoding,
+                                  FC.content_flags(tokenizer, split["ids_E"]),
+                                  latent_dtype_of(args))
         pred, _ = MK.midlayer_kv_generate(model, tokenizer, mem, split,
                                           max_new_tokens=int(args.max_new_tokens))
         hits += int(T._norm_ans(pred) == T._norm_ans(str(item["answer"])))

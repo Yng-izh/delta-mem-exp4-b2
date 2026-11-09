@@ -34,6 +34,8 @@ BG_DIM=${BG_DIM:-384}
 FIT_TOKENS=${FIT_TOKENS:-20000}
 # K/V 预算比（空=按组均分）。实测 V 的重建误差是 K 的 1.6 倍、吃掉 67% 总误差
 KV_SPLIT=${KV_SPLIT:-}
+# 潜码存储精度：bf16 才对应 2 KiB/token（fp32 会让预算翻倍）
+LATENT_DTYPE=${LATENT_DTYPE:-bf16}
 OUT=${OUT:-$B/results/$TAG}
 mkdir -p "$OUT"
 export DELTA_MEM_SCAN_IMPL=torch
@@ -45,9 +47,11 @@ cd "$R" || exit 1
 BASE=$B/models/Qwen3-4B-Instruct-2507
 TRAIN=$B/synth/hotpot_train_10k.jsonl
 VAL=$B/synth/hotpot_val500.jsonl
-COMMON="--base $BASE --gpu 0 --layers $LAYERS --segments $SEGMENTS"
+COMMON="--base $BASE --gpu 0 --layers $LAYERS --segments $SEGMENTS --latent-dtype $LATENT_DTYPE"
 # eval 不接 --segments：层段数从 codec 的 meta 里读，传了会 argparse 直接报错
-COMMON_EVAL="--base $BASE --gpu 0 --layers $LAYERS"
+# pca1024 基线必须与主表**同一个前缀协议**重新拟合，否则 41.0% vs 23.5% 不可比
+FIT_GLOBAL=${FIT_GLOBAL:-$OUT/pca1024_fullprefix.pt}
+COMMON_EVAL="--base $BASE --gpu 0 --layers $LAYERS --latent-dtype $LATENT_DTYPE"
 
 run_init() {
   echo "[F-init $(date '+%F %T')] 分组 PCA（${SEGMENTS}段 × K/V，总 $LATENT 维）"
@@ -106,12 +110,24 @@ run_train2() {
   return $rc
 }
 
+run_fitglobal() {
+  echo "[F-fitglobal $(date '+%F %T')] 用 full_prefix 重新拟合全局 PCA-1024 基线"
+  $PY eval_fadkv.py --stage fit-global --encoding full_prefix \
+    --fit-data "$TRAIN" --fit-tokens "${FIT_TOKENS}" --fit-limit 0 \
+    --fit-basis "$FIT_GLOBAL" --global-dim 1024 $COMMON_EVAL \
+    > "$OUT/fit_global.log" 2>&1
+  local rc=$?
+  tail -4 "$OUT/fit_global.log"
+  return $rc
+}
+
 run_eval() {
   echo "[F-eval $(date '+%F %T')] limit=$LIMIT"
   local extra=""
   [ -f "$OUT/fadkv_stage1.pt" ] && extra="$extra --stage1 $OUT/fadkv_stage1.pt"
   [ -f "$OUT/fadkv_stage2.pt" ] && extra="$extra --stage2 $OUT/fadkv_stage2.pt"
-  [ -f "$GLOBAL" ] && extra="$extra --global-basis $GLOBAL --global-dim 1024"
+  local gb="${GLOBAL:-$FIT_GLOBAL}"
+  [ -f "$gb" ] && extra="$extra --global-basis $gb --global-dim 1024"
   $PY eval_fadkv.py --data "$VAL" --limit "$LIMIT" --encoding full_prefix \
     --wrong --progress-every 10 --show-items 2 \
     --dump-jsonl "$OUT/rows.jsonl" --save-json "$OUT/summary.json" $extra $COMMON_EVAL \
@@ -126,12 +142,14 @@ case "$STAGE" in
   init)   run_init "$BASE" "$LAYERS" "$SEGMENTS" "$LATENT" "$FIT_TOKENS" "$BASIS" "$KV_SPLIT" ;;
   train1) run_train1 ;;
   train2) run_train2 ;;
+  fitglobal) run_fitglobal ;;
   eval)   run_eval ;;
   all)
     run_init "$BASE" "$LAYERS" "$SEGMENTS" "$LATENT" "$FIT_TOKENS" "$BASIS" "$KV_SPLIT" \
       || { echo "[F] PCA 初始化失败，停止"; exit 1; }
     run_train1 || { echo "[F] 阶段一训练失败，停止"; exit 1; }
+    run_fitglobal || echo "[F][warn] 同前缀基线拟合失败，pca1024 臂将沿用旧基底"
     run_train2 || { echo "[F] 阶段二训练失败，停止"; exit 1; }
     run_eval ;;
-  *) echo "未知 STAGE=$STAGE（init|train1|train2|eval|all）"; exit 2 ;;
+  *) echo "未知 STAGE=$STAGE（init|train1|fitglobal|train2|eval|all）"; exit 2 ;;
 esac

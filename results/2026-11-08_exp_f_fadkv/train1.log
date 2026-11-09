@@ -1,87 +1,0 @@
-[gpu] 已启用 TF32（Ampere+ TensorCore）
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:07,  5.85it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 87.65it/s]Loading weights:  10%|▉         | 38/398 [00:00<00:03, 118.85it/s]Loading weights:  15%|█▍        | 59/398 [00:00<00:02, 150.28it/s]Loading weights:  20%|██        | 80/398 [00:00<00:01, 168.01it/s]Loading weights:  25%|██▌       | 101/398 [00:00<00:01, 176.27it/s]Loading weights:  31%|███       | 124/398 [00:00<00:01, 186.43it/s]Loading weights:  37%|███▋      | 146/398 [00:00<00:01, 189.78it/s]Loading weights:  42%|████▏     | 168/398 [00:01<00:01, 192.16it/s]Loading weights:  47%|████▋     | 188/398 [00:01<00:01, 193.34it/s]Loading weights:  52%|█████▏    | 208/398 [00:01<00:01, 188.34it/s]Loading weights:  57%|█████▋    | 227/398 [00:01<00:00, 188.70it/s]Loading weights:  62%|██████▏   | 247/398 [00:01<00:00, 184.56it/s]Loading weights:  68%|██████▊   | 269/398 [00:01<00:00, 187.92it/s]Loading weights:  73%|███████▎  | 291/398 [00:01<00:00, 191.02it/s]Loading weights:  79%|███████▊  | 313/398 [00:01<00:00, 195.60it/s]Loading weights:  84%|████████▍ | 335/398 [00:01<00:00, 199.08it/s]Loading weights:  90%|████████▉ | 357/398 [00:02<00:00, 199.15it/s]Loading weights:  95%|█████████▌| 379/398 [00:02<00:00, 199.79it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 181.87it/s]
-[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
-[model] hidden=2560 uv_dim=61440 layers=6..35 stage=1 losses=['kv', 'qa', 'kl', 'attn'] encoding=full_prefix
-[data] train=9997
-[init] 分组 PCA <- /data/zhangjiayang/yyz3/results/exp_f_attn750/fadkv_groups_1024.pt {'n_groups': 6, 'native_dim': 61440, 'latent_dim': 1024, 'per_group': {'seg0.k': 103, 'seg0.v': 239, 'seg1.k': 102, 'seg1.v': 239, 'seg2.k': 102, 'seg2.v': 239}, 'bytes_per_token': 2048, 'ratio': 60.0}
-[codec] {'n_groups': 6, 'native_dim': 61440, 'latent_dim': 1024, 'per_group': {'seg0.k': 103, 'seg0.v': 239, 'seg1.k': 102, 'seg1.v': 239, 'seg2.k': 102, 'seg2.v': 239}, 'bytes_per_token': 2048, 'ratio': 60.0} 可训练 20.97M
-[step 10] total=0.2946 qa=0.0001 kl=0.0001 attn=0.4095 kv=0.2535 n_mem=88.0000 elapsed=21s (2.10s/step)
-[step 20] total=0.4005 qa=0.0884 kl=0.0881 attn=0.4776 kv=0.2203 n_mem=77.0000 elapsed=41s (2.07s/step)
-[step 30] total=1.7504 qa=1.0391 kl=0.8126 attn=0.6101 kv=0.2440 n_mem=149.0000 elapsed=62s (2.06s/step)
-[step 40] total=1.3970 qa=0.5117 kl=1.0948 attn=0.7617 kv=0.2617 n_mem=77.0000 elapsed=82s (2.05s/step)
-[step 50] total=1.3953 qa=0.7031 kl=0.7017 attn=0.8714 kv=0.2542 n_mem=100.0000 elapsed=102s (2.05s/step)
-[step 60] total=5.5092 qa=3.4375 kl=3.4321 attn=0.6202 kv=0.2936 n_mem=171.0000 elapsed=123s (2.04s/step)
-[step 70] total=1.2744 qa=0.2910 kl=1.2666 attn=0.5828 kv=0.2918 n_mem=42.0000 elapsed=143s (2.04s/step)
-[step 80] total=3.1360 qa=1.8516 kl=1.8537 attn=0.7613 kv=0.2814 n_mem=94.0000 elapsed=163s (2.04s/step)
-[step 90] total=0.3850 qa=0.0061 kl=0.0059 attn=0.8278 kv=0.2932 n_mem=89.0000 elapsed=183s (2.04s/step)
-[step 100] total=1.5060 qa=0.6914 kl=0.8292 attn=0.8805 kv=0.3119 n_mem=112.0000 elapsed=204s (2.04s/step)
-[step 110] total=0.9264 qa=0.3555 kl=0.3554 attn=1.1217 kv=0.2811 n_mem=115.0000 elapsed=224s (2.04s/step)
-[step 120] total=0.5275 qa=0.0864 kl=0.1119 attn=0.8115 kv=0.3039 n_mem=190.0000 elapsed=244s (2.04s/step)
-[step 130] total=0.9861 qa=0.4102 kl=0.3626 attn=1.0979 kv=0.2848 n_mem=73.0000 elapsed=265s (2.04s/step)
-[step 140] total=1.5777 qa=0.8359 kl=0.6864 attn=0.8262 kv=0.3160 n_mem=97.0000 elapsed=285s (2.04s/step)
-[step 150] total=1.3771 qa=0.6523 kl=0.6521 attn=0.9985 kv=0.2988 n_mem=99.0000 elapsed=305s (2.03s/step)
-[step 160] total=3.4555 qa=1.6484 kl=2.8322 attn=1.0693 kv=0.2840 n_mem=58.0000 elapsed=325s (2.03s/step)
-[step 170] total=2.3993 qa=1.5391 kl=0.8941 attn=0.7843 kv=0.3347 n_mem=153.0000 elapsed=346s (2.03s/step)
-[step 180] total=4.2911 qa=3.3125 kl=1.1583 attn=0.8914 kv=0.3103 n_mem=84.0000 elapsed=366s (2.03s/step)
-[step 190] total=10.5582 qa=7.4062 kl=5.5400 attn=0.6928 kv=0.3126 n_mem=104.0000 elapsed=386s (2.03s/step)
-[step 200] total=2.3659 qa=0.8789 kl=2.1241 attn=0.8210 kv=0.3428 n_mem=89.0000 elapsed=407s (2.03s/step)
-[step 210] total=1.7410 qa=0.0256 kl=2.6139 attn=0.7992 kv=0.3285 n_mem=104.0000 elapsed=427s (2.03s/step)
-[step 220] total=0.7889 qa=0.2412 kl=0.2359 attn=0.7798 kv=0.3518 n_mem=87.0000 elapsed=447s (2.03s/step)
-[step 230] total=2.5798 qa=1.4766 kl=1.3516 attn=0.7259 kv=0.3549 n_mem=106.0000 elapsed=468s (2.03s/step)
-[step 240] total=1.3102 qa=0.6172 kl=0.6174 attn=0.7322 kv=0.3110 n_mem=65.0000 elapsed=488s (2.04s/step)
-[step 250] total=0.6300 qa=0.0161 kl=0.4071 attn=1.0911 kv=0.3012 n_mem=64.0000 elapsed=509s (2.04s/step)
-[eval] step=250 n=30 EM=0.233
-[step 260] total=0.5481 qa=0.0359 kl=0.2109 attn=0.9074 kv=0.3160 n_mem=69.0000 elapsed=546s (2.10s/step)
-[step 270] total=3.2633 qa=1.6484 kl=2.4234 attn=0.7999 kv=0.3232 n_mem=114.0000 elapsed=566s (2.10s/step)
-[step 280] total=0.8110 qa=0.2812 kl=0.2815 attn=0.7009 kv=0.3189 n_mem=46.0000 elapsed=587s (2.10s/step)
-[step 290] total=0.8052 qa=0.2988 kl=0.2832 attn=0.7380 kv=0.2910 n_mem=61.0000 elapsed=608s (2.10s/step)
-[step 300] total=0.7136 qa=0.2754 kl=0.0776 attn=0.7497 kv=0.3245 n_mem=84.0000 elapsed=628s (2.09s/step)
-[step 310] total=1.6234 qa=0.9141 kl=0.6150 attn=0.9040 kv=0.3114 n_mem=126.0000 elapsed=649s (2.09s/step)
-[step 320] total=1.3780 qa=0.9297 kl=0.0369 attn=0.9506 kv=0.3348 n_mem=159.0000 elapsed=669s (2.09s/step)
-[step 330] total=0.5967 qa=0.1079 kl=0.1080 attn=0.8079 kv=0.3540 n_mem=122.0000 elapsed=690s (2.09s/step)
-[step 340] total=2.1779 qa=1.1641 kl=1.2617 attn=0.6725 kv=0.3157 n_mem=68.0000 elapsed=710s (2.09s/step)
-[step 350] total=1.7097 qa=0.9688 kl=0.6673 attn=0.8943 kv=0.3178 n_mem=94.0000 elapsed=730s (2.09s/step)
-[step 360] total=0.5597 qa=0.1104 kl=0.1028 attn=0.7590 kv=0.3221 n_mem=123.0000 elapsed=750s (2.08s/step)
-[step 370] total=2.3026 qa=0.0481 kl=3.6244 attn=0.8118 kv=0.3611 n_mem=50.0000 elapsed=771s (2.08s/step)
-[step 380] total=2.9593 qa=1.6797 kl=1.6608 attn=0.7824 kv=0.3710 n_mem=50.0000 elapsed=791s (2.08s/step)
-[step 390] total=0.6644 qa=0.1260 kl=0.1250 attn=0.8469 kv=0.3913 n_mem=144.0000 elapsed=811s (2.08s/step)
-[step 400] total=4.5263 qa=2.9219 kl=2.3228 attn=0.8901 kv=0.3540 n_mem=111.0000 elapsed=831s (2.08s/step)
-[step 410] total=0.7969 qa=0.2314 kl=0.2391 attn=1.0269 kv=0.3432 n_mem=177.0000 elapsed=851s (2.08s/step)
-[step 420] total=2.0983 qa=1.4062 kl=0.5277 attn=0.9330 kv=0.3349 n_mem=83.0000 elapsed=872s (2.08s/step)
-[step 430] total=1.6659 qa=0.8203 kl=0.8178 attn=0.9024 kv=0.3464 n_mem=134.0000 elapsed=892s (2.07s/step)
-[step 440] total=1.0646 qa=0.4219 kl=0.4215 attn=1.0831 kv=0.3237 n_mem=93.0000 elapsed=912s (2.07s/step)
-[step 450] total=1.0963 qa=0.4199 kl=0.4193 attn=0.6603 kv=0.4007 n_mem=90.0000 elapsed=932s (2.07s/step)
-[step 460] total=4.5641 qa=3.2500 kl=1.6836 attn=0.8273 kv=0.3895 n_mem=123.0000 elapsed=953s (2.07s/step)
-[step 470] total=0.9981 qa=0.3770 kl=0.3777 attn=0.7807 kv=0.3542 n_mem=41.0000 elapsed=973s (2.07s/step)
-[step 480] total=0.4562 qa=0.0040 kl=0.0040 attn=0.8764 kv=0.3626 n_mem=131.0000 elapsed=994s (2.07s/step)
-[step 490] total=0.5777 qa=0.0679 kl=0.0679 attn=0.8092 kv=0.3950 n_mem=82.0000 elapsed=1014s (2.07s/step)
-[step 500] total=0.4280 qa=0.0056 kl=0.0050 attn=0.9176 kv=0.3281 n_mem=54.0000 elapsed=1034s (2.07s/step)
-[eval] step=500 n=30 EM=0.433
-[step 510] total=3.2662 qa=1.5703 kl=2.5001 attn=0.9199 kv=0.3539 n_mem=123.0000 elapsed=1065s (2.09s/step)
-[step 520] total=1.5326 qa=0.6523 kl=0.9802 attn=0.7379 kv=0.3164 n_mem=89.0000 elapsed=1086s (2.09s/step)
-[step 530] total=1.2653 qa=0.5703 kl=0.5718 attn=0.7491 kv=0.3342 n_mem=68.0000 elapsed=1106s (2.09s/step)
-[step 540] total=1.3127 qa=0.1001 kl=1.5081 attn=0.9277 kv=0.3658 n_mem=75.0000 elapsed=1126s (2.09s/step)
-[step 550] total=6.1314 qa=3.7656 kl=3.7656 attn=1.0390 kv=0.3791 n_mem=105.0000 elapsed=1147s (2.08s/step)
-[step 560] total=2.3409 qa=1.2344 kl=1.2340 attn=1.1046 kv=0.3791 n_mem=108.0000 elapsed=1167s (2.08s/step)
-[step 570] total=0.9876 qa=0.0942 kl=0.8849 attn=1.0776 kv=0.3432 n_mem=75.0000 elapsed=1187s (2.08s/step)
-[step 580] total=0.5506 qa=0.0396 kl=0.0395 attn=0.9450 kv=0.3968 n_mem=71.0000 elapsed=1208s (2.08s/step)
-[step 590] total=2.9084 qa=1.9688 kl=0.8964 attn=1.2066 kv=0.3708 n_mem=164.0000 elapsed=1228s (2.08s/step)
-[step 600] total=2.6114 qa=0.0806 kl=4.0802 attn=1.0904 kv=0.3817 n_mem=65.0000 elapsed=1248s (2.08s/step)
-[step 610] total=1.2597 qa=0.1631 kl=1.2284 attn=0.9367 kv=0.3887 n_mem=96.0000 elapsed=1268s (2.08s/step)
-[step 620] total=2.6762 qa=1.4688 kl=1.4704 attn=1.1463 kv=0.3576 n_mem=120.0000 elapsed=1289s (2.08s/step)
-[step 630] total=0.6967 qa=0.1001 kl=0.1961 attn=1.1161 kv=0.3870 n_mem=116.0000 elapsed=1309s (2.08s/step)
-[step 640] total=0.5419 qa=0.0420 kl=0.0382 attn=1.0015 kv=0.3806 n_mem=115.0000 elapsed=1329s (2.08s/step)
-[step 650] total=1.6765 qa=0.8750 kl=0.7499 attn=0.8962 kv=0.3369 n_mem=55.0000 elapsed=1350s (2.08s/step)
-[step 660] total=0.8546 qa=0.1943 kl=0.3941 attn=0.9813 kv=0.3651 n_mem=101.0000 elapsed=1370s (2.08s/step)
-[step 670] total=1.0926 qa=0.2451 kl=0.6845 attn=1.1533 kv=0.3900 n_mem=73.0000 elapsed=1390s (2.08s/step)
-[step 680] total=3.5524 qa=2.0312 kl=2.0084 attn=1.1648 kv=0.4004 n_mem=140.0000 elapsed=1411s (2.07s/step)
-[step 690] total=0.4809 qa=0.0086 kl=0.0086 attn=1.1010 kv=0.3579 n_mem=60.0000 elapsed=1431s (2.07s/step)
-[step 700] total=1.4702 qa=0.2383 kl=1.4527 attn=1.2071 kv=0.3848 n_mem=90.0000 elapsed=1452s (2.07s/step)
-[step 710] total=0.8288 qa=0.0029 kl=0.6616 attn=1.1279 kv=0.3823 n_mem=104.0000 elapsed=1472s (2.07s/step)
-[step 720] total=0.7351 qa=0.1562 kl=0.1551 attn=0.7829 kv=0.4230 n_mem=80.0000 elapsed=1492s (2.07s/step)
-[step 730] total=3.3998 qa=1.9688 kl=1.9661 attn=0.9111 kv=0.3569 n_mem=105.0000 elapsed=1513s (2.07s/step)
-[step 740] total=0.7595 qa=0.1963 kl=0.1963 attn=1.0714 kv=0.3579 n_mem=121.0000 elapsed=1533s (2.07s/step)
-[step 750] total=3.2106 qa=1.6094 kl=2.2375 attn=1.0411 kv=0.3783 n_mem=68.0000 elapsed=1553s (2.07s/step)
-[eval] step=750 n=30 EM=0.533
-[save] /data/zhangjiayang/yyz3/results/exp_f_attn750/fadkv_stage1.pt

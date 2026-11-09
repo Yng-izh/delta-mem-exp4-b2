@@ -1,0 +1,51 @@
+[gpu] 已启用 TF32（Ampere+ TensorCore）
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<01:14,  5.35it/s]Loading weights:   5%|▌         | 20/398 [00:00<00:04, 81.47it/s]Loading weights:  11%|█         | 42/398 [00:00<00:02, 130.98it/s]Loading weights:  15%|█▌        | 60/398 [00:00<00:02, 147.61it/s]Loading weights:  21%|██        | 82/398 [00:00<00:01, 166.27it/s]Loading weights:  26%|██▌       | 104/398 [00:00<00:01, 179.94it/s]Loading weights:  32%|███▏      | 126/398 [00:00<00:01, 189.17it/s]Loading weights:  37%|███▋      | 148/398 [00:00<00:01, 193.39it/s]Loading weights:  43%|████▎     | 170/398 [00:01<00:01, 195.53it/s]Loading weights:  48%|████▊     | 192/398 [00:01<00:01, 197.03it/s]Loading weights:  54%|█████▍    | 214/398 [00:01<00:00, 201.08it/s]Loading weights:  59%|█████▉    | 236/398 [00:01<00:00, 203.72it/s]Loading weights:  65%|██████▍   | 258/398 [00:01<00:00, 203.54it/s]Loading weights:  70%|███████   | 280/398 [00:01<00:00, 202.28it/s]Loading weights:  76%|███████▌  | 302/398 [00:01<00:00, 203.29it/s]Loading weights:  81%|████████▏ | 324/398 [00:01<00:00, 204.96it/s]Loading weights:  87%|████████▋ | 346/398 [00:01<00:00, 206.55it/s]Loading weights:  92%|█████████▏| 368/398 [00:02<00:00, 207.61it/s]Loading weights:  98%|█████████▊| 390/398 [00:02<00:00, 208.89it/s]Loading weights: 100%|██████████| 398/398 [00:02<00:00, 187.97it/s]
+[gpu] 主干精度 bfloat16（--dtype auto；A100 走原生 bf16）
+[cfg] uv_dim=61440 arms=['native', 'pca1024', 'fadkv1_bf16', 'fadkv1_fp16', 'fadkv1_fp32'] storage={'native': {'kib_per_token': 120.0, 'seq_keep': 1.0}, 'pca1024': {'kib_per_token': 2.0, 'seq_keep': 1.0}, 'fadkv1_bf16': {'kib_per_token': 2.0, 'seq_keep': 1.0, 'latent_dtype': 'bf16'}, 'fadkv1_fp16': {'kib_per_token': 2.0, 'seq_keep': 1.0, 'latent_dtype': 'fp16'}, 'fadkv1_fp32': {'kib_per_token': 4.0, 'seq_keep': 1.0, 'latent_dtype': 'fp32'}}
+  [item 0] gold='Chief of Protocol' ne=127
+      native         ✗ 'Shirley Temple did not portray Corliss Archer in *Kiss and'
+      pca1024        ✗ 'The woman who portrayed Corliss Archer in the film *Kiss and Tell'
+      fadkv1_bf16    ✗ 'Chief of Protocol of the United States Department of State'
+      fadkv1_fp16    ✗ 'Chief of Protocol of the United States Department of State'
+      fadkv1_fp32    ✗ 'Chief of Protocol of the United States Department of State'
+[progress] 20/200 native=0.450 pca1024=0.300 fadkv1_bf16=0.400 fadkv1_fp16=0.400 fadkv1_fp32=0.400 elapsed=49s eta=441s
+[progress] 40/200 native=0.575 pca1024=0.250 fadkv1_bf16=0.400 fadkv1_fp16=0.400 fadkv1_fp32=0.400 elapsed=92s eta=370s
+[progress] 60/200 native=0.533 pca1024=0.250 fadkv1_bf16=0.333 fadkv1_fp16=0.333 fadkv1_fp32=0.333 elapsed=148s eta=345s
+[progress] 80/200 native=0.500 pca1024=0.225 fadkv1_bf16=0.325 fadkv1_fp16=0.325 fadkv1_fp32=0.325 elapsed=198s eta=297s
+[progress] 100/200 native=0.460 pca1024=0.210 fadkv1_bf16=0.300 fadkv1_fp16=0.300 fadkv1_fp32=0.300 elapsed=250s eta=250s
+[progress] 120/200 native=0.450 pca1024=0.192 fadkv1_bf16=0.308 fadkv1_fp16=0.308 fadkv1_fp32=0.308 elapsed=297s eta=198s
+[progress] 140/200 native=0.429 pca1024=0.186 fadkv1_bf16=0.300 fadkv1_fp16=0.300 fadkv1_fp32=0.300 elapsed=346s eta=148s
+[progress] 160/200 native=0.431 pca1024=0.194 fadkv1_bf16=0.300 fadkv1_fp16=0.300 fadkv1_fp32=0.300 elapsed=394s eta=98s
+[progress] 180/200 native=0.450 pca1024=0.211 fadkv1_bf16=0.306 fadkv1_fp16=0.306 fadkv1_fp32=0.306 elapsed=438s eta=49s
+[progress] 200/200 native=0.455 pca1024=0.205 fadkv1_bf16=0.290 fadkv1_fp16=0.290 fadkv1_fp32=0.290 elapsed=492s eta=0s
+
+| 方法 | 存储 KiB/Token | 序列保留率 | EM% | F1% | 相对原生 |
+|---|---|---|---|---|---|
+| native | 120.0 | 100.0% | 45.5 | 65.3 | — |
+| pca1024 | 2.0 | 100.0% | 20.5 | 33.9 | 45% |
+| fadkv1_bf16 | 2.0 | 100.0% | 29.0 | 54.7 | 64% |
+| fadkv1_fp16 | 2.0 | 100.0% | 29.0 | 54.9 | 64% |
+| fadkv1_fp32 | 4.0 | 100.0% | 29.0 | 55.0 | 64% |
+
+| 配对（vs native） | A% | B% | 差 | 只有A对 | 只有B对 | p |
+|---|---|---|---|---|---|---|
+| pca1024 | 20.5 | 45.5 | -25.0 | 2 | 52 | 0.0000 |
+| fadkv1_bf16 | 29.0 | 45.5 | -16.5 | 18 | 51 | 0.0001 |
+| fadkv1_fp16 | 29.0 | 45.5 | -16.5 | 18 | 51 | 0.0001 |
+| fadkv1_fp32 | 29.0 | 45.5 | -16.5 | 18 | 51 | 0.0001 |
+
+| 题型 | n | native | pca1024 | fadkv1_bf16 | fadkv1_fp16 | fadkv1_fp32 |
+|---|---|---|---|---|---|---|
+| date | 11 | 72.7 | 45.5 | 81.8 | 81.8 | 81.8 |
+| entity | 166 | 41.6 | 15.1 | 19.3 | 19.3 | 19.3 |
+| number | 7 | 42.9 | 14.3 | 28.6 | 28.6 | 28.6 |
+| yesno | 16 | 68.8 | 62.5 | 93.8 | 93.8 | 93.8 |
+
+[判据] fadkv1_bf16: EM=0.290 F1=0.547 保留原生 63.7%
+[判据] fadkv1_fp16: EM=0.290 F1=0.549 保留原生 63.7%
+[判据] fadkv1_fp32: EM=0.290 F1=0.550 保留原生 63.7%
+[判据] pca1024: EM=0.205 F1=0.339 保留原生 45.1%
+{"native": 0.455, "pca1024": 0.205, "fadkv1_bf16": 0.29, "fadkv1_fp16": 0.29, "fadkv1_fp32": 0.29}
+[out] 逐题明细 -> /data/zhangjiayang/yyz3/results/exp_f_v3/rows_dtype.jsonl
+[out] 汇总 -> /data/zhangjiayang/yyz3/results/exp_f_v3/summary_dtype.json
